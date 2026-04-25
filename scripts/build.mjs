@@ -85,7 +85,6 @@ async function loadSkills() {
       body,
       raw,
       claudeCodeCompanion,
-      _srcFile: srcFile,
     });
   }
   return skills;
