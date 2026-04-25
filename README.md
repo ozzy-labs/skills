@@ -39,7 +39,7 @@ Add the Renovate preset to your repository's `renovate.json`:
 }
 ```
 
-Track the upstream digest in `.dev-config/sync.yaml`:
+Track the upstream digest in `.commons/sync.yaml`:
 
 ```yaml
 skills_commit: <40-char SHA from main>

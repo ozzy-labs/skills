@@ -4,7 +4,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["**/.dev-config/sync.yaml"],
+      "managerFilePatterns": ["**/.commons/sync.yaml", "**/.dev-config/sync.yaml"],
       "matchStrings": ["skills_commit:\\s*(?<currentDigest>[a-f0-9]{7,40})"],
       "currentValueTemplate": "main",
       "depNameTemplate": "ozzy-labs/skills",
