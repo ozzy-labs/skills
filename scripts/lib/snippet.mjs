@@ -10,13 +10,19 @@ export const SNIPPET_BEGIN = `<!-- begin: ${MARKER_TAG} -->`;
 export const SNIPPET_END = `<!-- end: ${MARKER_TAG} -->`;
 
 /**
- * Wrap a body string with begin/end markers, ensuring exactly one trailing
- * newline so the snippet concatenates cleanly with neighboring content.
+ * Wrap a body string with begin/end markers.
+ *
+ * The marker block is emitted with one blank line after the begin marker and
+ * one blank line before the end marker so the output is idempotent under
+ * Prettier's Markdown formatter (which inserts those blank lines around
+ * HTML-block comments). Without this, consumers running Prettier on a
+ * synced snippet would re-format on every sync, oscillating with the next
+ * sync's overwrite.
  *
  * @param {string} body
  * @returns {string}
  */
 export function wrapSnippet(body) {
   const trimmed = body.replace(/\n+$/, "");
-  return `${SNIPPET_BEGIN}\n${trimmed}\n${SNIPPET_END}\n`;
+  return `${SNIPPET_BEGIN}\n\n${trimmed}\n\n${SNIPPET_END}\n`;
 }

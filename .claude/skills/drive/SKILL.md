@@ -1,6 +1,6 @@
 ---
 description: Issue から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す
-argument-hint: "<#issue-number | instruction>"
+argument-hint: <#issue-number | instruction>
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion
 ---

@@ -16,10 +16,12 @@ test("renderAgentsMdSnippet wraps a sorted bullet list in markers", () => {
     out,
     [
       "<!-- begin: @ozzylabs/skills -->",
+      "",
       "## Available Skills",
       "",
       "- `alpha` — A desc",
       "- `zeta` — Z desc",
+      "",
       "<!-- end: @ozzylabs/skills -->",
       "",
     ].join("\n"),

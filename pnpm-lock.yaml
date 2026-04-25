@@ -17,6 +17,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^20.0.0
         version: 20.5.0
+      prettier:
+        specifier: 3.8.3
+        version: 3.8.3
 
 packages:
 
@@ -360,6 +363,11 @@ packages:
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
+
+  prettier@3.8.3:
+    resolution: {integrity: sha512-7igPTM53cGHMW8xWuVTydi2KO233VFiTNyF5hLJqpilHfmn8C8gPf+PS7dUT64YcXFbiMGZxS9pCSxL/Dxm/Jw==}
+    engines: {node: '>=14'}
+    hasBin: true
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -751,6 +759,8 @@ snapshots:
       lines-and-columns: 1.2.4
 
   picocolors@1.1.1: {}
+
+  prettier@3.8.3: {}
 
   require-directory@2.1.1: {}
 
