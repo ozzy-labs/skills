@@ -65,3 +65,17 @@ jobs:
             git diff -- dist .agents/skills .claude/skills
             exit 1
           fi
+
+      - name: Verify build is deterministic
+        run: |
+          pnpm build
+          CHANGES=$(git status --porcelain -- dist .agents/skills .claude/skills)
+          if [ -n "$CHANGES" ]; then
+            echo "Second build produced different output — adapter pipeline is non-deterministic."
+            echo "$CHANGES"
+            git diff -- dist .agents/skills .claude/skills
+            exit 1
+          fi
+
+      - name: Test
+        run: pnpm test
