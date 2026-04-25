@@ -10,3 +10,25 @@ pinned:
   - lefthook.yaml
   - biome.json
   - renovate.json
+  # self-consume targets: built from src/skills/ by scripts/build.mjs
+  - .agents/skills/README.md
+  - .agents/skills/commit-conventions/SKILL.md
+  - .agents/skills/commit/SKILL.md
+  - .agents/skills/drive/SKILL.md
+  - .agents/skills/implement/SKILL.md
+  - .agents/skills/lint-rules/SKILL.md
+  - .agents/skills/lint/SKILL.md
+  - .agents/skills/pr/SKILL.md
+  - .agents/skills/review/SKILL.md
+  - .agents/skills/ship/SKILL.md
+  - .agents/skills/test/SKILL.md
+  - .claude/skills/commit-conventions/SKILL.md
+  - .claude/skills/commit/SKILL.md
+  - .claude/skills/drive/SKILL.md
+  - .claude/skills/implement/SKILL.md
+  - .claude/skills/lint-rules/SKILL.md
+  - .claude/skills/lint/SKILL.md
+  - .claude/skills/pr/SKILL.md
+  - .claude/skills/review/SKILL.md
+  - .claude/skills/ship/SKILL.md
+  - .claude/skills/test/SKILL.md
