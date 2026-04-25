@@ -1,82 +1,125 @@
 #!/usr/bin/env node
 // Build the @ozzylabs/skills distribution bundle and self-consume mirror.
 //
-// Reads canonical skill files from src/skills/{name}/SKILL.md, validates each
-// has the required frontmatter (name, description), and writes them to:
-//   - dist/.agents/skills/{name}/SKILL.md   (npm package payload, Renovate consumers)
-//   - .agents/skills/{name}/SKILL.md        (in-repo Codex / Copilot adapter)
-//   - .claude/skills/{name}/SKILL.md        (in-repo Claude Code adapter)
+// Reads canonical skill files from src/skills/{name}/SKILL.md, validates the
+// frontmatter, and emits two kinds of output:
 //
-// The two latter trees let this repository dogfood its own skills during
-// development. CI verifies all three are in sync with src/ so a stale mirror
-// fails the build.
+//   1. Legacy 3-target copy (kept until the staged migration in #14):
+//        - dist/.agents/skills/{name}/SKILL.md   (npm payload / Renovate consumers)
+//        - .agents/skills/{name}/SKILL.md        (in-repo dogfood)
+//        - .claude/skills/{name}/SKILL.md        (in-repo dogfood)
+//
+//   2. Adapter outputs under dist/{adapter-id}/, produced by AdapterBase
+//      subclasses. Adapters are pure functions; this orchestrator is the
+//      sole writer.
 
-import { readdir, readFile, mkdir, copyFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSkillDocument, assertRequiredFields } from "./lib/frontmatter.mjs";
+import { ClaudeCodeAdapter } from "./adapters/claude-code.mjs";
+import { assertRequiredFields, parseSkillDocument } from "./lib/frontmatter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const SRC = join(ROOT, "src", "skills");
+const DIST = join(ROOT, "dist");
 
-const TARGETS = [
+const LEGACY_TARGETS = [
   join(ROOT, "dist", ".agents", "skills"),
   join(ROOT, ".agents", "skills"),
   join(ROOT, ".claude", "skills"),
 ];
 
+const ADAPTERS = [new ClaudeCodeAdapter()];
+
 async function readSkillNames() {
   const entries = await readdir(SRC, { withFileTypes: true });
-  return entries.filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  return entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
 }
 
-async function emit(target, name, srcFile) {
-  const destDir = join(target, name);
-  await mkdir(destDir, { recursive: true });
-  await copyFile(srcFile, join(destDir, "SKILL.md"));
-}
-
-async function main() {
+async function loadSkills() {
   const names = await readSkillNames();
   if (names.length === 0) {
     throw new Error(`No skills found under ${SRC}`);
   }
-
-  // Validate first so we do not partially overwrite mirrors.
-  const validated = [];
+  const skills = [];
   for (const name of names) {
     const srcFile = join(SRC, name, "SKILL.md");
-    const text = await readFile(srcFile, "utf8");
+    const raw = await readFile(srcFile, "utf8");
     const label = `src/skills/${name}/SKILL.md`;
-    const { frontmatter } = parseSkillDocument(text, label);
+    const { frontmatter, body } = parseSkillDocument(raw, label);
     assertRequiredFields(frontmatter, ["name", "description"], label);
     if (frontmatter.name !== name) {
       throw new Error(
         `${label}: frontmatter name='${frontmatter.name}' does not match directory name='${name}'`,
       );
     }
-    validated.push({ name, srcFile });
+    skills.push({
+      name,
+      description: frontmatter.description,
+      frontmatter,
+      body,
+      raw,
+      _srcFile: srcFile,
+    });
   }
+  return skills;
+}
 
-  for (const target of TARGETS) {
+async function writeLegacyTargets(skills) {
+  for (const target of LEGACY_TARGETS) {
     if (existsSync(target)) {
       await rm(target, { recursive: true, force: true });
     }
     await mkdir(target, { recursive: true });
-    for (const { name, srcFile } of validated) {
-      await emit(target, name, srcFile);
+    for (const skill of skills) {
+      const destDir = join(target, skill.name);
+      await mkdir(destDir, { recursive: true });
+      await copyFile(skill._srcFile, join(destDir, "SKILL.md"));
     }
   }
+}
 
-  console.log(`✓ Built ${names.length} skill(s) → 3 targets:`);
-  for (const target of TARGETS) {
+async function writeAdapterOutputs(skills) {
+  for (const adapter of ADAPTERS) {
+    const id = adapter.constructor.id;
+    if (!id) {
+      throw new Error(`${adapter.constructor.name} is missing static id`);
+    }
+    const adapterRoot = join(DIST, id);
+    if (existsSync(adapterRoot)) {
+      await rm(adapterRoot, { recursive: true, force: true });
+    }
+    const outputs = adapter.generate(skills);
+    for (const out of outputs) {
+      const dest = join(adapterRoot, out.relativePath);
+      await mkdir(dirname(dest), { recursive: true });
+      await writeFile(dest, out.content);
+    }
+  }
+}
+
+async function main() {
+  const skills = await loadSkills();
+  await writeLegacyTargets(skills);
+  await writeAdapterOutputs(skills);
+
+  console.log(`✓ Built ${skills.length} skill(s)`);
+  console.log("Legacy targets:");
+  for (const target of LEGACY_TARGETS) {
     console.log(`  ${target.replace(ROOT, "").replace(/^\//, "")}`);
   }
+  console.log("Adapters:");
+  for (const adapter of ADAPTERS) {
+    console.log(`  dist/${adapter.constructor.id}/`);
+  }
   console.log("Skills:");
-  for (const { name } of validated) {
-    console.log(`  - ${name}`);
+  for (const skill of skills) {
+    console.log(`  - ${skill.name}`);
   }
 }
 
