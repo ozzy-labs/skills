@@ -47,6 +47,33 @@ skills_commit: <40-char SHA from main>
 
 Renovate が `ozzy-labs/skills@main` の更新を検知し、`skills_commit` を bump する PR を開く。同梱の `sync.sh`（[ozzy-labs/commons](https://github.com/ozzy-labs/commons) 提供）が本リポの `dist/.agents/skills/` を consumer の `.agents/skills/` へコピーする。
 
+### Adapter opt-in（agent 別出力の取り込み）
+
+agent 別 adapter 出力（`dist/{adapter-id}/`）を取り込む場合は、ルート preset と並べて該当する adapter sub-preset を extends する:
+
+```json
+{
+  "extends": [
+    "github>ozzy-labs/skills//skills-sync",
+    "github>ozzy-labs/skills//skills-sync/claude-code",
+    "github>ozzy-labs/skills//skills-sync/codex-cli",
+    "github>ozzy-labs/skills//skills-sync/gemini-cli",
+    "github>ozzy-labs/skills//skills-sync/copilot"
+  ]
+}
+```
+
+各 adapter sub-preset は Renovate sync PR に `adapter:<id>` ラベルを付与する。sub-preset は加算的で、実際に sync する adapter のみ extends すればよい。
+
+| Sub-preset | Adapter 出力 |
+| --- | --- |
+| `skills-sync/claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` |
+| `skills-sync/codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` |
+| `skills-sync/gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
+| `skills-sync/copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
+
+既存 consumer は `extends: ["github>ozzy-labs/skills//skills-sync"]` のみでこれまで通り動作する（adapter opt-in は非破壊・加算的）。consumer 側の adapter-id ベースファイルコピーは別途 `commons/sync.sh` の拡張として提供され（[commons](https://github.com/ozzy-labs/commons) リポの sub-issue で追跡）、本 preset と `sync.sh` の接続仕様は commons 側で定義される。
+
 ## Adapter 出力
 
 `pnpm build` は `scripts/adapters/` 配下の各 adapter を実行し、`dist/{adapter-id}/` に書き出す:

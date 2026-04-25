@@ -11,7 +11,7 @@
 
 ## プロジェクト概要
 
-`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/.agents/skills/{name}/SKILL.md` を生成し、Renovate sync（`skills-sync.json`）で各 consumer リポへ配信する。
+`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/.agents/skills/{name}/SKILL.md` を生成し、Renovate sync（`skills-sync/` preset）で各 consumer リポへ配信する。
 
 ## Tech Stack
 
@@ -45,7 +45,7 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 - `scripts/build.mjs` — ビルドオーケストレータ
 - `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
 - `scripts/lib/` — 共通 lib（frontmatter, snippet markers, AdapterBase）
-- `skills-sync.json` — consumer 向け Renovate preset
+- `skills-sync/` — consumer 向け Renovate preset（`default.json` がルート preset、`{adapter-id}.json` が adapter opt-in sub-preset）
 - `.dev-config/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ
 
 ## 規約
