@@ -39,7 +39,7 @@ OzzyLabs 全リポジトリ共通の 10 件:
 }
 ```
 
-`.dev-config/sync.yaml` に upstream digest を記録:
+`.commons/sync.yaml` に upstream digest を記録:
 
 ```yaml
 skills_commit: <40-char SHA from main>

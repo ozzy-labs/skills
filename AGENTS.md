@@ -46,7 +46,7 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 - `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
 - `scripts/lib/` — 共通 lib（frontmatter, snippet markers, AdapterBase）
 - `skills-sync/` — consumer 向け Renovate preset（`default.json` がルート preset、`{adapter-id}.json` が adapter opt-in sub-preset）
-- `.dev-config/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ
+- `.commons/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ
 
 ## 規約
 
