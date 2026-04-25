@@ -18,7 +18,7 @@
     "lint:yaml": "yamllint -c .yamllint.yaml .",
     "lint:secrets": "gitleaks detect --no-banner",
     "lint:all": "pnpm run lint && pnpm run lint:md && pnpm run lint:yaml && pnpm run lint:secrets",
-    "test": "node --test tests/"
+    "test": "node --test 'tests/**/*.test.mjs'"
   },
   "engines": {
     "node": ">=22"

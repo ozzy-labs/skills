@@ -15,6 +15,7 @@ import { readdir, readFile, mkdir, copyFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseSkillDocument, assertRequiredFields } from "./lib/frontmatter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -26,32 +27,9 @@ const TARGETS = [
   join(ROOT, ".claude", "skills"),
 ];
 
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n/;
-
 async function readSkillNames() {
   const entries = await readdir(SRC, { withFileTypes: true });
   return entries.filter((e) => e.isDirectory()).map((e) => e.name).sort();
-}
-
-function parseFrontmatter(text, fileLabel) {
-  const match = text.match(FRONTMATTER_RE);
-  if (!match) {
-    throw new Error(`${fileLabel}: missing frontmatter (--- ... ---)`);
-  }
-  const fm = {};
-  for (const line of match[1].split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
-    fm[key] = value;
-  }
-  for (const required of ["name", "description"]) {
-    if (!fm[required]) {
-      throw new Error(`${fileLabel}: frontmatter missing required field '${required}'`);
-    }
-  }
-  return fm;
 }
 
 async function emit(target, name, srcFile) {
@@ -71,10 +49,12 @@ async function main() {
   for (const name of names) {
     const srcFile = join(SRC, name, "SKILL.md");
     const text = await readFile(srcFile, "utf8");
-    const fm = parseFrontmatter(text, `src/skills/${name}/SKILL.md`);
-    if (fm.name !== name) {
+    const label = `src/skills/${name}/SKILL.md`;
+    const { frontmatter } = parseSkillDocument(text, label);
+    assertRequiredFields(frontmatter, ["name", "description"], label);
+    if (frontmatter.name !== name) {
       throw new Error(
-        `src/skills/${name}/SKILL.md: frontmatter name='${fm.name}' does not match directory name='${name}'`,
+        `${label}: frontmatter name='${frontmatter.name}' does not match directory name='${name}'`,
       );
     }
     validated.push({ name, srcFile });
