@@ -14,7 +14,7 @@
 //      sole writer.
 
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClaudeCodeAdapter } from "./adapters/claude-code.mjs";
@@ -28,10 +28,11 @@ const ROOT = join(__dirname, "..");
 const SRC = join(ROOT, "src", "skills");
 const DIST = join(ROOT, "dist");
 
+const CLAUDE_LEGACY_TARGET = join(ROOT, ".claude", "skills");
 const LEGACY_TARGETS = [
   join(ROOT, "dist", ".agents", "skills"),
   join(ROOT, ".agents", "skills"),
-  join(ROOT, ".claude", "skills"),
+  CLAUDE_LEGACY_TARGET,
 ];
 
 const ADAPTERS = [
@@ -47,6 +48,16 @@ async function readSkillNames() {
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
     .sort();
+}
+
+async function loadCompanion(name, adapterSuffix, requiredFields) {
+  const file = join(SRC, name, `SKILL.${adapterSuffix}.md`);
+  if (!existsSync(file)) return null;
+  const raw = await readFile(file, "utf8");
+  const label = `src/skills/${name}/SKILL.${adapterSuffix}.md`;
+  const { frontmatter, body } = parseSkillDocument(raw, label);
+  assertRequiredFields(frontmatter, requiredFields, label);
+  return { frontmatter, body, raw };
 }
 
 async function loadSkills() {
@@ -66,12 +77,14 @@ async function loadSkills() {
         `${label}: frontmatter name='${frontmatter.name}' does not match directory name='${name}'`,
       );
     }
+    const claudeCodeCompanion = await loadCompanion(name, "claude-code", ["description"]);
     skills.push({
       name,
       description: frontmatter.description,
       frontmatter,
       body,
       raw,
+      claudeCodeCompanion,
       _srcFile: srcFile,
     });
   }
@@ -84,10 +97,16 @@ async function writeLegacyTargets(skills) {
       await rm(target, { recursive: true, force: true });
     }
     await mkdir(target, { recursive: true });
+    // The in-repo .claude/skills/ mirror is what this repo loads when it
+    // dogfoods its own skills. Use the Claude Code companion when present so
+    // dogfood stays in sync with what the Claude Code adapter ships to
+    // consumers.
+    const useCompanion = target === CLAUDE_LEGACY_TARGET;
     for (const skill of skills) {
       const destDir = join(target, skill.name);
       await mkdir(destDir, { recursive: true });
-      await copyFile(skill._srcFile, join(destDir, "SKILL.md"));
+      const content = useCompanion && skill.claudeCodeCompanion ? skill.claudeCodeCompanion.raw : skill.raw;
+      await writeFile(join(destDir, "SKILL.md"), content);
     }
   }
 }

@@ -1,14 +1,24 @@
 ---
-name: lint
-description: 全リンターを自動修正付きで実行し、結果を報告する。コード品質チェック、フォーマット、型チェック、セキュリティスキャンを含む。
+description: 全リンターを自動修正付きで実行し、結果を報告する
+disable-model-invocation: true
+allowed-tools: Bash, Read, Edit, AskUserQuestion
 ---
 
-# lint - 全リンターの実行
+# lint
 
-全リンター・フォーマッターを自動修正付きで実行し、結果をレポートする。
+`.agents/skills/lint/SKILL.md` を Read し、ワークフロー手順に従う。
 
-## 手順
+## Claude Code 固有の追加事項
 
-1. `git status` で変更ファイルを特定する。変更がなければプロジェクト全体を対象とする
-2. `.agents/skills/lint-rules/SKILL.md` を参照し、コマンド表と型チェックルールに従って対象ファイルの lint・フォーマット・型チェックを実行する
-3. 全結果のサマリーを報告する
+サマリー報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）。報告の出力だけでスキルを終了しない:
+
+**全て通過した場合:**
+
+- **「コミットする」** → `.claude/skills/commit/SKILL.md` を Read し、その手順に従う
+- **「コミット・PR まで一括実行する」** → `.claude/skills/ship/SKILL.md` を Read し、その手順に従う
+- **「追加の変更を行う」** → 終了する
+
+**エラーがある場合:**
+
+- **「エラーを修正する」** → 修正完了後、再実行する
+- **「追加の変更を行う」** → 終了する

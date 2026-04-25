@@ -39,8 +39,12 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 ## ディレクトリ構成
 
 - `src/skills/{name}/SKILL.md` — 正準スキル（編集はここ）
-- `dist/.agents/skills/{name}/SKILL.md` — ビルド出力（commit 対象、Renovate consumer はこれを物理コピー）
-- `scripts/build.mjs` — ビルドスクリプト
+- `src/skills/{name}/SKILL.claude-code.md` — Claude Code 固有 wrapper（任意）。companion 仕様は README.md を参照
+- `dist/.agents/skills/{name}/SKILL.md` — npm payload / Renovate consumer 向けビルド出力（commit 対象）
+- `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）
+- `scripts/build.mjs` — ビルドオーケストレータ
+- `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
+- `scripts/lib/` — 共通 lib（frontmatter, snippet markers, AdapterBase）
 - `skills-sync.json` — consumer 向け Renovate preset
 - `.dev-config/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ
 

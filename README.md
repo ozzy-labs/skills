@@ -47,15 +47,43 @@ skills_commit: <40-char SHA from main>
 
 Renovate detects updates to `ozzy-labs/skills@main` and opens a PR bumping `skills_commit`. The accompanying `sync.sh` (provided by [ozzy-labs/commons](https://github.com/ozzy-labs/commons)) copies `dist/.agents/skills/` from this repository into the consumer's `.agents/skills/`.
 
+## Adapter outputs
+
+`pnpm build` runs each per-agent adapter under `scripts/adapters/` and writes the result to `dist/{adapter-id}/`:
+
+| Adapter | Output | Source |
+| --- | --- | --- |
+| `claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` | `SKILL.claude-code.md` if present, else canonical `SKILL.md` |
+| `codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` | canonical `SKILL.md` |
+| `gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` | canonical `SKILL.md` |
+| `copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` | canonical `SKILL.md` |
+
+### Claude Code companion file
+
+A skill may ship `src/skills/{name}/SKILL.claude-code.md` alongside the canonical `SKILL.md`. The Claude Code adapter emits the companion verbatim when present, so each skill can carry a Claude-Code-specific wrapper (next-action `AskUserQuestion` menus, `argument-hint`, `disable-model-invocation`, `allowed-tools`, etc.) without polluting the canonical `SKILL.md` other adapters consume.
+
+Companion frontmatter contract:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `description` | yes | May be a Claude-Code-tailored shortening of canonical `description` |
+| `disable-model-invocation` | optional | Boolean — opt out of automatic invocation |
+| `allowed-tools` | optional | Comma-separated tool list |
+| `argument-hint` | optional | Display hint for `/skill-name <hint>` |
+| `user-invocable` | optional | `false` for reference-only skills |
+
+`name` is derived from the directory and must not appear in companion frontmatter.
+
 ## Local development
 
 ```bash
 pnpm install
 pnpm build         # regenerate dist/
+pnpm test          # adapter unit + integration tests
 pnpm lint:all
 ```
 
-`dist/` is committed and the CI verifies it matches `pnpm build` output. After editing any `src/skills/*/SKILL.md`, run `pnpm build` and commit the resulting `dist/` changes.
+`dist/` is committed and the CI verifies it matches `pnpm build` output. After editing any `src/skills/*/SKILL.md` or `src/skills/*/SKILL.claude-code.md`, run `pnpm build` and commit the resulting `dist/` changes.
 
 ## Conventions
 

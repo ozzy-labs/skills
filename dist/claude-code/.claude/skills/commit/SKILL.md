@@ -1,36 +1,24 @@
 ---
-name: commit
-description: 変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
+description: 変更をステージし、Conventional Commits でコミットする（push はしない）
+disable-model-invocation: true
+allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
 
-# commit - ステージング＆コミット
+# commit
 
-変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
+`.agents/skills/commit/SKILL.md` を Read し、ワークフロー手順に従う。
 
-## 手順
+## Claude Code 固有の追加事項
 
-### 1. 状態確認
-
-以下のコマンドで現在の状態を把握する:
-
-- `git status` で変更ファイルの一覧を取得
-- `git diff` でステージされていない変更を確認
-- `git diff --staged` でステージ済みの変更を確認
-- `git log --oneline -5` で直近のコミット履歴を確認
-
-変更がない場合、コミットする変更がない旨を伝えて終了する。
-
-### 2. ステージング＆コミット
-
-1. **ステージング:** 変更ファイルを個別に `git add <file>` でステージする。`.env` ファイルはステージングしない
-2. **コミットメッセージ生成:** `.agents/skills/commit-conventions/SKILL.md` を参照し、ルールに従いメッセージを生成する
-3. **コミット実行:** `git commit -m "<message>"`
-
-### 3. 完了報告
-
-実行結果を報告する:
+変更ファイルの一覧をユーザーに提示する:
 
 ```text
-完了:
-  コミット: abc1234 feat: add blog post
+変更ファイル:
+  M src/pages/index.astro
+  A src/content/blog/new-post.md
 ```
+
+完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）。報告の出力だけでスキルを終了しない:
+
+- **「PR を作成する」** → `.claude/skills/pr/SKILL.md` を Read し、その手順に従う
+- **「追加の変更を行う」** → 終了する
