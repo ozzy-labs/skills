@@ -47,6 +47,33 @@ skills_commit: <40-char SHA from main>
 
 Renovate detects updates to `ozzy-labs/skills@main` and opens a PR bumping `skills_commit`. The accompanying `sync.sh` (provided by [ozzy-labs/commons](https://github.com/ozzy-labs/commons)) copies `dist/.agents/skills/` from this repository into the consumer's `.agents/skills/`.
 
+### Adapter opt-in (per-agent outputs)
+
+To consume per-agent adapter outputs (`dist/{adapter-id}/`), extend the matching adapter sub-presets alongside the root preset:
+
+```json
+{
+  "extends": [
+    "github>ozzy-labs/skills//skills-sync",
+    "github>ozzy-labs/skills//skills-sync/claude-code",
+    "github>ozzy-labs/skills//skills-sync/codex-cli",
+    "github>ozzy-labs/skills//skills-sync/gemini-cli",
+    "github>ozzy-labs/skills//skills-sync/copilot"
+  ]
+}
+```
+
+Each adapter sub-preset adds an `adapter:<id>` label to the Renovate sync PR. Sub-presets are additive — extend only the adapters you actually sync.
+
+| Sub-preset | Adapter output |
+| --- | --- |
+| `skills-sync/claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` |
+| `skills-sync/codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` |
+| `skills-sync/gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
+| `skills-sync/copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
+
+The actual file copy is performed by `commons/sync.sh`, which reads `.dev-config/sync.yaml` and the consumer's extended adapter sub-presets to determine which `dist/{adapter-id}/` outputs to copy. Existing consumers keep working with `extends: ["github>ozzy-labs/skills//skills-sync"]` alone — adapter opt-in is non-breaking and additive.
+
 ## Adapter outputs
 
 `pnpm build` runs each per-agent adapter under `scripts/adapters/` and writes the result to `dist/{adapter-id}/`:
