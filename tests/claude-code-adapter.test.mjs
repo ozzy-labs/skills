@@ -57,3 +57,36 @@ test("Claude Code adapter throws when description is missing", () => {
 test("Claude Code adapter has id 'claude-code'", () => {
   assert.equal(ClaudeCodeAdapter.id, "claude-code");
 });
+
+test("Claude Code adapter emits companion content when present", () => {
+  const s = skill("foo", { description: "canonical" });
+  s.claudeCodeCompanion = {
+    frontmatter: { description: "wrapper", "disable-model-invocation": "true" },
+    body: "# foo\n\nwrapper body\n",
+    raw: "---\ndescription: wrapper\ndisable-model-invocation: true\n---\n# foo\n\nwrapper body\n",
+  };
+  const out = new ClaudeCodeAdapter().generate([s]);
+  assert.equal(out[0].content, s.claudeCodeCompanion.raw);
+  assert.match(out[0].content, /disable-model-invocation: true/);
+  assert.doesNotMatch(out[0].content, /^name: foo/m);
+});
+
+test("Claude Code adapter falls back to canonical when no companion", () => {
+  const s = skill("foo", { description: "canonical" });
+  s.claudeCodeCompanion = null;
+  const out = new ClaudeCodeAdapter().generate([s]);
+  assert.equal(out[0].content, s.raw);
+});
+
+test("Claude Code adapter throws when companion is missing description", () => {
+  const s = skill("foo", { description: "canonical" });
+  s.claudeCodeCompanion = {
+    frontmatter: { "disable-model-invocation": "true" },
+    body: "x",
+    raw: "---\ndisable-model-invocation: true\n---\nx",
+  };
+  assert.throws(
+    () => new ClaudeCodeAdapter().generate([s]),
+    /SKILL\.claude-code\.md.*missing required field 'description'/,
+  );
+});

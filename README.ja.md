@@ -47,15 +47,43 @@ skills_commit: <40-char SHA from main>
 
 Renovate が `ozzy-labs/skills@main` の更新を検知し、`skills_commit` を bump する PR を開く。同梱の `sync.sh`（[ozzy-labs/commons](https://github.com/ozzy-labs/commons) 提供）が本リポの `dist/.agents/skills/` を consumer の `.agents/skills/` へコピーする。
 
+## Adapter 出力
+
+`pnpm build` は `scripts/adapters/` 配下の各 adapter を実行し、`dist/{adapter-id}/` に書き出す:
+
+| Adapter | 出力 | ソース |
+| --- | --- | --- |
+| `claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` | `SKILL.claude-code.md`（あれば）/ なければ canonical `SKILL.md` |
+| `codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` | canonical `SKILL.md` |
+| `gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` | canonical `SKILL.md` |
+| `copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` | canonical `SKILL.md` |
+
+### Claude Code コンパニオンファイル
+
+skill は canonical `SKILL.md` に加えて、任意で `src/skills/{name}/SKILL.claude-code.md` を持てる。Claude Code adapter は companion が存在すればそのまま出力し、各 skill が Claude Code 固有の wrapper（次アクション `AskUserQuestion` / `argument-hint` / `disable-model-invocation` / `allowed-tools` 等）を canonical `SKILL.md` を汚さずに同梱できる。
+
+Companion frontmatter contract:
+
+| フィールド | 必須 | 備考 |
+| --- | --- | --- |
+| `description` | ◯ | canonical の `description` を Claude Code 向けに短縮してもよい |
+| `disable-model-invocation` | 任意 | boolean — 自動呼び出しを抑止 |
+| `allowed-tools` | 任意 | カンマ区切りツール一覧 |
+| `argument-hint` | 任意 | `/skill-name <hint>` 形式のヒント |
+| `user-invocable` | 任意 | `false` で reference-only skill 扱い |
+
+`name` はディレクトリ名から導出するため、companion frontmatter に含めない。
+
 ## ローカル開発
 
 ```bash
 pnpm install
 pnpm build         # dist/ を再生成
+pnpm test          # adapter ユニット + 統合テスト
 pnpm lint:all
 ```
 
-`dist/` は commit 対象で、CI が `pnpm build` の出力と一致することを検証する。`src/skills/*/SKILL.md` を編集したら `pnpm build` を実行し、生成された `dist/` の差分も同じコミットに含める。
+`dist/` は commit 対象で、CI が `pnpm build` の出力と一致することを検証する。`src/skills/*/SKILL.md` または `src/skills/*/SKILL.claude-code.md` を編集したら `pnpm build` を実行し、生成された `dist/` の差分も同じコミットに含める。
 
 ## 規約
 
