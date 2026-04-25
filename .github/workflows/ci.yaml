@@ -56,10 +56,10 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Verify dist tree matches build output
+      - name: Verify build outputs match committed mirrors
         run: |
-          if ! git diff --quiet -- dist; then
-            echo "dist/ is out of date — run 'pnpm build' and commit the result."
-            git diff -- dist
+          if ! git diff --quiet -- dist .agents/skills .claude/skills; then
+            echo "dist/, .agents/skills/, or .claude/skills/ is out of date — run 'pnpm build' and commit the result."
+            git diff -- dist .agents/skills .claude/skills
             exit 1
           fi
