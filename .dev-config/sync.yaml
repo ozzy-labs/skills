@@ -10,6 +10,7 @@ pinned:
   - lefthook.yaml
   - biome.json
   - renovate.json
+  - .gitignore
   - .agents/skills/README.md
   - .agents/skills/commit-conventions/SKILL.md
   - .agents/skills/commit/SKILL.md
