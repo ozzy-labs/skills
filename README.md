@@ -72,7 +72,7 @@ Each adapter sub-preset adds an `adapter:<id>` label to the Renovate sync PR. Su
 | `skills-sync/gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
 | `skills-sync/copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
 
-The actual file copy is performed by `commons/sync.sh`, which reads `.dev-config/sync.yaml` and the consumer's extended adapter sub-presets to determine which `dist/{adapter-id}/` outputs to copy. Existing consumers keep working with `extends: ["github>ozzy-labs/skills//skills-sync"]` alone — adapter opt-in is non-breaking and additive.
+Existing consumers keep working with `extends: ["github>ozzy-labs/skills//skills-sync"]` alone — adapter opt-in is non-breaking and additive. The adapter-id-based file copy on the consumer side is provided by a separate `commons/sync.sh` extension (tracked as a sub-issue on the [commons](https://github.com/ozzy-labs/commons) repo); the connection spec between this preset and `sync.sh` is defined there.
 
 ## Adapter outputs
 

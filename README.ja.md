@@ -72,7 +72,7 @@ agent 別 adapter 出力（`dist/{adapter-id}/`）を取り込む場合は、ル
 | `skills-sync/gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
 | `skills-sync/copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
 
-実ファイルコピーは `commons/sync.sh` が `.dev-config/sync.yaml` と extends された adapter sub-preset を参照してどの `dist/{adapter-id}/` を取り込むかを決定する。既存 consumer は `extends: ["github>ozzy-labs/skills//skills-sync"]` のみでこれまで通り動作する（adapter opt-in は非破壊・加算的）。
+既存 consumer は `extends: ["github>ozzy-labs/skills//skills-sync"]` のみでこれまで通り動作する（adapter opt-in は非破壊・加算的）。consumer 側の adapter-id ベースファイルコピーは別途 `commons/sync.sh` の拡張として提供され（[commons](https://github.com/ozzy-labs/commons) リポの sub-issue で追跡）、本 preset と `sync.sh` の接続仕様は commons 側で定義される。
 
 ## Adapter 出力
 
