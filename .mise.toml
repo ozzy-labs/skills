@@ -23,9 +23,6 @@ yq = "4"
 just = "1"
 zoxide = "0.9"
 
-# Testing
-"npm:bats" = "1"
-
 # Git hooks & commit conventions
 lefthook = "2"
 "npm:@commitlint/cli" = "20"

@@ -1,66 +1,37 @@
 ---
-name: implement
-description: Issue または指示をもとに、ブランチ作成・実装計画・コード変更を行う。Issue 番号またはテキスト指示を受け取る。
+description: Issue または指示をもとに、ブランチ作成・実装を行う
+argument-hint: "<#issue-number | instruction>"
+disable-model-invocation: true
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion
 ---
 
-# implement - Issue/指示からブランチ作成・実装
+# implement
 
-Issue 読解または直接指示をもとに、ブランチ作成・実装計画・コード変更までを行う。
+`.agents/skills/implement/SKILL.md` を Read し、ワークフロー手順に従う。
 
-## 入力
+## Claude Code 固有の追加事項
 
-- **Issue 番号の場合**（`#N` または数字のみ）: `gh issue view <N>` で内容を取得し、要件を整理する
-- **テキスト指示の場合**: そのまま要件として扱う
-- **引数なしの場合**: 何を実装するか確認する
+### 入力解析
 
-## 手順
+`$ARGUMENTS` を解析し、要件を特定する。
 
-### 1. ブランチ作成
+- **引数なしの場合:** AskUserQuestion で「何を実装しますか？（Issue 番号 or 説明）」と確認する（`answers` パラメータは設定しない）
+- **`gh` CLI エラー時:** 認証エラーの場合は `gh auth login` の実行を案内して中断する
 
-1. `git status` と `git branch --show-current` で現在の状態を確認する
-2. 要件から `<type>/<slug>` 形式のブランチ名を決定する
-3. `git checkout -b <branch-name>` でブランチを作成する
+### 実装計画の確認
 
-既にフィーチャーブランチにいる場合は、そのブランチで作業を続けるか確認する。
+実装計画を提示した後、AskUserQuestion で確認する（`answers` パラメータは設定しない）:
 
-### 2. 実装計画
+- **「この計画で実装」**
+- **「計画を修正」**
+- **「キャンセル」**
 
-1. コードベースを調査する
-   - 関連ファイルの特定
-   - 既存の実装パターンの把握
-   - 影響範囲の確認
-2. 実装計画を提示する:
-   - 変更するファイルとその内容
-   - 影響範囲
-3. 計画の承認を得てから実装に進む
+**重要:** 承認なしにコード変更を開始しない。
 
-### 3. 実装
+### 完了後の次のアクション
 
-承認された計画に従い、コード変更を実行する。各ファイルの変更完了時に進捗を報告する。
+実装完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
 
-### 4. 動作確認
-
-実装完了後、以下の検証を行う:
-
-- ビルドが成功するか
-- 型チェックが通るか
-- テストが通るか
-- lint エラーがないか
-
-エラーが出た場合はその場で修正し、再度確認する。
-
-### 5. 完了報告
-
-```text
-実装完了:
-  ブランチ: <branch-name>
-  変更ファイル:
-    A path/to/new-file
-    M path/to/modified-file
-```
-
-## 注意事項
-
-- .env ファイルは読み取り・ステージングしない
-- `gh` CLI が未認証の場合はエラーメッセージを表示して中断する
-- 実装計画の承認なしにコード変更を開始しない
+- **「lint・コミット・PR まで一括実行する」** → `.claude/skills/ship/SKILL.md` を Read し、その手順に従う
+- **「個別に lint を実行する」** → `.claude/skills/lint/SKILL.md` を Read し、その手順に従う
+- **「追加の変更を行う」** → 終了する
