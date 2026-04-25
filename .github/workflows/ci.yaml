@@ -58,8 +58,10 @@ jobs:
 
       - name: Verify build outputs match committed mirrors
         run: |
-          if ! git diff --quiet -- dist .agents/skills .claude/skills; then
+          CHANGES=$(git status --porcelain -- dist .agents/skills .claude/skills)
+          if [ -n "$CHANGES" ]; then
             echo "dist/, .agents/skills/, or .claude/skills/ is out of date — run 'pnpm build' and commit the result."
+            echo "$CHANGES"
             git diff -- dist .agents/skills .claude/skills
             exit 1
           fi
