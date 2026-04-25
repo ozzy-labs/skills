@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClaudeCodeAdapter } from "./adapters/claude-code.mjs";
 import { CodexCliAdapter } from "./adapters/codex-cli.mjs";
+import { GeminiCliAdapter } from "./adapters/gemini-cli.mjs";
 import { assertRequiredFields, parseSkillDocument } from "./lib/frontmatter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,7 +33,7 @@ const LEGACY_TARGETS = [
   join(ROOT, ".claude", "skills"),
 ];
 
-const ADAPTERS = [new ClaudeCodeAdapter(), new CodexCliAdapter()];
+const ADAPTERS = [new ClaudeCodeAdapter(), new CodexCliAdapter(), new GeminiCliAdapter()];
 
 async function readSkillNames() {
   const entries = await readdir(SRC, { withFileTypes: true });
