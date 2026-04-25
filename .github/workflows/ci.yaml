@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          install: true
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MISE_DISABLE_TOOLS: trivy
+
+      - name: pnpm cache
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: biome check .
+
+      - name: Lint (Markdown)
+        run: markdownlint-cli2 '**/*.md' '#**/node_modules' '#CHANGELOG.md'
+
+      - name: Lint (YAML)
+        run: yamllint -c .yamllint.yaml .
+
+      - name: Lint (GitHub Actions)
+        run: actionlint
+
+      - name: Security (Gitleaks)
+        run: gitleaks detect --no-banner
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify dist tree matches build output
+        run: |
+          if ! git diff --quiet -- dist; then
+            echo "dist/ is out of date — run 'pnpm build' and commit the result."
+            git diff -- dist
+            exit 1
+          fi

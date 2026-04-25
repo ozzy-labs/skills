@@ -1,0 +1,51 @@
+{
+  "name": "@ozzylabs/skills",
+  "version": "0.0.0",
+  "description": "Canonical OzzyLabs agent skill bundle. Distributed via Renovate sync (dist/) and published to npm for programmatic access.",
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "prepare": "lefthook install || true",
+    "build": "node scripts/build.mjs",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "lint:md": "markdownlint-cli2 '**/*.md' '#**/node_modules' '#CHANGELOG.md'",
+    "lint:yaml": "yamllint -c .yamllint.yaml .",
+    "lint:secrets": "gitleaks detect --no-banner",
+    "lint:all": "pnpm run lint && pnpm run lint:md && pnpm run lint:yaml && pnpm run lint:secrets",
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "license": "MIT",
+  "author": "ozzy-labs",
+  "homepage": "https://github.com/ozzy-labs/skills#readme",
+  "bugs": "https://github.com/ozzy-labs/skills/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ozzy-labs/skills.git"
+  },
+  "keywords": [
+    "ozzylabs",
+    "skills",
+    "claude-code",
+    "agents",
+    "ai"
+  ],
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@commitlint/cli": "^20.0.0",
+    "@commitlint/config-conventional": "^20.0.0"
+  }
+}
