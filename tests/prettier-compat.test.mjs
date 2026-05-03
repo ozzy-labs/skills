@@ -68,44 +68,56 @@ async function formatMarkdown(content, options = {}) {
   return prettier.format(content, { parser: "markdown", ...options });
 }
 
+async function formatJson(content, options = {}) {
+  return prettier.format(content, { parser: "json", ...options });
+}
+
 test("AGENTS.md.snippet is Prettier-idempotent under default config", async () => {
-  const out = new CodexCliAdapter()
-    .generate(SAMPLE_SKILLS)
-    .find((o) => o.relativePath === "AGENTS.md.snippet");
+  const out = (await new CodexCliAdapter().generate(SAMPLE_SKILLS)).find(
+    (o) => o.relativePath === "AGENTS.md.snippet",
+  );
   const formatted = await formatMarkdown(out.content);
   assert.equal(formatted, out.content);
 });
 
 test("AGENTS.md.snippet is Prettier-idempotent under singleQuote config", async () => {
-  const out = new CodexCliAdapter()
-    .generate(SAMPLE_SKILLS)
-    .find((o) => o.relativePath === "AGENTS.md.snippet");
+  const out = (await new CodexCliAdapter().generate(SAMPLE_SKILLS)).find(
+    (o) => o.relativePath === "AGENTS.md.snippet",
+  );
   const formatted = await formatMarkdown(out.content, { singleQuote: true });
   assert.equal(formatted, out.content);
 });
 
 test("Gemini CLI AGENTS.md.snippet is Prettier-idempotent", async () => {
-  const out = new GeminiCliAdapter()
-    .generate(SAMPLE_SKILLS)
-    .find((o) => o.relativePath === "AGENTS.md.snippet");
+  const out = (await new GeminiCliAdapter().generate(SAMPLE_SKILLS)).find(
+    (o) => o.relativePath === "AGENTS.md.snippet",
+  );
   const formatted = await formatMarkdown(out.content);
   assert.equal(formatted, out.content);
 });
 
+test("Gemini CLI .gemini/settings.json is Prettier-idempotent (regression: #35)", async () => {
+  const out = (await new GeminiCliAdapter().generate(SAMPLE_SKILLS)).find(
+    (o) => o.relativePath === ".gemini/settings.json",
+  );
+  const formatted = await formatJson(out.content);
+  assert.equal(formatted, out.content);
+});
+
 test("copilot-instructions.md.snippet is Prettier-idempotent under default config", async () => {
-  const out = new CopilotAdapter().generate(SAMPLE_SKILLS)[0];
+  const out = (await new CopilotAdapter().generate(SAMPLE_SKILLS))[0];
   const formatted = await formatMarkdown(out.content);
   assert.equal(formatted, out.content);
 });
 
 test("copilot-instructions.md.snippet is Prettier-idempotent under singleQuote config", async () => {
-  const out = new CopilotAdapter().generate(SAMPLE_SKILLS)[0];
+  const out = (await new CopilotAdapter().generate(SAMPLE_SKILLS))[0];
   const formatted = await formatMarkdown(out.content, { singleQuote: true });
   assert.equal(formatted, out.content);
 });
 
 test("Claude Code SKILL.md (canonical pass-through) is Prettier-idempotent", async () => {
-  const out = new ClaudeCodeAdapter().generate(SAMPLE_SKILLS);
+  const out = await new ClaudeCodeAdapter().generate(SAMPLE_SKILLS);
   for (const file of out) {
     const formatted = await formatMarkdown(file.content);
     assert.equal(formatted, file.content, `${file.relativePath} drifts under default Prettier`);
@@ -119,9 +131,9 @@ test("Claude Code SKILL.md (canonical pass-through) is Prettier-idempotent", asy
 });
 
 test("Claude Code SKILL.md (companion with argument-hint) is Prettier-idempotent under both configs", async () => {
-  const out = new ClaudeCodeAdapter()
-    .generate([SAMPLE_WITH_COMPANION])
-    .find((o) => o.relativePath === ".claude/skills/drive/SKILL.md");
+  const out = (await new ClaudeCodeAdapter().generate([SAMPLE_WITH_COMPANION])).find(
+    (o) => o.relativePath === ".claude/skills/drive/SKILL.md",
+  );
   const def = await formatMarkdown(out.content);
   assert.equal(def, out.content, "drift under default Prettier");
   const sq = await formatMarkdown(out.content, { singleQuote: true });

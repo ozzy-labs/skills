@@ -132,7 +132,7 @@ async function writeAdapterOutputs(skills) {
     if (existsSync(adapterRoot)) {
       await rm(adapterRoot, { recursive: true, force: true });
     }
-    const outputs = adapter.generate(skills);
+    const outputs = await adapter.generate(skills);
     for (const out of outputs) {
       const dest = join(adapterRoot, out.relativePath);
       await mkdir(dirname(dest), { recursive: true });

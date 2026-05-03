@@ -8,6 +8,7 @@
 //
 // Reference: https://github.com/google-gemini/gemini-cli
 
+import prettier from "prettier";
 import { AdapterBase } from "../lib/adapter-base.mjs";
 import { renderAgentsMdSnippet } from "../lib/agents-md-snippet.mjs";
 
@@ -23,14 +24,18 @@ const SETTINGS = {
 };
 
 /**
- * Stable JSON serializer — emits keys in insertion order with 2-space
- * indent and a trailing newline, matching what we want committed to dist/.
+ * JSON serializer whose output is Prettier-idempotent — `JSON.stringify`'s
+ * default formatter splits every array/object onto multiple lines, which
+ * collides with Prettier/Biome's "collapse short arrays" policy and causes
+ * sync oscillation in downstream repos (skills#35). Routing through
+ * `prettier.format` produces the exact bytes Prettier and Biome would emit,
+ * so consumers can run their formatters over `dist/` without drift.
  *
  * @param {unknown} value
- * @returns {string}
+ * @returns {Promise<string>}
  */
-function stableJsonStringify(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
+async function stableJsonStringify(value) {
+  return prettier.format(JSON.stringify(value), { parser: "json" });
 }
 
 export class GeminiCliAdapter extends AdapterBase {
@@ -38,14 +43,14 @@ export class GeminiCliAdapter extends AdapterBase {
 
   /**
    * @param {Skill[]} skills
-   * @returns {OutputFile[]}
+   * @returns {Promise<OutputFile[]>}
    */
-  generate(skills) {
+  async generate(skills) {
     const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name));
     return [
       {
         relativePath: ".gemini/settings.json",
-        content: stableJsonStringify(SETTINGS),
+        content: await stableJsonStringify(SETTINGS),
       },
       {
         relativePath: "AGENTS.md.snippet",

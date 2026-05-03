@@ -7,17 +7,17 @@ test("AdapterBase.generate throws when not overridden", () => {
   assert.throws(() => adapter.generate([]), /not implemented/);
 });
 
-test("subclass that overrides generate works", () => {
+test("subclass that overrides generate works", async () => {
   class FakeAdapter extends AdapterBase {
     static id = "fake";
-    generate(skills) {
+    async generate(skills) {
       return skills.map((s) => ({
         relativePath: `${s.name}.md`,
         content: s.body,
       }));
     }
   }
-  const out = new FakeAdapter().generate([
+  const out = await new FakeAdapter().generate([
     { name: "x", description: "d", frontmatter: {}, body: "B", raw: "B" },
   ]);
   assert.deepEqual(out, [{ relativePath: "x.md", content: "B" }]);

@@ -28,9 +28,9 @@ export class ClaudeCodeAdapter extends AdapterBase {
 
   /**
    * @param {Skill[]} skills
-   * @returns {OutputFile[]}
+   * @returns {Promise<OutputFile[]>}
    */
-  generate(skills) {
+  async generate(skills) {
     const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name));
     return sorted.map((skill) => {
       const canonicalLabel = `src/skills/${skill.name}/SKILL.md`;
