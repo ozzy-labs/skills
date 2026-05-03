@@ -91,6 +91,12 @@ test("appends snippet when marker is missing", async () => {
     const beginIdx = out.indexOf("<!-- begin: @ozzylabs/skills -->");
     const handIdx = out.indexOf("Hand-written body.");
     assert.ok(handIdx < beginIdx, "snippet must be appended after existing content");
+    // Exactly one blank line between existing content and the snippet.
+    assert.match(
+      out,
+      /Hand-written body\.\n\n<!-- begin: @ozzylabs\/skills -->/,
+      "must use exactly one blank line as separator",
+    );
   });
 });
 

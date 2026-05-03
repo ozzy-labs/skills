@@ -35,7 +35,10 @@ fi
 append_snippet() {
   mkdir -p "$(dirname "${target}")"
   if [[ -s "${target}" ]]; then
-    if [[ "$(tail -c 1 "${target}" 2>/dev/null || printf '')" != $'\n' ]]; then
+    # Ensure the existing file ends with exactly one newline before adding a
+    # blank-line separator. Bash's $() strips trailing newlines, so an empty
+    # capture means the last byte already is a newline.
+    if [[ -n "$(tail -c 1 "${target}" 2>/dev/null)" ]]; then
       printf '\n' >>"${target}"
     fi
     printf '\n' >>"${target}"
