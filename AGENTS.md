@@ -42,8 +42,10 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 - `src/skills/{name}/SKILL.claude-code.md` — Claude Code 固有 wrapper（任意）。companion 仕様は README.md を参照
 - `dist/.agents/skills/{name}/SKILL.md` — npm payload / Renovate consumer 向けビルド出力（commit 対象）
 - `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）
+- `dist/sync/replace-snippet.sh` — 下流 sync workflow 向けマーカー間置換ヘルパー（マーカー欠落時は append でフォールバック）
 - `scripts/build.mjs` — ビルドオーケストレータ
 - `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
+- `scripts/sync/replace-snippet.sh` — `dist/sync/` にコピーされる sync ヘルパーの SSOT
 - `scripts/lib/` — 共通 lib（frontmatter, snippet markers, AdapterBase）
 - `skills-sync/` — consumer 向け Renovate preset（`default.json` がルート preset、`{adapter-id}.json` が adapter opt-in sub-preset）
 - `.commons/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ

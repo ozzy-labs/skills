@@ -14,7 +14,7 @@
 //      sole writer.
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClaudeCodeAdapter } from "./adapters/claude-code.mjs";
@@ -110,6 +110,18 @@ async function writeLegacyTargets(skills) {
   }
 }
 
+async function writeSyncHelpers() {
+  const src = join(ROOT, "scripts", "sync", "replace-snippet.sh");
+  const destDir = join(DIST, "sync");
+  if (existsSync(destDir)) {
+    await rm(destDir, { recursive: true, force: true });
+  }
+  await mkdir(destDir, { recursive: true });
+  const dest = join(destDir, "replace-snippet.sh");
+  await copyFile(src, dest);
+  await chmod(dest, 0o755);
+}
+
 async function writeAdapterOutputs(skills) {
   for (const adapter of ADAPTERS) {
     const id = adapter.constructor.id;
@@ -133,6 +145,7 @@ async function main() {
   const skills = await loadSkills();
   await writeLegacyTargets(skills);
   await writeAdapterOutputs(skills);
+  await writeSyncHelpers();
 
   console.log(`✓ Built ${skills.length} skill(s)`);
   console.log("Legacy targets:");
@@ -143,6 +156,8 @@ async function main() {
   for (const adapter of ADAPTERS) {
     console.log(`  dist/${adapter.constructor.id}/`);
   }
+  console.log("Sync helpers:");
+  console.log("  dist/sync/replace-snippet.sh");
   console.log("Skills:");
   for (const skill of skills) {
     console.log(`  - ${skill.name}`);
