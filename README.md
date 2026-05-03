@@ -74,6 +74,24 @@ Each adapter sub-preset adds an `adapter:<id>` label to the Renovate sync PR. Su
 
 Existing consumers keep working with `extends: ["github>ozzy-labs/skills//skills-sync"]` alone — adapter opt-in is non-breaking and additive. The adapter-id-based file copy on the consumer side is provided by a separate `commons/sync.sh` extension (tracked as a sub-issue on the [commons](https://github.com/ozzy-labs/commons) repo); the connection spec between this preset and `sync.sh` is defined there.
 
+### Snippet sync helper
+
+`dist/sync/replace-snippet.sh` is shipped as a drop-in helper for downstream sync workflows that merge snippet files (`AGENTS.md.snippet`, `copilot-instructions.md.snippet`) into consumer-owned files:
+
+```bash
+.sync-skills/dist/sync/replace-snippet.sh \
+  AGENTS.md \
+  .sync-skills/dist/codex-cli/AGENTS.md.snippet
+```
+
+Behavior:
+
+- Target contains the begin marker → replace the marker block (begin..end inclusive) with the snippet contents.
+- Target is missing the marker (e.g. another sync — typically `commons` — overwrote the file and stripped the managed region) → append the snippet to the end of the file. The snippet itself carries the markers, so the next run resumes in-place replacement.
+- Target file does not exist → create it from the snippet.
+
+This auto-recovery removes the need for downstream workflows to carry their own marker-handling logic and avoids hard failures when ownership of a shared file like `.github/copilot-instructions.md` shifts between sync sources.
+
 ## Adapter outputs
 
 `pnpm build` runs each per-agent adapter under `scripts/adapters/` and writes the result to `dist/{adapter-id}/`:

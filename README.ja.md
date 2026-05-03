@@ -74,6 +74,24 @@ agent 別 adapter 出力（`dist/{adapter-id}/`）を取り込む場合は、ル
 
 既存 consumer は `extends: ["github>ozzy-labs/skills//skills-sync"]` のみでこれまで通り動作する（adapter opt-in は非破壊・加算的）。consumer 側の adapter-id ベースファイルコピーは別途 `commons/sync.sh` の拡張として提供され（[commons](https://github.com/ozzy-labs/commons) リポの sub-issue で追跡）、本 preset と `sync.sh` の接続仕様は commons 側で定義される。
 
+### Snippet sync ヘルパー
+
+`dist/sync/replace-snippet.sh` は、snippet ファイル（`AGENTS.md.snippet` / `copilot-instructions.md.snippet`）を consumer 所有ファイルへマージする下流 sync workflow 向けのドロップインヘルパーとして配布される:
+
+```bash
+.sync-skills/dist/sync/replace-snippet.sh \
+  AGENTS.md \
+  .sync-skills/dist/codex-cli/AGENTS.md.snippet
+```
+
+挙動:
+
+- ターゲットに begin マーカーがある場合 → マーカーブロック（begin..end 包括）を snippet 内容で置換する
+- マーカーが欠落している場合（別 sync — 典型的には `commons` — がファイルを上書きしてマネージド領域を消した場合）→ ファイル末尾に snippet を append する。snippet 自体がマーカーを含むため、次回以降は in-place 置換に戻る
+- ターゲットファイルが存在しない場合 → snippet から新規作成する
+
+この自動復旧により、下流 workflow がマーカー処理ロジックを自前で持つ必要がなくなり、`.github/copilot-instructions.md` のような共有ファイルの所有権が複数の sync 元にまたがる場合でも hard failure を回避できる。
+
 ## Adapter 出力
 
 `pnpm build` は `scripts/adapters/` 配下の各 adapter を実行し、`dist/{adapter-id}/` に書き出す:
