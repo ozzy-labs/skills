@@ -24,10 +24,10 @@ export class AdapterBase {
    *
    * Subclasses must override. Implementations must be deterministic: the same
    * skills input must produce the same OutputFile list (same order, same
-   * content).
+   * content). May be async — the build orchestrator awaits the result.
    *
    * @param {Skill[]} _skills
-   * @returns {OutputFile[]}
+   * @returns {Promise<OutputFile[]> | OutputFile[]}
    */
   generate(_skills) {
     throw new Error(`${this.constructor.name}.generate() not implemented`);

@@ -11,15 +11,15 @@ function skill(name, frontmatter, body = "body\n") {
   return { name, description: fm.description, frontmatter: fm, body, raw };
 }
 
-test("Claude Code adapter emits .claude/skills/{name}/SKILL.md", () => {
-  const out = new ClaudeCodeAdapter().generate([skill("foo", { description: "d" })]);
+test("Claude Code adapter emits .claude/skills/{name}/SKILL.md", async () => {
+  const out = await new ClaudeCodeAdapter().generate([skill("foo", { description: "d" })]);
   assert.equal(out.length, 1);
   assert.equal(out[0].relativePath, ".claude/skills/foo/SKILL.md");
   assert.match(out[0].content, /^---\nname: foo\ndescription: d\n---\nbody\n$/);
 });
 
-test("Claude Code adapter is deterministic — sorts by name", () => {
-  const out = new ClaudeCodeAdapter().generate([
+test("Claude Code adapter is deterministic — sorts by name", async () => {
+  const out = await new ClaudeCodeAdapter().generate([
     skill("zeta", { description: "z" }),
     skill("alpha", { description: "a" }),
   ]);
@@ -29,18 +29,18 @@ test("Claude Code adapter is deterministic — sorts by name", () => {
   );
 });
 
-test("Claude Code adapter passes through Claude-specific frontmatter", () => {
+test("Claude Code adapter passes through Claude-specific frontmatter", async () => {
   const s = skill("foo", {
     description: "d",
     "allowed-tools": "Bash,Read",
     "argument-hint": "<file>",
   });
-  const out = new ClaudeCodeAdapter().generate([s]);
+  const out = await new ClaudeCodeAdapter().generate([s]);
   assert.match(out[0].content, /allowed-tools: Bash,Read/);
   assert.match(out[0].content, /argument-hint: <file>/);
 });
 
-test("Claude Code adapter throws when description is missing", () => {
+test("Claude Code adapter throws when description is missing", async () => {
   const bad = {
     name: "foo",
     description: "",
@@ -48,7 +48,7 @@ test("Claude Code adapter throws when description is missing", () => {
     body: "",
     raw: "---\nname: foo\n---\n",
   };
-  assert.throws(
+  await assert.rejects(
     () => new ClaudeCodeAdapter().generate([bad]),
     /missing required field 'description'/,
   );
@@ -58,34 +58,34 @@ test("Claude Code adapter has id 'claude-code'", () => {
   assert.equal(ClaudeCodeAdapter.id, "claude-code");
 });
 
-test("Claude Code adapter emits companion content when present", () => {
+test("Claude Code adapter emits companion content when present", async () => {
   const s = skill("foo", { description: "canonical" });
   s.claudeCodeCompanion = {
     frontmatter: { description: "wrapper", "disable-model-invocation": "true" },
     body: "# foo\n\nwrapper body\n",
     raw: "---\ndescription: wrapper\ndisable-model-invocation: true\n---\n# foo\n\nwrapper body\n",
   };
-  const out = new ClaudeCodeAdapter().generate([s]);
+  const out = await new ClaudeCodeAdapter().generate([s]);
   assert.equal(out[0].content, s.claudeCodeCompanion.raw);
   assert.match(out[0].content, /disable-model-invocation: true/);
   assert.doesNotMatch(out[0].content, /^name: foo/m);
 });
 
-test("Claude Code adapter falls back to canonical when no companion", () => {
+test("Claude Code adapter falls back to canonical when no companion", async () => {
   const s = skill("foo", { description: "canonical" });
   s.claudeCodeCompanion = null;
-  const out = new ClaudeCodeAdapter().generate([s]);
+  const out = await new ClaudeCodeAdapter().generate([s]);
   assert.equal(out[0].content, s.raw);
 });
 
-test("Claude Code adapter throws when companion is missing description", () => {
+test("Claude Code adapter throws when companion is missing description", async () => {
   const s = skill("foo", { description: "canonical" });
   s.claudeCodeCompanion = {
     frontmatter: { "disable-model-invocation": "true" },
     body: "x",
     raw: "---\ndisable-model-invocation: true\n---\nx",
   };
-  assert.throws(
+  await assert.rejects(
     () => new ClaudeCodeAdapter().generate([s]),
     /SKILL\.claude-code\.md.*missing required field 'description'/,
   );

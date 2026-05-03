@@ -8,8 +8,8 @@ function skill(name, description, body = "body\n") {
   return { name, description, frontmatter: fm, body, raw };
 }
 
-test("Codex CLI adapter emits per-skill SKILL.md plus AGENTS.md.snippet", () => {
-  const out = new CodexCliAdapter().generate([
+test("Codex CLI adapter emits per-skill SKILL.md plus AGENTS.md.snippet", async () => {
+  const out = await new CodexCliAdapter().generate([
     skill("foo", "Foo description"),
     skill("bar", "Bar description"),
   ]);
@@ -21,17 +21,17 @@ test("Codex CLI adapter emits per-skill SKILL.md plus AGENTS.md.snippet", () => 
   ]);
 });
 
-test("Codex CLI snippet contains begin/end markers and skill bullets", () => {
-  const out = new CodexCliAdapter().generate([skill("foo", "Foo description")]);
+test("Codex CLI snippet contains begin/end markers and skill bullets", async () => {
+  const out = await new CodexCliAdapter().generate([skill("foo", "Foo description")]);
   const snippet = out.find((o) => o.relativePath === "AGENTS.md.snippet").content;
   assert.match(snippet, /<!-- begin: @ozzylabs\/skills -->/);
   assert.match(snippet, /<!-- end: @ozzylabs\/skills -->/);
   assert.match(snippet, /- `foo` — Foo description/);
 });
 
-test("Codex CLI adapter is deterministic — sorts skills by name", () => {
-  const a = new CodexCliAdapter().generate([skill("zeta", "z"), skill("alpha", "a")]);
-  const b = new CodexCliAdapter().generate([skill("alpha", "a"), skill("zeta", "z")]);
+test("Codex CLI adapter is deterministic — sorts skills by name", async () => {
+  const a = await new CodexCliAdapter().generate([skill("zeta", "z"), skill("alpha", "a")]);
+  const b = await new CodexCliAdapter().generate([skill("alpha", "a"), skill("zeta", "z")]);
   assert.deepEqual(a, b);
 });
 

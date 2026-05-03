@@ -66,7 +66,7 @@ test("every adapter produces non-empty output for canonical skills", async () =>
   const skills = await loadCanonicalSkills();
   assert.ok(skills.length > 0, "src/skills/ must contain at least one skill");
   for (const adapter of ADAPTERS) {
-    const out = adapter.generate(skills);
+    const out = await adapter.generate(skills);
     assert.ok(out.length > 0, `${adapter.constructor.name} returned no outputs`);
     for (const file of out) {
       assert.ok(file.relativePath, "OutputFile.relativePath must be set");
@@ -78,8 +78,8 @@ test("every adapter produces non-empty output for canonical skills", async () =>
 test("adapter outputs are deterministic across repeated runs", async () => {
   const skills = await loadCanonicalSkills();
   for (const adapter of ADAPTERS) {
-    const a = adapter.generate(skills);
-    const b = adapter.generate(skills);
+    const a = await adapter.generate(skills);
+    const b = await adapter.generate(skills);
     assert.deepEqual(a, b, `${adapter.constructor.name} is non-deterministic`);
   }
 });
@@ -88,8 +88,8 @@ test("adapter outputs are deterministic regardless of input order", async () => 
   const skills = await loadCanonicalSkills();
   const reversed = [...skills].reverse();
   for (const adapter of ADAPTERS) {
-    const a = adapter.generate(skills);
-    const b = adapter.generate(reversed);
+    const a = await adapter.generate(skills);
+    const b = await adapter.generate(reversed);
     assert.deepEqual(
       a,
       b,
@@ -100,19 +100,19 @@ test("adapter outputs are deterministic regardless of input order", async () => 
 
 test("Codex CLI and Gemini CLI emit identical AGENTS.md.snippet", async () => {
   const skills = await loadCanonicalSkills();
-  const codex = new CodexCliAdapter()
-    .generate(skills)
-    .find((o) => o.relativePath === "AGENTS.md.snippet").content;
-  const gemini = new GeminiCliAdapter()
-    .generate(skills)
-    .find((o) => o.relativePath === "AGENTS.md.snippet").content;
+  const codex = (await new CodexCliAdapter().generate(skills)).find(
+    (o) => o.relativePath === "AGENTS.md.snippet",
+  ).content;
+  const gemini = (await new GeminiCliAdapter().generate(skills)).find(
+    (o) => o.relativePath === "AGENTS.md.snippet",
+  ).content;
   assert.equal(codex, gemini);
 });
 
 test("every snippet output is wrapped with @ozzylabs/skills markers", async () => {
   const skills = await loadCanonicalSkills();
   for (const adapter of ADAPTERS) {
-    for (const file of adapter.generate(skills)) {
+    for (const file of await adapter.generate(skills)) {
       if (!file.relativePath.endsWith(".snippet")) continue;
       assert.match(
         file.content,
@@ -135,7 +135,7 @@ test("Claude Code adapter prefers SKILL.claude-code.md when present", async () =
     withCompanion.length > 0,
     "expected at least one skill to ship a Claude Code companion",
   );
-  const out = new ClaudeCodeAdapter().generate(skills);
+  const out = await new ClaudeCodeAdapter().generate(skills);
   for (const skill of withCompanion) {
     const file = out.find((o) => o.relativePath === `.claude/skills/${skill.name}/SKILL.md`);
     assert.equal(
@@ -150,12 +150,12 @@ test("Claude Code adapter and other adapters diverge for skills with companion",
   const skills = await loadCanonicalSkills();
   const sample = skills.find((s) => s.claudeCodeCompanion);
   if (!sample) return; // no companion in repo — nothing to assert
-  const claudeOut = new ClaudeCodeAdapter()
-    .generate([sample])
-    .find((o) => o.relativePath.endsWith("/SKILL.md"));
-  const codexOut = new CodexCliAdapter()
-    .generate([sample])
-    .find((o) => o.relativePath.endsWith("/SKILL.md"));
+  const claudeOut = (await new ClaudeCodeAdapter().generate([sample])).find((o) =>
+    o.relativePath.endsWith("/SKILL.md"),
+  );
+  const codexOut = (await new CodexCliAdapter().generate([sample])).find((o) =>
+    o.relativePath.endsWith("/SKILL.md"),
+  );
   assert.notEqual(
     claudeOut.content,
     codexOut.content,

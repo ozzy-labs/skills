@@ -20,9 +20,9 @@ export class CodexCliAdapter extends AdapterBase {
 
   /**
    * @param {Skill[]} skills
-   * @returns {OutputFile[]}
+   * @returns {Promise<OutputFile[]>}
    */
-  generate(skills) {
+  async generate(skills) {
     const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name));
     const outputs = sorted.map((skill) => {
       const label = `src/skills/${skill.name}/SKILL.md`;

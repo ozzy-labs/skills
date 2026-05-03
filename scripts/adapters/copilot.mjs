@@ -34,9 +34,9 @@ export class CopilotAdapter extends AdapterBase {
 
   /**
    * @param {Skill[]} skills
-   * @returns {OutputFile[]}
+   * @returns {Promise<OutputFile[]>}
    */
-  generate(skills) {
+  async generate(skills) {
     return [
       {
         relativePath: ".github/copilot-instructions.md.snippet",
