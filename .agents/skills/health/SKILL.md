@@ -21,7 +21,9 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 - **実行禁止:** 削除・drop・prune・close 等の解消アクションを実行しない（推奨を表示するのみ）
 - **推奨は固定語彙のみ:** 後述の語彙以外は使わない。Claude の自由判断で文言を生成しない
 - **section 順序固定:** Broken state → Local artifacts → Triage(mine) → Triage(automation) の順で出力する。順序が暗黙の優先度を表現する
-- **section 内ソート:** 古い順（最終更新が古いものほど上）で安定化させ、Routine 実行時の差分を意味あるものにする
+- **section 内ソート:** Routine 実行時の差分を安定化するため、各 section で **決定論的な順序** を採用する。具体的には:
+  - 元コマンドが自然順を返すもの（`git stash list`, `git worktree list`, `git status -s`, `git submodule status`, `git tag -l`）は **元コマンドの順序を維持**
+  - branch / PR / issue / failed run / draft release は **古い順（最終更新が古いものほど上）** で stale 項目を section 上部に集約
 
 ## 推奨アクション語彙（固定）
 
@@ -77,7 +79,8 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 - 各 branch について:
   - merged 済みの PR が存在 → `delete`（PR 番号を表示）
   - upstream なし、かつ最終 commit から 14 日以上 → `要確認`
-  - ahead で未 push、関連 PR なし → `push`
+  - upstream なし、かつ 1 commit 以上、かつ最終 commit から 14 日未満 → `push`（新規ブランチで未 push のケース）
+  - upstream あり、ahead で未 push、関連 PR なし → `push`
   - それ以外 → 推奨なし
 
 #### 6. remote tracking
@@ -123,7 +126,8 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 #### 13. recent failed actions
 
-- コマンド: `gh run list --branch "$(git branch --show-current)" --status failure --limit 5 --json databaseId,name,conclusion,createdAt,url`
+- 前提: `git branch --show-current` で現在ブランチを取得する。空文字（detached HEAD）の場合は section に `(skipped: detached HEAD)` を表示し、コマンドを実行しない
+- コマンド: `gh run list --branch "<current-branch>" --status failure --limit 5 --json databaseId,name,conclusion,createdAt,url`
 - 各 run を表示し、推奨アクション `要確認` を付与する
 
 #### 14. draft release
@@ -196,8 +200,8 @@ stash@{0}  3d   feat/x      WIP          → drop
 stash@{1}  14d  main        temp fix     → 要確認
 
 ## Local branches (3)
-feat/done        merged (PR #42)          → delete
 feat/abandoned   no upstream, 21d         → 要確認
+feat/done        merged (PR #42)          → delete
 fix/bug          ahead 2, behind 5        → push
 
 ## Remote tracking (gone)
@@ -237,6 +241,24 @@ v1.0.0           draft, 7d                → 要対応
 #203 release-please  chore: release 0.3.0 → 要対応
 ```
 
+### エラー時の出力例
+
+```text
+## Recent failed actions
+(skipped: detached HEAD)
+
+## My open PRs
+(error: gh not authenticated)
+
+## Issues assigned to me
+(error: gh not authenticated)
+
+## Submodules
+(none)
+```
+
+エラー / skip / 該当なしは section を省略せず、必ず 1 行で状態を表示する。
+
 ## エラーハンドリング
 
 | 状況 | 動作 |
@@ -246,6 +268,7 @@ v1.0.0           draft, 7d                → 要対応
 | `git` 個別コマンド失敗 | 該当 section に `(error: <stderr 1 行目>)` を表示し、他 section は継続する |
 | GitHub remote なし | Triage 系 5 section に `(error: no GitHub remote)` を表示し、git 系チェックは継続する |
 | network エラー | 該当 section に `(error: network)` を表示する |
+| detached HEAD | Section 13 に `(skipped: detached HEAD)` を表示し、他 section は継続する |
 
 全 section の実行は **失敗があっても中断しない**。
 
