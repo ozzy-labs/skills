@@ -1,8 +1,8 @@
 ---
-description: Issue から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。オプションでマージまで実行可能。
-argument-hint: <#issue-number | instruction> [--merge]
+description: Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。
+argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N]
 disable-model-invocation: true
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent
 ---
 
 # drive
@@ -15,11 +15,31 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 ### 入力解析
 
-`$ARGUMENTS` を解析し、対象（Issue/指示）とオプション（`--merge` の有無）を特定する。
+`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`）を特定する。
+
+- target が 1 件かつ依存記法（`->`）なし → 単一モード
+- target が 2 件以上、または依存記法あり → オーケストレーションモード
 
 ### 自律実行
 
 計画承認を含め、マージ処理（またはマージ確認）まで AskUserQuestion を使用しない（完全自律実行）。
+
+### subagent dispatch（オーケストレーションモード）
+
+オーケストレーションモードでは `Agent` tool で各 target を並列実行する:
+
+- **isolation:** `"worktree"`（必須）
+- **subagent_type:** `general-purpose`
+- **prompt:** `/drive #<N>[ --merge]` を実行させ、結果を JSON で返すよう指示する。subagent 内では引数 1 件のため自動的に単一モードに入る
+- **並列起動:** 同一 wave 内の独立 subagent は **1 メッセージ複数 tool call** で並列起動する
+- **並列度:** `min(4, wave 内タスク数)`、`--concurrency N` で上書き、8 超は警告のみ
+- **wave 内タスク数 > 並列度:** semaphore 方式で空きスロット待ち（先に起動した subagent の完了を待ってから次を起動）
+
+### 観測性
+
+- Phase 0 完了時に wave 構成と target リストを表示する
+- 各 subagent が PR を作成した時点で PR URL を即時中間出力（subagent の prompt にこの指示を含める）
+- Phase Final で集約レポートを出力する
 
 ### 中断時
 
@@ -28,11 +48,20 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 - **「エラーを修正して再開する」** → 中断したフェーズから再開
 - **「中断する」** → 終了
 
+オーケストレーションモードで一部 task のみ失敗の場合は、Phase Final レポート出力後に AskUserQuestion で再開対象を確認する。
+
 ### 完了後
 
-1. **自動マージが指定されている場合 (`--merge`):**
-   - Phase 4 の手順に従いマージを実行し、結果を報告して終了する。
-2. **自動マージが指定されていない場合:**
-   - AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
-     - **「PR をマージする」** → `gh pr merge --squash --delete-branch` でマージを実行し、結果を報告する
-     - **「追加の変更を行う」** → 終了する
+#### 単一モード
+
+1. **`--merge` 指定時:** Phase 4 の手順に従いマージを実行し、結果を報告して終了する
+2. **`--merge` 未指定時:** AskUserQuestion を呼び出す（`answers` パラメータは設定しない）
+   - **「PR をマージする」** → `gh pr merge --squash --delete-branch` でマージを実行し、結果を報告する
+   - **「追加の変更を行う」** → 終了する
+
+#### オーケストレーションモード
+
+1. **`--merge` 指定時:** 各 subagent が自 PR のマージまで完了させているため、Phase Final 集約レポートを出力して終了する
+2. **`--merge` 未指定時:** Phase Final レポート出力後、AskUserQuestion を呼び出す
+   - **「全 PR を一括マージする」** → 各 PR に対し順次 `gh pr merge --squash --delete-branch` を依存順に実行
+   - **「個別に対応する」** → 終了する
