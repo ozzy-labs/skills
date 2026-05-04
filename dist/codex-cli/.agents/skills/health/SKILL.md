@@ -263,7 +263,8 @@ Phase 2 のいずれかの調査が失敗しても他の調査は継続する。
 | error | `error: <reason>` |
 | skipped | `skipped: <reason>` |
 
-- `<count>` は推奨アクション付き項目の総数。Phase 2 で `same as <id>` に書き換わった行は集約済みのためカウントしない（H2 section の `(<count>)` 表記と一致させる）
+- `<count>` は推奨アクション付き項目の総数。Phase 2 で `same as <id>` に書き換わった行は集約済みのためカウントしない
+- 注: H2 section の `(<count>)` は section 内の総項目数（`same as` 行も含む）を示す。表の `<count>` は推奨アクション付き項目のみを数えるため、Phase 2 で `same as` グルーピングが起きた場合のみ両者は異なる（例: Phase 2 で 5 件の failed run が 1 代表 + 4 件の `same as` に整理されたとき、表は `1 件（要対応）`、H2 は `## Recent failed actions (5)`）
 - Phase 2 でラベルが書き換わった場合（`要確認` → `drop` など）、表の "詳細" 列も書き換え後ラベルで再計算する
 
 ### 非 clean section
