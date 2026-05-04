@@ -16,6 +16,7 @@
 - `/review` — コード変更や PR をレビュー
 - `/ship` — lint・コミット・PR 作成を一括実行
 - `/drive` — implement + ship + review loop（Issue から merge-ready な PR まで自律駆動）
+- `/health` — リポジトリ状態を 15 領域確認し、推奨アクションを inline 表示
 
 ## Skills の共通ルール
 

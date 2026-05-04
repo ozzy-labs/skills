@@ -10,13 +10,14 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-The 10 common skills shared across all OzzyLabs repositories:
+The 11 common skills shared across all OzzyLabs repositories:
 
 | Skill | Description |
 | --- | --- |
 | `commit` | Stage changes and create a Conventional Commit |
 | `commit-conventions` | Commit / branch / PR naming conventions |
 | `drive` | Issue → merge-ready PR autonomous loop |
+| `health` | Inspect repo state across 15 areas with inline recommended actions |
 | `implement` | Branch creation and implementation from an issue or instructions |
 | `lint` | Run all linters with auto-fix |
 | `lint-rules` | Lint configuration reference |
