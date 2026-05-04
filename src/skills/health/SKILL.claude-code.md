@@ -1,5 +1,5 @@
 ---
-description: リポジトリ改修中に意図せず残る状態を 15 領域に渡って一発確認し、固定語彙の推奨アクションを inline 付与して報告する。`--deep` 指定時は `要確認` 項目を追加調査してラベルを格上げする。検査と提示のみで実行はしない。Routine 互換。
+description: リポジトリ改修中に意図せず残る状態を 15 領域に渡って一発確認し、ステータス表で俯瞰しつつ固定語彙の推奨アクションを inline 付与して報告する。`--deep` 指定時は `要確認` 項目を追加調査してラベルを格上げする。検査と提示のみで実行はしない。Routine 互換。
 argument-hint: "[--deep]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep
@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Grep
 
 `.agents/skills/health/SKILL.md` を Read し、ワークフロー手順に従う。
 
-**重要:** 読み込んだスキル内の手順を忠実に実行する。section 順序、推奨アクション語彙、出力フォーマット（サマリ行・compact list・Clean 集約）、エラーハンドリングは厳密に守る。
+**重要:** 読み込んだスキル内の手順を忠実に実行する。section 順序、推奨アクション語彙、出力フォーマット（ステータス表・compact list）、エラーハンドリングは厳密に守る。
 
 ## Claude Code 固有の追加事項
 

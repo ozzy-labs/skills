@@ -1,6 +1,6 @@
 ---
 name: health
-description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）を一発で確認し、各項目に固定語彙の推奨アクションを inline で付与して報告する。`--deep` 指定時は `要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする。検査と提示のみで、削除・close 等の実行は行わない。
+description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）を一発で確認し、15 領域のステータス表で俯瞰しつつ各項目に固定語彙の推奨アクションを inline で付与して報告する。`--deep` 指定時は `要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする。検査と提示のみで、削除・close 等の実行は行わない。
 ---
 
 # health - リポジトリ状態の確認と推奨アクション提示
@@ -226,34 +226,49 @@ Phase 2 のいずれかの調査が失敗しても他の調査は継続する。
 
 ## 出力フォーマット
 
-レポートは 3 ブロック構成:
+レポートは 2 ブロック構成:
 
-1. **サマリ行**（先頭固定 1 行）
+1. **ステータス表**（先頭固定。15 領域を 1 表で俯瞰）
 2. **非 clean section**（要対応事項のある領域のみ、compact list 形式）
-3. **Clean section 集約**（要対応事項のない領域を 1 ブロックにまとめる）
 
-### サマリ行
+### ステータス表
 
-レポート先頭に必ず 1 行出力する。
-
-```text
-Status: <N> areas need attention · <M> actions queued (<a> prune, <b> 要確認, ...) · <K> areas clean
-```
-
-- `<N>` = 非 clean section の数
-- `<M>` = 推奨アクション付き項目の総数。`same as <id>` 行はグループ代表行に集約済みのため、`<M>` には含めない（各 section 内の `(<count>)` 表記には含める）
-- 内訳は付与されたラベルごとの件数を昇順固定（`abort or continue` / `delete` / `drop` / `fetch` / `prune` / `push` / `要対応` / `要確認` の順）で列挙する。0 件のラベルは省略する
-- `<K>` = clean section の数（空の場合は 0）
-
-全 section が clean なら:
+レポート先頭に必ず 15 行のテーブルを出力する。行順は固定（後述の section 順）で、ステータスアイコンと詳細列で各領域の状態を 1 行ずつ示す。
 
 ```text
-Status: all clean (15 areas)
+| # | 領域 | 状態 | 詳細 |
+|---|---|---|---|
+| 1 | Interrupted git ops | <icon> | <detail> |
+| 2 | Conflict markers | <icon> | <detail> |
+| ... | ... | ... | ... |
+| 15 | Automation PRs | <icon> | <detail> |
 ```
+
+#### ステータスアイコン（固定）
+
+| アイコン | 意味 | 適用条件 |
+|---|---|---|
+| `✅` | clean | 項目数 0 |
+| `⚠️` | 非 clean | 推奨アクション付き項目が 1 件以上 |
+| `❌` | error | 該当 section の取得が失敗 |
+| `⏭️` | skipped | 該当 section が条件不成立で skip |
+
+#### 詳細列（決定論的生成）
+
+| 状態 | 詳細列の内容 |
+|---|---|
+| clean | `clean` |
+| 非 clean（label 1 種類） | `<count> 件（<label>）` |
+| 非 clean（label 複数） | `<count> 件（mixed: <l1>+<l2>+...）` ※ label は推奨アクション語彙の昇順固定（`abort or continue` / `delete` / `drop` / `fetch` / `prune` / `push` / `要対応` / `要確認`） |
+| error | `error: <reason>` |
+| skipped | `skipped: <reason>` |
+
+- `<count>` は推奨アクション付き項目の総数。Phase 2 で `same as <id>` に書き換わった行は集約済みのためカウントしない（H2 section の `(<count>)` 表記と一致させる）
+- Phase 2 でラベルが書き換わった場合（`要確認` → `drop` など）、表の "詳細" 列も書き換え後ラベルで再計算する
 
 ### 非 clean section
 
-要対応事項のある領域のみ H2 section として出力する。section 順序は次の固定順から該当領域を抽出する:
+要対応事項のある領域のみ H2 section として出力する。section 順序は固定:
 
 1. Interrupted git ops
 2. Conflict markers
@@ -281,29 +296,32 @@ Status: all clean (15 areas)
 - 項目情報と推奨アクションの間は `→` で区切り、矢印の前後に半角スペースを 2 個ずつ挟む（列の整列と視認性のため）
 - Phase 2 で根拠が付与された項目は末尾に `│ <text>` を付与する。パイプ `│` の前にスペース 2 個、`<text>` の前にスペース 1 個を挟む。Phase 1 のみの場合は付与しない
 - `<count>` は section 内の項目数。section heading に件数のみ付与し、`(N → label)` 形式は採用しない（推奨アクションが mixed の場合に破綻するため）
-- 列の整列は agent が項目幅から決める。表形式（markdown table）は使わない（cell 幅と inline 根拠が衝突するため）
+- 列の整列は agent が項目幅から決める。表形式（markdown table）は項目部分には使わない（cell 幅と inline 根拠が衝突するため）
 
-エラー section は `(error: <reason>)` を 1 行表示する。skip section は `(skipped: <reason>)` を表示する。
+エラー section は `(error: <reason>)` を 1 行表示する。skip section は `(skipped: <reason>)` を 1 行表示する。これら error / skipped の section は **H2 section 側にも出力**し、ステータス表とあわせて 2 箇所で示す（表は俯瞰、H2 は 1 行詳細）。clean な領域は H2 section を出さない。
 
-### Clean section 集約
-
-clean な section（要対応事項なし）は最後に 1 ブロックにまとめる:
-
-```text
-## Clean (<count>)
-<Section name 1> · <Section name 2> · ...
-```
-
-- 集約ブロック内の項目順は **上記 1〜15 の固定順を維持**（決定論性）
-- セパレータは ` · `（U+00B7、前後に半角スペース）
-- 1 行が長い場合は折り返してよい（折り返し位置は agent が決める）
-- 全 section が clean な場合: `## Clean (15)` の下に 15 個全領域を列挙する
-- 全 section が非 clean な場合: clean section 自体を省略する
+全 section が clean な場合は H2 section を一切出力せず、ステータス表のみで完結する。
 
 ### 出力例（Phase 1 のみ、引数なし）
 
 ```text
-Status: 4 areas need attention · 13 actions queued (5 prune, 1 push, 2 要対応, 5 要確認) · 11 areas clean
+| # | 領域 | 状態 | 詳細 |
+|---|---|---|---|
+| 1 | Interrupted git ops | ✅ | clean |
+| 2 | Conflict markers | ✅ | clean |
+| 3 | Working tree | ✅ | clean |
+| 4 | Stash | ⚠️ | 1 件（要確認） |
+| 5 | Local branches | ✅ | clean |
+| 6 | Remote tracking | ⚠️ | 5 件（prune） |
+| 7 | Worktrees | ✅ | clean |
+| 8 | Submodules | ✅ | clean |
+| 9 | Tags | ⚠️ | 1 件（push） |
+| 10 | My open PRs | ✅ | clean |
+| 11 | Issues assigned to me | ✅ | clean |
+| 12 | Review requests on me | ✅ | clean |
+| 13 | Recent failed actions | ⚠️ | 5 件（要確認） |
+| 14 | Draft releases | ✅ | clean |
+| 15 | Automation PRs | ⚠️ | 2 件（要対応） |
 
 ## Stash (1)
 stash@{0}  18d  feat/x  WIP            → 要確認
@@ -328,17 +346,28 @@ v0.2.0  local only                      → push
 ## Automation PRs (2)
 #39  github-actions[bot]  1d  chore: sync commons defaults  → 要対応
 #1   github-actions[bot]  0d  chore(main): release 0.1.0    → 要対応
-
-## Clean (11)
-Interrupted git ops · Conflict markers · Working tree · Local branches ·
-Worktrees · Submodules · My open PRs · Issues assigned to me ·
-Review requests on me · Draft releases
 ```
 
 ### 出力例（`--deep` 時、Phase 2 適用後）
 
 ```text
-Status: 3 areas need attention · 7 actions queued (1 drop, 5 prune, 1 要対応) · 12 areas clean
+| # | 領域 | 状態 | 詳細 |
+|---|---|---|---|
+| 1 | Interrupted git ops | ✅ | clean |
+| 2 | Conflict markers | ✅ | clean |
+| 3 | Working tree | ✅ | clean |
+| 4 | Stash | ⚠️ | 1 件（drop） |
+| 5 | Local branches | ✅ | clean |
+| 6 | Remote tracking | ⚠️ | 5 件（prune） |
+| 7 | Worktrees | ✅ | clean |
+| 8 | Submodules | ✅ | clean |
+| 9 | Tags | ✅ | clean |
+| 10 | My open PRs | ✅ | clean |
+| 11 | Issues assigned to me | ✅ | clean |
+| 12 | Review requests on me | ✅ | clean |
+| 13 | Recent failed actions | ⚠️ | 1 件（要対応） |
+| 14 | Draft releases | ✅ | clean |
+| 15 | Automation PRs | ✅ | clean |
 
 ## Stash (1)
 stash@{0}  18d  feat/x  WIP            → drop          │ apply --check failed (conflicts with HEAD)
@@ -356,44 +385,72 @@ origin/feat/old-5                       → prune
 25274616099  1d  Sync commons           → same as 24924393951
 25274622229  1d  Sync commons           → same as 24924393951
 25274636372  1d  Sync commons           → same as 24924393951
-
-## Clean (12)
-Interrupted git ops · Conflict markers · Working tree · Local branches ·
-Worktrees · Submodules · Tags · My open PRs · Issues assigned to me ·
-Review requests on me · Draft releases · Automation PRs
 ```
 
-注: 上記例では Phase 2 によって stash が `要確認 → drop` に格上げされ、CI failure 5 件が `要確認 → 要対応 (1 件) + same as ... (4 件)` に整理された結果、`要確認` ラベルが消えサマリ件数が減っている。
+注: Phase 2 によって stash が `要確認 → drop` に格上げされ、CI failure 5 件が `要確認 → 要対応 (1 件) + same as ... (4 件)` に整理された結果、ステータス表の Stash 詳細は `1 件（drop）`、Recent failed actions は `1 件（要対応）`（`same as` 行はカウント外）になる。
 
 ### 全 clean な場合の出力例
 
 ```text
-Status: all clean (15 areas)
-
-## Clean (15)
-Interrupted git ops · Conflict markers · Working tree · Stash · Local branches ·
-Remote tracking · Worktrees · Submodules · Tags · My open PRs ·
-Issues assigned to me · Review requests on me · Recent failed actions ·
-Draft releases · Automation PRs
+| # | 領域 | 状態 | 詳細 |
+|---|---|---|---|
+| 1 | Interrupted git ops | ✅ | clean |
+| 2 | Conflict markers | ✅ | clean |
+| 3 | Working tree | ✅ | clean |
+| 4 | Stash | ✅ | clean |
+| 5 | Local branches | ✅ | clean |
+| 6 | Remote tracking | ✅ | clean |
+| 7 | Worktrees | ✅ | clean |
+| 8 | Submodules | ✅ | clean |
+| 9 | Tags | ✅ | clean |
+| 10 | My open PRs | ✅ | clean |
+| 11 | Issues assigned to me | ✅ | clean |
+| 12 | Review requests on me | ✅ | clean |
+| 13 | Recent failed actions | ✅ | clean |
+| 14 | Draft releases | ✅ | clean |
+| 15 | Automation PRs | ✅ | clean |
 ```
 
 ### エラー時の出力例
 
-エラー / skip は **非 clean section として扱う**（clean 集約には入れない）:
+error / skipped は表で `❌` / `⏭️` アイコンと `error:` / `skipped:` 詳細列で示し、H2 section にも 1 行で再掲する:
 
 ```text
-Status: 2 areas need attention · 0 actions queued · 13 areas clean
-
-## Recent failed actions
-(skipped: detached HEAD)
+| # | 領域 | 状態 | 詳細 |
+|---|---|---|---|
+| 1 | Interrupted git ops | ✅ | clean |
+| 2 | Conflict markers | ✅ | clean |
+| 3 | Working tree | ✅ | clean |
+| 4 | Stash | ✅ | clean |
+| 5 | Local branches | ✅ | clean |
+| 6 | Remote tracking | ✅ | clean |
+| 7 | Worktrees | ✅ | clean |
+| 8 | Submodules | ✅ | clean |
+| 9 | Tags | ✅ | clean |
+| 10 | My open PRs | ❌ | error: gh not authenticated |
+| 11 | Issues assigned to me | ❌ | error: gh not authenticated |
+| 12 | Review requests on me | ❌ | error: gh not authenticated |
+| 13 | Recent failed actions | ⏭️ | skipped: detached HEAD |
+| 14 | Draft releases | ❌ | error: gh not authenticated |
+| 15 | Automation PRs | ❌ | error: gh not authenticated |
 
 ## My open PRs
 (error: gh not authenticated)
 
-## Clean (13)
-Interrupted git ops · Conflict markers · Working tree · Stash · Local branches ·
-Remote tracking · Worktrees · Submodules · Tags · Issues assigned to me ·
-Review requests on me · Draft releases · Automation PRs
+## Issues assigned to me
+(error: gh not authenticated)
+
+## Review requests on me
+(error: gh not authenticated)
+
+## Recent failed actions
+(skipped: detached HEAD)
+
+## Draft releases
+(error: gh not authenticated)
+
+## Automation PRs
+(error: gh not authenticated)
 ```
 
 ## エラーハンドリング
