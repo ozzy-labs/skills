@@ -30,7 +30,11 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 - **isolation:** `"worktree"`（必須）
 - **subagent_type:** `general-purpose`
-- **prompt:** `/drive #<N>[ --merge]` を実行させ、結果を JSON で返すよう指示する。subagent 内では引数 1 件のため自動的に単一モードに入る
+- **prompt:** subagent から slash command は呼べないため、`.agents/skills/drive/SKILL.md` を Read させ、target #N について単一モードのワークフロー（Phase 1-5）を実行するよう指示する。`--merge` 指定時は Phase 4 まで完了し、自 PR の merged まで polling して終了させる。最終結果は JSON で返させる
+- **依存元 wave がある場合のベースブランチ:**
+  - `--merge` 指定 + 依存元が merged → main から作成
+  - `--merge` 指定 + 依存元が auto-merge enabled（未マージ）→ main を pull してから作成（取り込まれていれば main ベース、未取り込みなら依存元 headRefName ベース）
+  - `--merge` 未指定 → 依存元 PR の headRefName をベースに stacked PR として作成
 - **並列起動:** 同一 wave 内の独立 subagent は **1 メッセージ複数 tool call** で並列起動する
 - **並列度:** `min(4, wave 内タスク数)`、`--concurrency N` で上書き、8 超は警告のみ
 - **wave 内タスク数 > 並列度:** semaphore 方式で空きスロット待ち（先に起動した subagent の完了を待ってから次を起動）
@@ -38,7 +42,7 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 ### 観測性
 
 - Phase 0 完了時に wave 構成と target リストを表示する
-- 各 subagent が PR を作成した時点で PR URL を即時中間出力（subagent の prompt にこの指示を含める）
+- `Agent` tool は最終結果のみを返すためストリーム的な中間報告は不可。親は wave 起動直後に `gh pr list --search "head:<prefix>" --state open` を定期実行し、新規 PR の URL を表示する
 - Phase Final で集約レポートを出力する
 
 ### 中断時
