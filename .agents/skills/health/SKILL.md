@@ -1,6 +1,6 @@
 ---
 name: health
-description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）を一発で確認し、各項目に固定語彙の推奨アクションを inline で付与して報告する。検査と提示のみで、削除・close 等の実行は行わない。
+description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）を一発で確認し、各項目に固定語彙の推奨アクションを inline で付与して報告する。`--deep` 指定時は `要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする。検査と提示のみで、削除・close 等の実行は行わない。
 ---
 
 # health - リポジトリ状態の確認と推奨アクション提示
@@ -11,15 +11,18 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 ## 入力
 
-引数なし。常に全 15 領域を確認する。
+- 引数なし → Phase 1 のみ実行（routine 互換、決定論的）
+- `--deep` → Phase 1 完了後、`要確認` フラグが付いた項目に Phase 2 の追加調査を行う（後述）
+
+`--deep` は明示時のみ有効。routine 経路（`/loop`, `schedule`）でも `--deep` がなければ Phase 1 のみ。
 
 ## 動作原則
 
-- **並列実行:** 全領域のチェックコマンドを **同一メッセージ内の複数 Bash 呼び出し** で並列起動する（直列実行は禁止）
+- **並列実行:** 全領域のチェックコマンドを **同一メッセージ内の複数 Bash 呼び出し** で並列起動する（直列実行は禁止）。Phase 2 の追加調査も同様に並列起動する
 - **per-check error handling:** あるチェックが失敗（gh 未認証、コマンド不在、network エラー等）しても他チェックは継続する。失敗した領域は section 内にエラー行を出力する
 - **対話禁止:** AskUserQuestion を使わない
-- **実行禁止:** 削除・drop・prune・close 等の解消アクションを実行しない（推奨を表示するのみ）
-- **推奨は固定語彙のみ:** 後述の語彙以外は使わない。Claude の自由判断で文言を生成しない
+- **実行禁止:** 削除・drop・prune・close 等の解消アクションを実行しない（推奨を表示するのみ）。Phase 2 でも read-only コマンドのみ
+- **推奨は固定語彙のみ:** 後述の語彙以外は使わない。Phase 2 でも語彙拡張はしない（既存ラベルへの書き換え or `要確認` 維持 + 根拠付与のみ）。Claude の自由判断で文言を生成しない
 - **section 順序固定:** Broken state → Local artifacts → Triage(mine) → Triage(automation) の順で出力する。順序が暗黙の優先度を表現する
 - **section 内ソート:** Routine 実行時の差分を安定化するため、各 section で **決定論的な順序** を採用する。具体的には:
   - 元コマンドが自然順を返すもの（`git stash list`, `git worktree list`, `git status -s`, `git submodule status`, `git tag -l`）は **元コマンドの順序を維持**
@@ -157,6 +160,61 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 - 各 PR について author 種別と経過日数を表示し、推奨アクション `要対応` を付与する
 - 該当なしの場合は section 自体を `(none)` で表示する
 
+## Phase 2: Investigation（`--deep` 時のみ）
+
+`--deep` 指定時、Phase 1 で `要確認` フラグが付いた項目に対し read-only な追加調査を行い、機械判定可能な範囲でラベルを格上げする。
+
+### 起動条件
+
+- `--deep` フラグ明示時のみ実行する。デフォルト無効
+- routine 経路（`/loop`, `schedule`）でも `--deep` がなければ起動しない（決定論性維持）
+- Phase 1 の出力に `要確認` が 0 件なら自動スキップする
+
+### 対象範囲
+
+Phase 1 で `要確認` が付いた項目のうち、機械判定可能なものに限定する。
+
+| 領域 | 調査コマンド（read-only） | ラベル更新ルール |
+|---|---|---|
+| 4. stash（14d+） | `git stash show -p stash@{N} \| git apply --check`（HEAD への clean apply 可否） | clean apply 不可 → `drop` に格上げ / 可能 → `要確認` 維持 |
+| 5. local branch（upstream なし、14d+） | `git cherry main <branch>`（main への取り込み判定） | 全 `-` 印（main 含み済み）→ `delete` に格上げ / それ以外 → `要確認` 維持 |
+| 5. local branch（merged PR + 追加 commit） | `git cherry main <branch>` 同上 | 全 `-` → `delete` に格上げ / それ以外 → `要確認` 維持 |
+| 13. failed CI run | `gh run view <id> --log-failed \| tail -200` | 同一エラー初発 → `要確認` 維持 + 「root cause: <1 行抜粋>」付与 / N (≥2) 連続発生 → `要対応` に格上げ + 「N 連続」付与 |
+
+### 対象外（Phase 2 でも `要確認` のまま、根拠も付与しない）
+
+| 領域 | 除外理由 |
+|---|---|
+| 2. conflict markers | fixture / docs を破壊するリスク。片側採用提案は scope 違反 |
+| 8. submodule 異常 | プロジェクト固有の判断必要。一般化した自動提案は誤誘導しやすい |
+| triviality / transient 等の主観判定全般 | LLM の苦手領域、誤判定で破壊的提案につながる |
+
+### 実行ルール
+
+- **対象絞り込み:** Phase 1 で `要確認` フラグが付いた項目のみ調査する（「最新 N 件」ではない）
+- **並列実行:** 全調査を **同一メッセージ内の複数 Bash 呼び出し** で並列起動する
+- **CI ログ取得上限:** 詳細ログ取得は **最大 3 件**。4 件目以降は最初の 1 件と同一エラーパターンか比較し、一致する場合は `same as <id>` と表示し詳細取得を省略する
+- **ログクリップ:** `gh run view --log-failed | tail -200` で末尾 200 行に制限する
+- **same-error 判定:** stderr 末尾の最終エラー行（`Error:` / `error:` / `failed` 等のパターン）が一致するかで dedup する
+
+### 語彙ポリシー
+
+- 既存固定語彙 8 種から拡張しない（`要対応: rerun` 等の verb 付き形式は採用しない）
+- Phase 2 の出力は次の 2 通りのみ:
+  - **ラベル書き換え:** `要確認` → `delete` / `drop` / `要対応` のいずれか
+  - **`要確認` 維持 + 根拠付与:** ラベルは変えず、項目末尾に `│ <1 行根拠>` を付与
+- 根拠は各項目の右端に `│ <text>` 形式で 1 行付与する（パイプ文字 `│` は U+2502、矢印 `→` の後ろにスペースを挟んで配置）
+
+### エラーハンドリング（Phase 2 固有）
+
+| 状況 | 動作 |
+|---|---|
+| `git apply --check` 自体が失敗（patch corrupt 等） | 該当 stash は `要確認` 維持 + 根拠 `│ patch unreadable` |
+| `gh run view --log-failed` が失敗 | 該当 run は `要確認` 維持 + 根拠 `│ log fetch failed` |
+| `git cherry` がエラー（base ref 不在等） | 該当 branch は `要確認` 維持 + 根拠 `│ cherry check failed` |
+
+Phase 2 のいずれかの調査が失敗しても他の調査は継続する。Phase 1 の出力は影響を受けない（書き換えがなければ Phase 1 ラベルがそのまま残る）。
+
 ## 明示的に除外する項目
 
 | 項目 | 除外理由 |
@@ -167,7 +225,34 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 ## 出力フォーマット
 
-markdown の H2 section を順に出力する。section 順序は固定:
+レポートは 3 ブロック構成:
+
+1. **サマリ行**（先頭固定 1 行）
+2. **非 clean section**（要対応事項のある領域のみ、compact list 形式）
+3. **Clean section 集約**（要対応事項のない領域を 1 ブロックにまとめる）
+
+### サマリ行
+
+レポート先頭に必ず 1 行出力する。
+
+```text
+Status: <N> areas need attention · <M> actions queued (<a> prune, <b> 要確認, ...) · <K> areas clean
+```
+
+- `<N>` = 非 clean section の数
+- `<M>` = 推奨アクション付き項目の総数
+- 内訳は付与されたラベルごとの件数を昇順固定（`abort or continue` / `delete` / `drop` / `fetch` / `prune` / `push` / `要対応` / `要確認` の順）で列挙する。0 件のラベルは省略する
+- `<K>` = clean section の数（空の場合は 0）
+
+全 section が clean なら:
+
+```text
+Status: all clean (15 areas)
+```
+
+### 非 clean section
+
+要対応事項のある領域のみ H2 section として出力する。section 順序は次の固定順から該当領域を抽出する:
 
 1. Interrupted git ops
 2. Conflict markers
@@ -185,88 +270,130 @@ markdown の H2 section を順に出力する。section 順序は固定:
 14. Draft releases
 15. Automation PRs
 
-各 section 内は「項目情報 → 推奨アクション」を 1 行 1 項目で表示し、推奨アクションは末尾に `→ <ラベル>` 形式で付与する（矢印の前に半角スペース）。
-
-該当なしの section は `(none)` を表示し、section 自体は省略しない（決定論的出力のため）。
-
-エラー section は `(error: <reason>)` を表示する。
-
-### 出力例
+各 section 内は **compact list 形式** で 1 行 1 項目を出力する:
 
 ```text
-## Interrupted git ops
-MERGE_HEAD                                → abort or continue
+## <Section name> (<count>)
+<item info>  → <label>  │ <Phase 2 rationale (--deep 時のみ)>
+```
 
-## Conflict markers
-src/foo.md:42                             → 要確認
+- 項目情報と推奨アクションの間は `→` で区切り、矢印の前後に半角スペースを 2 個ずつ挟む（列の整列と視認性のため）
+- Phase 2 で根拠が付与された項目は末尾に `│ <text>` を付与する。パイプ `│` の前にスペース 2 個、`<text>` の前にスペース 1 個を挟む。Phase 1 のみの場合は付与しない
+- `<count>` は section 内の項目数。section heading に件数のみ付与し、`(N → label)` 形式は採用しない（推奨アクションが mixed の場合に破綻するため）
+- 列の整列は agent が項目幅から決める。表形式（markdown table）は使わない（cell 幅と inline 根拠が衝突するため）
 
-## Working tree
- M src/foo.ts
-?? scripts/bar.sh
+エラー section は `(error: <reason>)` を 1 行表示する。skip section は `(skipped: <reason>)` を表示する。
 
-## Stash (2)
-stash@{0}  3d   feat/x      WIP          → drop
-stash@{1}  14d  main        temp fix     → 要確認
+### Clean section 集約
 
-## Local branches (3)
-feat/abandoned   no upstream, 21d         → 要確認
-feat/done        merged (PR #42)          → delete
-fix/bug          ahead 2, behind 5        → push
+clean な section（要対応事項なし）は最後に 1 ブロックにまとめる:
 
-## Remote tracking (gone)
-origin/feat/old-1                         → prune
-origin/feat/old-2                         → prune
+```text
+## Clean (<count>)
+<Section name 1> · <Section name 2> · ...
+```
 
-## Worktrees
-/tmp/wt-abc123   feat/abc (merged)        → prune
+- 集約ブロック内の項目順は **上記 1〜15 の固定順を維持**（決定論性）
+- セパレータは ` · `（U+00B7、前後に半角スペース）
+- 1 行が長い場合は折り返してよい（折り返し位置は agent が決める）
+- 全 section が clean な場合: `## Clean (15)` の下に 15 個全領域を列挙する
+- 全 section が非 clean な場合: clean section 自体を省略する
 
-## Submodules
-(none)
+### 出力例（Phase 1 のみ、引数なし）
 
-## Tags
-v0.2.0           local only                → push
-v0.3.0           remote only               → fetch
+```text
+Status: 4 areas need attention · 13 actions queued (5 prune, 5 要確認, 1 push, 2 要対応) · 11 areas clean
 
-## My open PRs (2)
-#101 draft 5d    fix: typo                → 要確認
-#102 awaiting    feat: add health         → 要対応
+## Stash (1)
+stash@{0}  18d  feat/x  WIP            → 要確認
 
-## Issues assigned to me (2)
-#50  open 12d    Bug in foo               → 要対応
-#51  open  3d    Feature X                → 要対応
+## Remote tracking (5)
+origin/feat/old-1                       → prune
+origin/feat/old-2                       → prune
+origin/feat/old-3                       → prune
+origin/feat/old-4                       → prune
+origin/feat/old-5                       → prune
 
-## Review requests on me (1)
-#88  open 2d     refactor auth            → 要対応
+## Tags (1)
+v0.2.0  local only                      → push
 
-## Recent failed actions
-fix/bug  2h ago  CI failure               → 要確認
+## Recent failed actions (5)
+24924393951  9d  Sync commons           → 要確認
+24971520228  7d  Sync commons           → 要確認
+25274616099  1d  Sync commons           → 要確認
+25274622229  1d  Sync commons           → 要確認
+25274636372  1d  Sync commons           → 要確認
 
-## Draft releases
-v1.0.0           draft, 7d                → 要対応
+## Automation PRs (2)
+#39  github-actions[bot]  1d  chore: sync commons defaults  → 要対応
+#1   github-actions[bot]  0d  chore(main): release 0.1.0    → 要対応
 
-## Automation PRs (3)
-#201 renovate    chore(deps): bump foo    → 要対応
-#202 dependabot  chore(deps): bump bar    → 要対応
-#203 release-please  chore: release 0.3.0 → 要対応
+## Clean (11)
+Interrupted git ops · Conflict markers · Working tree · Local branches ·
+Worktrees · Submodules · My open PRs · Issues assigned to me ·
+Review requests on me · Draft releases
+```
+
+### 出力例（`--deep` 時、Phase 2 適用後）
+
+```text
+Status: 3 areas need attention · 7 actions queued (5 prune, 1 drop, 1 要対応) · 12 areas clean
+
+## Stash (1)
+stash@{0}  18d  feat/x  WIP            → drop          │ apply --check failed (conflicts with HEAD)
+
+## Remote tracking (5)
+origin/feat/old-1                       → prune
+origin/feat/old-2                       → prune
+origin/feat/old-3                       → prune
+origin/feat/old-4                       → prune
+origin/feat/old-5                       → prune
+
+## Recent failed actions (5)
+24924393951  9d  Sync commons           → 要対応       │ rsync exit 23 (5 連続同一エラー)
+24971520228  7d  Sync commons           → same as 24924393951
+25274616099  1d  Sync commons           → same as 24924393951
+25274622229  1d  Sync commons           → same as 24924393951
+25274636372  1d  Sync commons           → same as 24924393951
+
+## Clean (12)
+Interrupted git ops · Conflict markers · Working tree · Local branches ·
+Worktrees · Submodules · Tags · My open PRs · Issues assigned to me ·
+Review requests on me · Draft releases · Automation PRs
+```
+
+注: 上記例では Phase 2 によって stash が `要確認 → drop` に格上げされ、CI failure 5 件が `要確認 → 要対応 (1 件) + same as ... (4 件)` に整理された結果、`要確認` ラベルが消えサマリ件数が減っている。
+
+### 全 clean な場合の出力例
+
+```text
+Status: all clean (15 areas)
+
+## Clean (15)
+Interrupted git ops · Conflict markers · Working tree · Stash · Local branches ·
+Remote tracking · Worktrees · Submodules · Tags · My open PRs ·
+Issues assigned to me · Review requests on me · Recent failed actions ·
+Draft releases · Automation PRs
 ```
 
 ### エラー時の出力例
 
+エラー / skip は **非 clean section として扱う**（clean 集約には入れない）:
+
 ```text
+Status: 2 areas need attention · 0 actions queued · 13 areas clean
+
 ## Recent failed actions
 (skipped: detached HEAD)
 
 ## My open PRs
 (error: gh not authenticated)
 
-## Issues assigned to me
-(error: gh not authenticated)
-
-## Submodules
-(none)
+## Clean (13)
+Interrupted git ops · Conflict markers · Working tree · Stash · Local branches ·
+Remote tracking · Worktrees · Submodules · Tags · Issues assigned to me ·
+Review requests on me · Draft releases · Automation PRs
 ```
-
-エラー / skip / 該当なしは section を省略せず、必ず 1 行で状態を表示する。
 
 ## エラーハンドリング
 
@@ -284,7 +411,8 @@ v1.0.0           draft, 7d                → 要対応
 ## 注意事項
 
 - `.env` ファイルは読み取らない
-- 削除・drop・prune・close 等の解消コマンドは **実行しない**（推奨表示のみ）
+- 削除・drop・prune・close 等の解消コマンドは **実行しない**（Phase 1/2 とも推奨表示のみ）
 - branch 削除推奨は `git branch -d`（safe）。force delete `-D` は推奨に含めない
 - severity ラベル（blocker / warning / info）は付与しない。section 順序が暗黙の優先度を表現する
-- 推奨アクション語彙は固定。新規追加は SKILL.md 改訂で行う
+- 推奨アクション語彙は固定。新規追加は SKILL.md 改訂で行う（Phase 2 でも語彙拡張はしない）
+- `--deep` は明示時のみ有効。routine 実行で Phase 2 を走らせたい場合も `--deep` の明示が必須
