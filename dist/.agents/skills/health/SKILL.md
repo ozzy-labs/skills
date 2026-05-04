@@ -73,13 +73,12 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 #### 5. local branch
 
 - コマンド: `git branch -vv` および `git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads/`
+- PR 検出（**1 度だけ batch 取得**）: `gh pr list --state all --json number,state,mergedAt,headRefName --limit 100` を 1 回実行し、client side で local branch 名と `headRefName` を join する（branch ごとに gh を呼ばない）
 - 各 branch について:
   - merged 済みの PR が存在 → `delete`（PR 番号を表示）
   - upstream なし、かつ最終 commit から 14 日以上 → `要確認`
   - ahead で未 push、関連 PR なし → `push`
   - それ以外 → 推奨なし
-
-PR 検出: `gh pr list --state all --head <branch> --json number,state,mergedAt --limit 1`
 
 #### 6. remote tracking
 
@@ -107,21 +106,19 @@ PR 検出: `gh pr list --state all --head <branch> --json number,state,mergedAt 
 
 #### 10. open PR (mine)
 
-- コマンド: `gh pr list --author @me --state open --json number,title,isDraft,reviewDecision,updatedAt`
+- コマンド: `gh pr list --author @me --state open --json number,title,isDraft,updatedAt`
 - 各 PR について:
   - draft → `要確認`
-  - reviewDecision が `REVIEW_REQUIRED` で 7 日以上経過 → `要対応`
-  - reviewDecision が `APPROVED` → `要対応`（マージ判断）
   - それ以外 → `要対応`
 
 #### 11. open issue (assigned to me)
 
 - コマンド: `gh issue list --assignee @me --state open --json number,title,updatedAt`
-- 各 issue を表示。14 日以上更新なし → `要対応`、それ以外も `要対応`
+- 各 issue を表示し、推奨アクション `要対応` を一律付与する。経過日数は表示行の補足情報として含める
 
 #### 12. review request (waiting on me)
 
-- コマンド: `gh pr list --search "review-requested:@me state:open" --json number,title,author,updatedAt`
+- コマンド: `gh pr list --search "is:open review-requested:@me" --json number,title,author,updatedAt`
 - 各 PR を表示し、推奨アクション `要対応` を付与する
 
 #### 13. recent failed actions
@@ -138,7 +135,12 @@ PR 検出: `gh pr list --state all --head <branch> --json number,state,mergedAt 
 
 #### 15. automation PR
 
-- コマンド: `gh pr list --state open --json number,title,author,updatedAt --search "author:app/renovate author:app/dependabot author:app/release-please"`
+- コマンド: `gh pr list --state open --limit 100 --json number,title,author,updatedAt`
+- **client side で author を判別**する（GitHub search の `author:` は OR 不可、AND になるため別アプローチを採る）。`author.login` が下記のパターンに一致するものを抽出:
+  - `app/renovate` / `renovate[bot]`
+  - `app/dependabot` / `dependabot[bot]`
+  - `app/release-please` / `release-please[bot]`
+  - その他 `*[bot]` または `app/*` 形式の機械作者
 - 各 PR について author 種別と経過日数を表示し、推奨アクション `要対応` を付与する
 - 該当なしの場合は section 自体を `(none)` で表示する
 
