@@ -17,7 +17,7 @@ The 11 common skills shared across all OzzyLabs repositories:
 | `commit` | Stage changes and create a Conventional Commit |
 | `commit-conventions` | Commit / branch / PR naming conventions |
 | `drive` | Issue → merge-ready PR autonomous loop |
-| `health` | Inspect repo state across 15 areas with inline recommended actions |
+| `health` | Inspect repo state across 15 areas with inline recommended actions (`--deep` for follow-up investigation of `要確認` items) |
 | `implement` | Branch creation and implementation from an issue or instructions |
 | `lint` | Run all linters with auto-fix |
 | `lint-rules` | Lint configuration reference |

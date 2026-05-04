@@ -17,7 +17,7 @@ OzzyLabs 全リポジトリ共通の 11 件:
 | `commit` | 変更をステージし Conventional Commits でコミット |
 | `commit-conventions` | コミット / ブランチ / PR の命名規則 |
 | `drive` | Issue → merge-ready な PR まで自律駆動するループ |
-| `health` | リポジトリ状態を 15 領域に渡って確認し、推奨アクションを inline 表示 |
+| `health` | リポジトリ状態を 15 領域に渡って確認し、推奨アクションを inline 表示（`--deep` で `要確認` 項目を追加調査） |
 | `implement` | Issue または指示をもとに、ブランチ作成・実装 |
 | `lint` | 全リンターを自動修正付きで実行 |
 | `lint-rules` | リンター設定リファレンス |
