@@ -175,9 +175,9 @@ wave を順に実行する。
 
 | 上流の状態 | downstream の扱い |
 |---|---|
-| merged（`--merge` 指定 + auto-merge 成功） | 進める（main ベース） |
-| auto-merge enabled（`--merge` + 即時マージ未完了） | 進める（main ベースだが未取り込み。git pull origin main 後にブランチを作る） |
-| merge-ready（`--merge` 未指定 / `--merge` 指定 + 残存指摘） | 進める（前段 PR の headRefName をベースに stacked PR） |
+| merged（`--merge` 指定 + auto-merge 成功） | 進める（`git pull origin main` 後に main ベース） |
+| auto-merge enabled（`--merge` + polling タイムアウト等で未マージ） | 進める（前段 PR の headRefName ベースで stacked PR） |
+| merge-ready（`--merge` 未指定 / `--merge` 指定 + 残存指摘） | 進める（前段 PR の headRefName ベースで stacked PR） |
 | failed | `skipped (upstream failed: #N)` として除外 |
 
 - 失敗した target は記録する
