@@ -77,11 +77,14 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 - コマンド: `git branch -vv` および `git for-each-ref --sort=committerdate --format='%(refname:short) %(upstream:track) %(committerdate:relative)' refs/heads/`（古い順）
 - PR 検出（**1 度だけ batch 取得**）: `gh pr list --state all --json number,state,mergedAt,headRefName --limit 100` を 1 回実行し、client side で local branch 名と `headRefName` を join する（branch ごとに gh を呼ばない）
 - 各 branch について:
-  - merged 済みの PR が存在 → `delete`（PR 番号を表示）
+  - merged 済みの PR が存在し、かつ merge base 以降に追加 commit が **ない** → `delete`（PR 番号を表示）
+  - merged 済みの PR が存在し、かつ merge base 以降に追加 commit が **ある** → `要確認`（PR 番号と追加 commit 数を表示。merge 後に作業継続したケース）
   - upstream なし、かつ最終 commit から 14 日以上 → `要確認`
   - upstream なし、かつ 1 commit 以上、かつ最終 commit から 14 日未満 → `push`（新規ブランチで未 push のケース）
   - upstream あり、ahead で未 push、関連 PR なし → `push`
   - それ以外 → 推奨なし
+
+「追加 commit の有無」の判定: PR の merge commit と local branch の `git rev-list --count <merge-commit>..<branch>` を比較し、結果が 0 なら追加なし、1 以上なら追加あり。
 
 #### 6. remote tracking
 
