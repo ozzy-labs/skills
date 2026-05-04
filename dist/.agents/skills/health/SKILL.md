@@ -21,7 +21,9 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 - **実行禁止:** 削除・drop・prune・close 等の解消アクションを実行しない（推奨を表示するのみ）
 - **推奨は固定語彙のみ:** 後述の語彙以外は使わない。Claude の自由判断で文言を生成しない
 - **section 順序固定:** Broken state → Local artifacts → Triage(mine) → Triage(automation) の順で出力する。順序が暗黙の優先度を表現する
-- **section 内ソート:** 古い順（最終更新が古いものほど上）で安定化させ、Routine 実行時の差分を意味あるものにする
+- **section 内ソート:** Routine 実行時の差分を安定化するため、各 section で **決定論的な順序** を採用する。具体的には:
+  - 元コマンドが自然順を返すもの（`git stash list`, `git worktree list`, `git status -s`, `git submodule status`, `git tag -l`）は **元コマンドの順序を維持**
+  - branch / PR / issue / failed run / draft release は **古い順（最終更新が古いものほど上）** で stale 項目を section 上部に集約する。具体的なソート方法は各 section で指定する（git は `--sort` 等のフラグ、gh は `--json` 結果の client side ソート）
 
 ## 推奨アクション語彙（固定）
 
@@ -72,12 +74,13 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 #### 5. local branch
 
-- コマンド: `git branch -vv` および `git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads/`
+- コマンド: `git branch -vv` および `git for-each-ref --sort=committerdate --format='%(refname:short) %(upstream:track) %(committerdate:relative)' refs/heads/`（古い順）
 - PR 検出（**1 度だけ batch 取得**）: `gh pr list --state all --json number,state,mergedAt,headRefName --limit 100` を 1 回実行し、client side で local branch 名と `headRefName` を join する（branch ごとに gh を呼ばない）
 - 各 branch について:
   - merged 済みの PR が存在 → `delete`（PR 番号を表示）
   - upstream なし、かつ最終 commit から 14 日以上 → `要確認`
-  - ahead で未 push、関連 PR なし → `push`
+  - upstream なし、かつ 1 commit 以上、かつ最終 commit から 14 日未満 → `push`（新規ブランチで未 push のケース）
+  - upstream あり、ahead で未 push、関連 PR なし → `push`
   - それ以外 → 推奨なし
 
 #### 6. remote tracking
@@ -107,6 +110,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 #### 10. open PR (mine)
 
 - コマンド: `gh pr list --author @me --state open --json number,title,isDraft,updatedAt`
+- **client side で `updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 PR について:
   - draft → `要確認`
   - それ以外 → `要対応`
@@ -114,22 +118,27 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 #### 11. open issue (assigned to me)
 
 - コマンド: `gh issue list --assignee @me --state open --json number,title,updatedAt`
+- **client side で `updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 issue を表示し、推奨アクション `要対応` を一律付与する。経過日数は表示行の補足情報として含める
 
 #### 12. review request (waiting on me)
 
 - コマンド: `gh pr list --search "is:open review-requested:@me" --json number,title,author,updatedAt`
+- **client side で `updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 PR を表示し、推奨アクション `要対応` を付与する
 
 #### 13. recent failed actions
 
-- コマンド: `gh run list --branch "$(git branch --show-current)" --status failure --limit 5 --json databaseId,name,conclusion,createdAt,url`
+- 前提: `git branch --show-current` で現在ブランチを取得する。空文字（detached HEAD）の場合は section に `(skipped: detached HEAD)` を表示し、コマンドを実行しない
+- コマンド: `gh run list --branch "<current-branch>" --status failure --limit 5 --json databaseId,name,conclusion,createdAt,url`
+- **client side で `createdAt` 昇順にソート**してから表示する（古いほど上）
 - 各 run を表示し、推奨アクション `要確認` を付与する
 
 #### 14. draft release
 
 - コマンド: `gh release list --limit 20 --json name,tagName,isDraft,createdAt`
-- isDraft=true のみ抽出して表示し、推奨アクション `要対応` を付与する
+- isDraft=true のみ抽出し、**client side で `createdAt` 昇順にソート**してから表示する
+- 推奨アクション `要対応` を付与する
 
 ### Triage（automation）
 
@@ -141,6 +150,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
   - `app/dependabot` / `dependabot[bot]`
   - `app/release-please` / `release-please[bot]`
   - その他 `*[bot]` または `app/*` 形式の機械作者
+- 抽出後、**`updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 PR について author 種別と経過日数を表示し、推奨アクション `要対応` を付与する
 - 該当なしの場合は section 自体を `(none)` で表示する
 
@@ -196,8 +206,8 @@ stash@{0}  3d   feat/x      WIP          → drop
 stash@{1}  14d  main        temp fix     → 要確認
 
 ## Local branches (3)
-feat/done        merged (PR #42)          → delete
 feat/abandoned   no upstream, 21d         → 要確認
+feat/done        merged (PR #42)          → delete
 fix/bug          ahead 2, behind 5        → push
 
 ## Remote tracking (gone)
@@ -237,6 +247,24 @@ v1.0.0           draft, 7d                → 要対応
 #203 release-please  chore: release 0.3.0 → 要対応
 ```
 
+### エラー時の出力例
+
+```text
+## Recent failed actions
+(skipped: detached HEAD)
+
+## My open PRs
+(error: gh not authenticated)
+
+## Issues assigned to me
+(error: gh not authenticated)
+
+## Submodules
+(none)
+```
+
+エラー / skip / 該当なしは section を省略せず、必ず 1 行で状態を表示する。
+
 ## エラーハンドリング
 
 | 状況 | 動作 |
@@ -246,6 +274,7 @@ v1.0.0           draft, 7d                → 要対応
 | `git` 個別コマンド失敗 | 該当 section に `(error: <stderr 1 行目>)` を表示し、他 section は継続する |
 | GitHub remote なし | Triage 系 5 section に `(error: no GitHub remote)` を表示し、git 系チェックは継続する |
 | network エラー | 該当 section に `(error: network)` を表示する |
+| detached HEAD | Section 13 に `(skipped: detached HEAD)` を表示し、他 section は継続する |
 
 全 section の実行は **失敗があっても中断しない**。
 
