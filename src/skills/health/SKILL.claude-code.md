@@ -1,5 +1,6 @@
 ---
 description: リポジトリ改修中に意図せず残る状態を 15 領域に渡って一発確認し、固定語彙の推奨アクションを inline 付与して報告する。`--deep` 指定時は `要確認` 項目を追加調査してラベルを格上げする。検査と提示のみで実行はしない。Routine 互換。
+argument-hint: "[--deep]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep
 ---
