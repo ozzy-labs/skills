@@ -42,7 +42,7 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 ### 観測性
 
 - Phase 0 完了時に wave 構成と target リストを表示する
-- `Agent` tool は最終結果のみを返すためストリーム的な中間報告は不可。親は wave 起動直後に `gh pr list --search "head:<prefix>" --state open` を定期実行し、新規 PR の URL を表示する
+- `Agent` tool は最終結果のみを返すためストリーム的な中間報告は不可。親は wave 起動時刻 `<T>` を ISO 8601 で記録し、30 秒間隔で `gh pr list --author @me --state open --search "created:>=<T>" --json number,url,headRefName,title` を polling する。既知 PR との差分から新規 PR を検出して URL を即時表示する
 - Phase Final で集約レポートを出力する
 
 ### 中断時

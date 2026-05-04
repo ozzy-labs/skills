@@ -162,8 +162,9 @@ wave を順に実行する。
 #### 観測性
 
 - `Agent` tool は subagent 完了時に最終結果のみを返すため、ストリーム的な中間報告は不可
-- 親は wave 起動直後に `gh pr list --search "head:<prefix>" --state open` を polling し、新規作成された PR の URL を表示する
-- subagent の最終 JSON 戻り値で全状態を確定する
+- 親は wave 起動時刻 `<T>` を ISO 8601 で記録し、30 秒間隔で `gh pr list --author @me --state open --search "created:>=<T>" --json number,url,headRefName,title` を polling する
+- 既知 PR との差分から新規作成 PR を検出し、URL を即時表示する
+- 全 subagent 完了時に最終 JSON 戻り値で状態を確定する
 
 #### wave 完了待ち
 
