@@ -23,7 +23,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 - **section 順序固定:** Broken state → Local artifacts → Triage(mine) → Triage(automation) の順で出力する。順序が暗黙の優先度を表現する
 - **section 内ソート:** Routine 実行時の差分を安定化するため、各 section で **決定論的な順序** を採用する。具体的には:
   - 元コマンドが自然順を返すもの（`git stash list`, `git worktree list`, `git status -s`, `git submodule status`, `git tag -l`）は **元コマンドの順序を維持**
-  - branch / PR / issue / failed run / draft release は **古い順（最終更新が古いものほど上）** で stale 項目を section 上部に集約
+  - branch / PR / issue / failed run / draft release は **古い順（最終更新が古いものほど上）** で stale 項目を section 上部に集約する。具体的なソート方法は各 section で指定する（git は `--sort` 等のフラグ、gh は `--json` 結果の client side ソート）
 
 ## 推奨アクション語彙（固定）
 
@@ -74,7 +74,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 #### 5. local branch
 
-- コマンド: `git branch -vv` および `git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads/`
+- コマンド: `git branch -vv` および `git for-each-ref --sort=committerdate --format='%(refname:short) %(upstream:track) %(committerdate:relative)' refs/heads/`（古い順）
 - PR 検出（**1 度だけ batch 取得**）: `gh pr list --state all --json number,state,mergedAt,headRefName --limit 100` を 1 回実行し、client side で local branch 名と `headRefName` を join する（branch ごとに gh を呼ばない）
 - 各 branch について:
   - merged 済みの PR が存在 → `delete`（PR 番号を表示）
@@ -110,6 +110,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 #### 10. open PR (mine)
 
 - コマンド: `gh pr list --author @me --state open --json number,title,isDraft,updatedAt`
+- **client side で `updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 PR について:
   - draft → `要確認`
   - それ以外 → `要対応`
@@ -117,23 +118,27 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 #### 11. open issue (assigned to me)
 
 - コマンド: `gh issue list --assignee @me --state open --json number,title,updatedAt`
+- **client side で `updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 issue を表示し、推奨アクション `要対応` を一律付与する。経過日数は表示行の補足情報として含める
 
 #### 12. review request (waiting on me)
 
 - コマンド: `gh pr list --search "is:open review-requested:@me" --json number,title,author,updatedAt`
+- **client side で `updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 PR を表示し、推奨アクション `要対応` を付与する
 
 #### 13. recent failed actions
 
 - 前提: `git branch --show-current` で現在ブランチを取得する。空文字（detached HEAD）の場合は section に `(skipped: detached HEAD)` を表示し、コマンドを実行しない
 - コマンド: `gh run list --branch "<current-branch>" --status failure --limit 5 --json databaseId,name,conclusion,createdAt,url`
+- **client side で `createdAt` 昇順にソート**してから表示する（古いほど上）
 - 各 run を表示し、推奨アクション `要確認` を付与する
 
 #### 14. draft release
 
 - コマンド: `gh release list --limit 20 --json name,tagName,isDraft,createdAt`
-- isDraft=true のみ抽出して表示し、推奨アクション `要対応` を付与する
+- isDraft=true のみ抽出し、**client side で `createdAt` 昇順にソート**してから表示する
+- 推奨アクション `要対応` を付与する
 
 ### Triage（automation）
 
@@ -145,6 +150,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
   - `app/dependabot` / `dependabot[bot]`
   - `app/release-please` / `release-please[bot]`
   - その他 `*[bot]` または `app/*` 形式の機械作者
+- 抽出後、**`updatedAt` 昇順にソート**してから表示する（古いほど上）
 - 各 PR について author 種別と経過日数を表示し、推奨アクション `要対応` を付与する
 - 該当なしの場合は section 自体を `(none)` で表示する
 
