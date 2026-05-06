@@ -4,20 +4,14 @@
 #   extends:
 #     - lefthook-base.yaml
 #
-# Then add repo-specific commands (biome, taplo, ruff, etc.)
-
-# Shared base config from commons
-# Extend this in your repo's lefthook.yaml:
-#
-#   extends:
-#     - lefthook-base.yaml
-#
 # Then add repo-specific commands (biome, ruff, etc.)
 #
 # All commands run via `mise exec --` so hooks succeed even when the calling
 # shell hasn't run `mise activate` (e.g. `bash -c 'git commit ...'`, IDE
 # integrations). See ozzy-labs/commons#117.
+
 glob_matcher: doublestar
+
 commit-msg:
   commands:
     commitlint:
@@ -27,6 +21,7 @@ commit-msg:
       run: |
         NODE_PATH="$(mise where npm:@commitlint/config-conventional 2>/dev/null)/lib/node_modules" \
           mise exec -- commitlint --edit {1}
+
 pre-commit:
   parallel: true
   commands:
@@ -42,11 +37,11 @@ pre-commit:
       glob: "**/*.{yaml,yml}"
       run: mise exec -- yamlfmt {staged_files} && mise exec -- yamllint -c .yamllint.yaml {staged_files}
       stage_fixed: true
-    gitleaks:
-      run: mise exec -- gitleaks protect --staged --no-banner
-    trivy:
-      run: mise exec -- trivy fs --scanners vuln,secret --exit-code 1 --no-progress .
     taplo:
       glob: "**/*.toml"
       run: mise exec -- taplo format {staged_files}
       stage_fixed: true
+    gitleaks:
+      run: mise exec -- gitleaks protect --staged --no-banner
+    trivy:
+      run: mise exec -- trivy fs --scanners vuln,secret --exit-code 1 --no-progress .
