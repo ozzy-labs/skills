@@ -1,11 +1,11 @@
 ---
 name: health
-description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）を一発で確認し、15 領域のステータス表で俯瞰しつつ各項目に固定語彙の推奨アクションを inline で付与して報告する。`--deep` 指定時は `要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする。検査と提示のみで、削除・close 等の実行は行わない。
+description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）と skill catalog 整合性を一発で確認し、16 領域のステータス表で俯瞰しつつ各項目に固定語彙の推奨アクションを inline で付与して報告する。`--deep` 指定時は `要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする。検査と提示のみで、削除・close 等の実行は行わない。
 ---
 
 # health - リポジトリ状態の確認と推奨アクション提示
 
-リポジトリ改修中に意図せず残る状態（中断中の git op、未 push commit、stale branch、open PR/issue、failed CI など）を 15 領域に渡って確認し、各項目に **固定語彙の推奨アクション** を inline で付与して報告する。
+リポジトリ改修中に意図せず残る状態（中断中の git op、未 push commit、stale branch、open PR/issue、failed CI など）と skill catalog の整合性を 16 領域に渡って確認し、各項目に **固定語彙の推奨アクション** を inline で付与して報告する。
 
 判断と実行はユーザーが行う。本スキルは検査と提示のみを担当し、削除・drop・prune・close 等は実行しない。
 
@@ -252,7 +252,7 @@ Phase 2 のいずれかの調査が失敗しても他の調査は継続する。
 
 レポートは 2 ブロック構成:
 
-1. **ステータス表**（先頭固定。15 領域を 1 表で俯瞰）
+1. **ステータス表**（先頭固定。16 領域を 1 表で俯瞰）
 2. **非 clean section**（要対応事項のある領域のみ、compact list 形式）
 
 ### ステータス表
