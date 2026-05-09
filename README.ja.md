@@ -17,12 +17,12 @@ OzzyLabs 全リポジトリ共通の 11 件:
 | `commit` | 変更をステージし Conventional Commits でコミット |
 | `commit-conventions` | コミット / ブランチ / PR の命名規則 |
 | `drive` | Issue → merge-ready な PR まで自律駆動するループ |
-| `health` | リポジトリ状態を 15 領域に渡って確認し、推奨アクションを inline 表示（`--deep` で `要確認` 項目を追加調査） |
+| `health` | リポジトリ状態と skill catalog 整合性を 16 領域に渡って確認し、推奨アクションを inline 表示（`--deep` で `要確認` 項目を追加調査） |
 | `implement` | Issue または指示をもとに、ブランチ作成・実装 |
 | `lint` | 全リンターを自動修正付きで実行 |
 | `lint-rules` | リンター設定リファレンス |
 | `pr` | 変更を push し PR を作成・更新 |
-| `review` | コード変更や PR をレビュー |
+| `review` | コード変更や PR を 11 観点（正確性 / セキュリティ / 規約 / アーキテクチャ / 互換性 / 保守性 / テスト / パフォーマンス / 可観測性 / ユーザビリティ / ドキュメント整合性）でレビュー。JSON 構造化出力を併載し、`drive` のループ終了判定を機械化する。`--axes` で自動選別を上書き、`--deep` で観点別 subagent 並列起動（Claude Code のみ） |
 | `ship` | lint + commit + PR 作成を一括実行 |
 | `test` | ビルド・テスト・型チェックを実行 |
 

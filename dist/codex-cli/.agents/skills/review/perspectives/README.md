@@ -27,17 +27,20 @@ review skill / `code-reviewer` agent が参照する観点定義の SSOT（[ADR-
 
 ```yaml
 ---
-name: <axis>                              # ファイル名と一致させる
+name: <axis>                                                    # ファイル名と一致させる
 category: required | design | quality | ux
 description: <一行で観点の主旨>
-applies_when: ["<glob>", ...]             # diff にこの glob にマッチするファイルが含まれれば適用
-skip_when:
-  diff_only_in: ["<glob>", ...]           # 全変更ファイルがこの glob 部分集合なら不適用
-default_enabled: true | false             # false の場合は --axes 明示時のみ適用
+applies_when: ["<glob>", ...]                                   # diff にこの glob にマッチするファイルが含まれれば適用
+skip_when: { diff_only_in: ["<glob>", ...] }                    # 全変更ファイルがこの glob 部分集合なら不適用
+default_enabled: true | false                                   # false の場合は --axes 明示時のみ適用
+severity_rules: { critical: "<...>", warning: "<...>", info: "<...>" }
+exit_criteria: { drive_loop: { critical: <N>, warning: <N> } }  # warning キーは省略可（許容を意味する）
 ---
 ```
 
-未定義キーは reader が無視する（forward-compat）。`severity_rules` と `exit_criteria.drive_loop` は本文で記述する。
+`skip_when` / `severity_rules` / `exit_criteria` は flow-style YAML の 1 行で記述する（既存の flat frontmatter parser と整合させるため）。本文には人間可読な severity ガイドや検査項目を冗長に記述してよいが、機械処理の SSOT は frontmatter とする。
+
+未定義キーは reader が無視する（forward-compat）。互換破壊的なスキーマ変更（必須キーの削除等）は ADR を起こす。
 
 ## 観点選別ロジック
 

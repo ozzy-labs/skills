@@ -3,9 +3,10 @@ name: documentation
 category: ux
 description: README・AGENTS.md・CLAUDE.md・SKILL.md・公開挙動の同期
 applies_when: ["**/*"]
-skip_when:
-  diff_only_in: []
+skip_when: { diff_only_in: [] }
 default_enabled: true
+severity_rules: { critical: "公開 API / 公開 CLI の変更がドキュメントに一切反映されておらず利用者が破壊される", warning: "README / SKILL.md / AGENTS.md の陳腐化、ADR と実装の乖離、誤ったサンプル", info: "ドキュメント追記の提案、説明の改善、表記揺れの統一" }
+exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
 # documentation — ドキュメント整合性

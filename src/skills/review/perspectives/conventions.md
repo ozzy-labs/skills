@@ -4,6 +4,8 @@ category: required
 description: Conventional Commits、lint、ファイル命名、`.yaml` 統一などのリポジトリ規約
 applies_when: ["**/*"]
 default_enabled: true
+severity_rules: { critical: "コミット / PR タイトルが Conventional Commits 違反 (commitlint で fail)、main への直接 push、--no-verify 利用", warning: "lint / formatter 違反、命名規約違反、.yaml / .yml 不整合", info: "より明示的な書き方への改善提案、命名の細かな統一" }
+exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
 # conventions — コーディング規約

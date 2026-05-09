@@ -3,9 +3,10 @@ name: observability
 category: quality
 description: エラー文脈・ログ・失敗時の手がかり
 applies_when: ["src/**", "scripts/**", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "**/*.py", "**/*.sh"]
-skip_when:
-  diff_only_in: ["**/*.md", "docs/**", "tests/**", "**/*.test.*", "**/*.yaml", "**/*.yml", "**/*.json"]
+skip_when: { diff_only_in: ["**/*.md", "docs/**", "tests/**", "**/*.test.*", "**/*.yaml", "**/*.yml", "**/*.json"] }
 default_enabled: true
+severity_rules: { critical: "失敗時に何も情報が出ず原因特定不可能、本番で silent failure になる経路", warning: "エラーメッセージが薄い、ログ過剰 / 不足、エラー種別の取り違え", info: "より親切なメッセージ、log level の調整提案" }
+exit_criteria: { drive_loop: { critical: 0 } }
 ---
 
 # observability — 可観測性

@@ -3,9 +3,10 @@ name: testing
 category: quality
 description: 新コードのカバレッジ、回帰リスク、bats / Vitest / node:test の妥当性
 applies_when: ["src/**", "scripts/**", "tests/**", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "**/*.py", "**/*.sh"]
-skip_when:
-  diff_only_in: ["**/*.md", "docs/**", "**/*.yaml", "**/*.yml", "**/*.json"]
+skip_when: { diff_only_in: ["**/*.md", "docs/**", "**/*.yaml", "**/*.yml", "**/*.json"] }
 default_enabled: true
+severity_rules: { critical: "公開 API / バグ修正にテストがない、既存テストを根拠なく削除、tautology テスト", warning: "エッジケースの取りこぼし、不安定なテスト (flaky)、mock 過剰", info: "より良いアサーション、テストの整理 / 命名改善" }
+exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
 # testing — テスト

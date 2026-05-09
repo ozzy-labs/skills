@@ -3,9 +3,10 @@ name: performance
 category: quality
 description: hot path、不要な逐次 I/O、メモリ
 applies_when: ["src/**", "scripts/**", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "**/*.py"]
-skip_when:
-  diff_only_in: ["**/*.md", "docs/**", "tests/**", "**/*.test.*", "**/*.yaml", "**/*.yml", "**/*.json"]
+skip_when: { diff_only_in: ["**/*.md", "docs/**", "tests/**", "**/*.test.*", "**/*.yaml", "**/*.yml", "**/*.json"] }
 default_enabled: true
+severity_rules: { critical: "顕著な性能退行、production で UX を損なう規模のリグレッション、無限ループ", warning: "hot path 上の非効率、逐次 I/O、明らかな再計算", info: "軽微な最適化提案、cache 化候補" }
+exit_criteria: { drive_loop: { critical: 0 } }
 ---
 
 # performance — パフォーマンス

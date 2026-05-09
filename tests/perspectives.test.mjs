@@ -32,17 +32,66 @@ test("perspectives directory exists with at least one axis file", async () => {
 
 test("each perspective MD has required frontmatter keys", async () => {
   const axes = await listAxes();
+  // Match Issue #59 scope: name, category, description, applies_when,
+  // default_enabled, severity_rules, exit_criteria. (skip_when is optional —
+  // required-category axes need no skip rules.)
+  const required = [
+    "name",
+    "category",
+    "description",
+    "applies_when",
+    "default_enabled",
+    "severity_rules",
+    "exit_criteria",
+  ];
   for (const filename of axes) {
     const path = join(PERSPECTIVES_DIR, filename);
     const raw = await readFile(path, "utf8");
     const label = `src/skills/review/perspectives/${filename}`;
     const { frontmatter } = parseSkillDocument(raw, label);
-    for (const key of ["name", "category", "description"]) {
+    for (const key of required) {
       assert.ok(
         frontmatter[key] && frontmatter[key].length > 0,
         `${label}: missing required frontmatter key '${key}'`,
       );
     }
+  }
+});
+
+test("severity_rules frontmatter mentions all three severities", async () => {
+  const axes = await listAxes();
+  for (const filename of axes) {
+    const path = join(PERSPECTIVES_DIR, filename);
+    const raw = await readFile(path, "utf8");
+    const label = `src/skills/review/perspectives/${filename}`;
+    const { frontmatter } = parseSkillDocument(raw, label);
+    for (const sev of ["critical", "warning", "info"]) {
+      assert.match(
+        frontmatter.severity_rules,
+        new RegExp(`\\b${sev}\\b`),
+        `${label}: severity_rules must declare '${sev}'`,
+      );
+    }
+  }
+});
+
+test("exit_criteria frontmatter declares drive_loop", async () => {
+  const axes = await listAxes();
+  for (const filename of axes) {
+    const path = join(PERSPECTIVES_DIR, filename);
+    const raw = await readFile(path, "utf8");
+    const label = `src/skills/review/perspectives/${filename}`;
+    const { frontmatter } = parseSkillDocument(raw, label);
+    assert.match(
+      frontmatter.exit_criteria,
+      /drive_loop\s*:/,
+      `${label}: exit_criteria must declare drive_loop`,
+    );
+    assert.match(
+      frontmatter.exit_criteria,
+      /critical\s*:/,
+      `${label}: exit_criteria.drive_loop must declare critical threshold`,
+    );
   }
 });
 

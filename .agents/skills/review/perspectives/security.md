@@ -4,6 +4,8 @@ category: required
 description: 注入・秘密情報露出・権限昇格・サプライチェーン・スクリプト実行
 applies_when: ["**/*"]
 default_enabled: true
+severity_rules: { critical: "悪用可能な脆弱性、明示的な秘密情報の commit、認証回避、任意コード実行", warning: "防御層の欠落、未サニタイズ入力、過剰な権限、暗黙の信頼境界", info: "改善余地のある defensive coding、CSP / セキュリティヘッダの強化提案" }
+exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
 # security — セキュリティ
