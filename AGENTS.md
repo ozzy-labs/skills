@@ -40,6 +40,8 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 
 - `src/skills/{name}/SKILL.md` — 正準スキル（編集はここ）
 - `src/skills/{name}/SKILL.claude-code.md` — Claude Code 固有 wrapper（任意）。companion 仕様は README.md を参照
+- `src/skills/{name}/<extra>.md` — 任意の skill 内アセット（例: `review/perspectives/<axis>.md`）。`SKILL.md` / `SKILL.{adapter}.md` 以外のファイルは全配信先（`.claude/skills/{name}/<extra>.md`, `.agents/skills/{name}/<extra>.md` 等）に verbatim でコピーされる
+- `src/agents/{name}.md` — Claude Code 専用 agent（[ADR-0026](https://github.com/ozzy-labs/handbook/blob/main/adr/0026-agent-distribution-via-skills-sync.md)）。`dist/claude-code/.claude/agents/{name}.md` のみに出力される
 - `dist/.agents/skills/{name}/SKILL.md` — npm payload / Renovate consumer 向けビルド出力（commit 対象）
 - `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）
 - `dist/sync/replace-snippet.sh` — 下流 sync workflow 向けマーカー間置換ヘルパー（マーカー欠落時は append でフォールバック）

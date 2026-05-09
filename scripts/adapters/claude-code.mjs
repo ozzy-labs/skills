@@ -13,6 +13,11 @@
 // absent, the canonical SKILL.md is passed through — preserving the
 // pre-companion behavior.
 //
+// The adapter also emits any non-SKILL.* extra files shipped with a skill
+// (e.g. `perspectives/<axis>.md` for the review skill — ADR-0025) and
+// project-level Claude Code agents under `.claude/agents/<name>.md`
+// (ADR-0026). Agents are Claude Code only — other adapters ignore them.
+//
 // Reference: https://docs.claude.com/en/docs/claude-code/skills
 
 import { AdapterBase } from "../lib/adapter-base.mjs";
@@ -20,7 +25,9 @@ import { assertRequiredFields } from "../lib/frontmatter.mjs";
 
 /**
  * @typedef {import("../lib/types.mjs").Skill} Skill
+ * @typedef {import("../lib/types.mjs").Agent} Agent
  * @typedef {import("../lib/types.mjs").OutputFile} OutputFile
+ * @typedef {import("../lib/types.mjs").GenerateOptions} GenerateOptions
  */
 
 export class ClaudeCodeAdapter extends AdapterBase {
@@ -28,11 +35,13 @@ export class ClaudeCodeAdapter extends AdapterBase {
 
   /**
    * @param {Skill[]} skills
+   * @param {GenerateOptions} [options]
    * @returns {Promise<OutputFile[]>}
    */
-  async generate(skills) {
-    const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name));
-    return sorted.map((skill) => {
+  async generate(skills, options = {}) {
+    const sortedSkills = [...skills].sort((a, b) => a.name.localeCompare(b.name));
+    const outputs = [];
+    for (const skill of sortedSkills) {
       const canonicalLabel = `src/skills/${skill.name}/SKILL.md`;
       assertRequiredFields(skill.frontmatter, ["name", "description"], canonicalLabel);
 
@@ -40,16 +49,33 @@ export class ClaudeCodeAdapter extends AdapterBase {
       if (companion) {
         const label = `src/skills/${skill.name}/SKILL.claude-code.md`;
         assertRequiredFields(companion.frontmatter, ["description"], label);
-        return {
+        outputs.push({
           relativePath: `.claude/skills/${skill.name}/SKILL.md`,
           content: companion.raw,
-        };
+        });
+      } else {
+        outputs.push({
+          relativePath: `.claude/skills/${skill.name}/SKILL.md`,
+          content: skill.raw,
+        });
       }
+      for (const extra of skill.extraFiles ?? []) {
+        outputs.push({
+          relativePath: `.claude/skills/${skill.name}/${extra.relativePath}`,
+          content: extra.content,
+        });
+      }
+    }
 
-      return {
-        relativePath: `.claude/skills/${skill.name}/SKILL.md`,
-        content: skill.raw,
-      };
-    });
+    const agents = [...(options.agents ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    for (const agent of agents) {
+      const label = `src/agents/${agent.name}.md`;
+      assertRequiredFields(agent.frontmatter, ["name", "description", "tools"], label);
+      outputs.push({
+        relativePath: `.claude/agents/${agent.name}.md`,
+        content: agent.raw,
+      });
+    }
+    return outputs;
   }
 }
