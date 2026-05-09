@@ -17,12 +17,12 @@ The 11 common skills shared across all OzzyLabs repositories:
 | `commit` | Stage changes and create a Conventional Commit |
 | `commit-conventions` | Commit / branch / PR naming conventions |
 | `drive` | Issue → merge-ready PR autonomous loop |
-| `health` | Inspect repo state across 15 areas with inline recommended actions (`--deep` for follow-up investigation of `要確認` items) |
+| `health` | Inspect repo state and skill catalog consistency across 16 areas with inline recommended actions (`--deep` for follow-up investigation of `要確認` items) |
 | `implement` | Branch creation and implementation from an issue or instructions |
 | `lint` | Run all linters with auto-fix |
 | `lint-rules` | Lint configuration reference |
 | `pr` | Push changes and open or update a PR |
-| `review` | Review code changes or pull requests |
+| `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
 | `ship` | Lint + commit + PR creation in one go |
 | `test` | Run build, tests, and type checks |
 

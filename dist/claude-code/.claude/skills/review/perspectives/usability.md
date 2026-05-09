@@ -3,9 +3,10 @@ name: usability
 category: ux
 description: CLI 文言・エラーメッセージ・skill argument-hint・README 即座理解性
 applies_when: ["src/**", "**/*.md", "**/SKILL.md", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "**/*.py", "**/*.sh"]
-skip_when:
-  diff_only_in: ["tests/**", "**/*.test.*"]
+skip_when: { diff_only_in: ["tests/**", "**/*.test.*"] }
 default_enabled: true
+severity_rules: { critical: "ユーザーが詰まる致命的な UX 不備 (無限ループ的な確認、復旧不可能な操作の無確認実行)", warning: "紛らわしいメッセージ、誤解を招く CLI 文言、argument-hint の欠落", info: "より親切な文言、説明追記、UX の細かな改善" }
+exit_criteria: { drive_loop: { critical: 0 } }
 ---
 
 # usability — ユーザビリティ / DX

@@ -4,6 +4,8 @@ category: required
 description: ロジック誤り・エッジケース・並行性・エラーハンドリング
 applies_when: ["**/*"]
 default_enabled: true
+severity_rules: { critical: "悪用・データ破壊・誤った状態遷移・無限ループ・回帰の温床になり得るバグ", warning: "通常パスは動くが特定入力で破綻するケース、未処理の例外", info: "防御的コーディングの改善余地、より堅牢な書き方の提案" }
+exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
 # correctness — 正確性

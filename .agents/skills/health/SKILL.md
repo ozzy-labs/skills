@@ -172,11 +172,13 @@ review skill が参照する `src/skills/review/perspectives/<axis>.md`（[ADR-0
   - `.agents/skills/review/perspectives/<axis>.md`（codex / gemini 配信先）
 - 検査項目（順に実施）:
   1. SSOT に存在する `<axis>.md` のうち `README.md` 以外を列挙する
-  2. 各観点 MD の frontmatter に **必須キー** `name`, `category`, `description` が揃っているか確認する
+  2. 各観点 MD の frontmatter に **必須キー** `name`, `category`, `description`, `applies_when`, `default_enabled`, `severity_rules`, `exit_criteria` が揃っているか確認する（`skip_when` は任意）
   3. `name` がファイル名（拡張子なし）と一致するか
   4. `category` が `required` / `design` / `quality` / `ux` のいずれかか
   5. `applies_when` / `skip_when.diff_only_in` の各 glob が文字列として有効か（空でない、`/` ではじまらない、改行を含まない）
-  6. SSOT と配信先のファイル一覧が一致しているか（drift があれば `pnpm run build` の取り違えを示唆）
+  6. `severity_rules` に `critical` / `warning` / `info` の 3 段階がすべて含まれているか
+  7. `exit_criteria.drive_loop` に少なくとも `critical` の許容しきい値が含まれているか
+  8. SSOT と配信先のファイル一覧が一致しているか（drift があれば `pnpm run build` の取り違えを示唆）
 - 推奨アクション:
   - 必須キー欠落 / 値不正 → `要確認`（観点 MD の frontmatter を修正）
   - SSOT と配信先の drift → `要確認`（`pnpm run build` を実行して再生成）

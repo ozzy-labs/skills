@@ -3,9 +3,10 @@ name: maintainability
 category: design
 description: 命名・複雑度・dead code・コメント負債
 applies_when: ["src/**", "scripts/**", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "**/*.py", "**/*.sh"]
-skip_when:
-  diff_only_in: ["**/*.md", "docs/**", "**/*.yaml", "**/*.yml", "**/*.json"]
+skip_when: { diff_only_in: ["**/*.md", "docs/**", "**/*.yaml", "**/*.yml", "**/*.json"] }
 default_enabled: true
+severity_rules: { critical: "取り返しのつかない命名 / 構造の選択 (公開 API として固定される名称等)", warning: "顕著な dead code、過剰な複雑度、誤解を招く命名、明らかな重複", info: "命名の細かな改善、コメント整理、軽微なリファクタ提案" }
+exit_criteria: { drive_loop: { critical: 0 } }
 ---
 
 # maintainability — 保守性

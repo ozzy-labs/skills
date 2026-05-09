@@ -3,9 +3,10 @@ name: compatibility
 category: design
 description: 後方互換、スキーマ変更、commons-sync 経由のコンシューマ影響
 applies_when: ["src/**", "scripts/**", "dist/**", "package.json", "**/*.json", "**/*.yaml", "**/*.yml", "**/SKILL.md"]
-skip_when:
-  diff_only_in: ["tests/**", "**/*.test.*"]
+skip_when: { diff_only_in: ["tests/**", "**/*.test.*"] }
 default_enabled: true
+severity_rules: { critical: "既存コンシューマが破壊される非互換変更 (rename / 削除 / 型変更) で migration path や CHANGELOG への記載がない", warning: "互換性は保てるがコンシューマ側で対応が必要、または default 変更で挙動が変わる", info: "より丁寧な deprecation の提案、注意喚起" }
+exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
 # compatibility — 互換性

@@ -3,9 +3,10 @@ name: architecture
 category: design
 description: レイヤリング・責務配置・抽象度・既存パターン整合
 applies_when: ["src/**", "scripts/**", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "**/*.py"]
-skip_when:
-  diff_only_in: ["**/*.md", "docs/**", "**/*.yaml", "**/*.yml", "**/*.json"]
+skip_when: { diff_only_in: ["**/*.md", "docs/**", "**/*.yaml", "**/*.yml", "**/*.json"] }
 default_enabled: true
+severity_rules: { critical: "既存アーキテクチャ判断 (ADR 等) に明確に反する、取り返しがつかない構造変更", warning: "責務違反、循環依存、既存パターンを破る無理筋、保守性を著しく下げる構造", info: "より良い分離・命名・抽象度の提案、リファクタリング候補" }
+exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
 # architecture — アーキテクチャ
