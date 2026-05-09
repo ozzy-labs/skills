@@ -1,6 +1,6 @@
 ---
 description: Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。
-argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N]
+argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N] [--review=quick|final-deep|deep]
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent
 ---
@@ -15,10 +15,16 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 ### 入力解析
 
-`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`）を特定する。
+`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`, `--review=<mode>`）を特定する。
 
 - target が 1 件かつ依存記法（`->`）なし → 単一モード
 - target が 2 件以上、または依存記法あり → オーケストレーションモード
+
+`--review` の取り扱い:
+
+- 既定は `quick`
+- 単一モード: `quick` / `final-deep` / `deep` をすべて受け付ける
+- オーケストレーションモード: `--review=quick` を強制し、`final-deep` / `deep` 指定時は警告を表示して `quick` にフォールバックする（コスト管理）
 
 ### 自律実行
 

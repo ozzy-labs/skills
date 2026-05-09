@@ -44,7 +44,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 「閾値より古い」の目安は 14 日。
 
-## チェック対象（15 領域）
+## チェック対象（16 領域）
 
 各領域について「コマンド」「推奨アクションの判定ルール」を定義する。
 
@@ -160,6 +160,30 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 - 各 PR について author 種別と経過日数を表示し、推奨アクション `要対応` を付与する
 - 該当なしの場合は section 自体を `(none)` で表示する
 
+### Skill catalog consistency
+
+#### 16. perspective MD frontmatter
+
+review skill が参照する `src/skills/review/perspectives/<axis>.md`（[ADR-0025](https://github.com/ozzy-labs/handbook/blob/main/adr/0025-skills-review-multi-perspective.md)）の frontmatter スキーマと glob 妥当性を検証する。配信先（`.claude/skills/review/perspectives/` および `.agents/skills/review/perspectives/`）にも同じファイルが揃っているかを確認する。
+
+- 検査対象ディレクトリ:
+  - `src/skills/review/perspectives/<axis>.md`（SSOT）
+  - `.claude/skills/review/perspectives/<axis>.md`（Claude Code 配信先）
+  - `.agents/skills/review/perspectives/<axis>.md`（codex / gemini 配信先）
+- 検査項目（順に実施）:
+  1. SSOT に存在する `<axis>.md` のうち `README.md` 以外を列挙する
+  2. 各観点 MD の frontmatter に **必須キー** `name`, `category`, `description` が揃っているか確認する
+  3. `name` がファイル名（拡張子なし）と一致するか
+  4. `category` が `required` / `design` / `quality` / `ux` のいずれかか
+  5. `applies_when` / `skip_when.diff_only_in` の各 glob が文字列として有効か（空でない、`/` ではじまらない、改行を含まない）
+  6. SSOT と配信先のファイル一覧が一致しているか（drift があれば `pnpm run build` の取り違えを示唆）
+- 推奨アクション:
+  - 必須キー欠落 / 値不正 → `要確認`（観点 MD の frontmatter を修正）
+  - SSOT と配信先の drift → `要確認`（`pnpm run build` を実行して再生成）
+  - すべて整合 → 推奨なし（情報のみ表示）
+
+新しい観点 MD を追加した直後は **必ず本領域を確認** すること。SSOT のみで配信先に drift がある場合、review skill / `code-reviewer` agent が古い観点定義を読む。
+
 ## Phase 2: Investigation（`--deep` 時のみ）
 
 `--deep` 指定時、Phase 1 で `要確認` フラグが付いた項目に対し read-only な追加調査を行い、機械判定可能な範囲でラベルを格上げする。
@@ -233,7 +257,7 @@ Phase 2 のいずれかの調査が失敗しても他の調査は継続する。
 
 ### ステータス表
 
-レポート先頭に必ず 15 行のテーブルを出力する。行順は固定（後述の section 順）で、ステータスアイコンと詳細列で各領域の状態を 1 行ずつ示す。
+レポート先頭に必ず 16 行のテーブルを出力する。行順は固定（後述の section 順）で、ステータスアイコンと詳細列で各領域の状態を 1 行ずつ示す。
 
 ```text
 | # | 領域 | 状態 | 詳細 |
@@ -242,6 +266,7 @@ Phase 2 のいずれかの調査が失敗しても他の調査は継続する。
 | 2 | Conflict markers | <icon> | <detail> |
 | ... | ... | ... | ... |
 | 15 | Automation PRs | <icon> | <detail> |
+| 16 | Perspective MD frontmatter | <icon> | <detail> |
 ```
 
 #### ステータスアイコン（固定）
@@ -286,6 +311,7 @@ Phase 2 のいずれかの調査が失敗しても他の調査は継続する。
 13. Recent failed actions
 14. Draft releases
 15. Automation PRs
+16. Perspective MD frontmatter
 
 各 section 内は **compact list 形式** で 1 行 1 項目を出力する:
 
