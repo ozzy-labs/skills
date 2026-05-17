@@ -1,6 +1,6 @@
 {
   "name": "@ozzylabs/skills",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Canonical OzzyLabs agent skill bundle. Distributed via Renovate sync (dist/) and published to npm for programmatic access.",
   "type": "module",
   "exports": {
