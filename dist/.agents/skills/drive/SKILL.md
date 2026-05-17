@@ -102,6 +102,7 @@ review skill の観点別 `exit_criteria.drive_loop` を集約して終了判定
 `--merge` 指定時に実行する。
 
 1. **Auto-merge の有効化:** `gh pr merge --auto --squash --delete-branch` を実行する
+   - **subagent として単一モードを実行する場合は `--delete-branch` を省略する:** 自 worktree が当該 branch を握っているため `fatal: '<branch>' is already used by worktree at ...` エラーになる。ローカル branch / worktree の整理は親側 Phase Final で一括処理する（[Issue #69](https://github.com/ozzy-labs/skills/issues/69)）
 2. **成否の確認:**
    - 成功（Auto-merge がセットされた、または即時マージされた）→ 次へ
    - 失敗（Auto-merge がリポジトリで無効など）→ ユーザーに通知し、手動マージを促す（状態を `merge-ready` にする）
@@ -169,6 +170,7 @@ wave を順に実行する。
 - **隔離:** worktree 隔離で起動する（必須。並列実行時の作業ディレクトリ衝突防止）
 - **委譲粒度:** subagent には `.agents/skills/drive/SKILL.md` を Read させ、target #N について単一モードのワークフロー（Phase 1-5）を実行するよう指示する。slash command は subagent からは呼べないため、SKILL.md を直接実行する
 - **main への checkout 禁止:** subagent は自 worktree branch で完結する。`git checkout main` / `git switch main` / `git checkout HEAD~` 等で worktree の HEAD を移動させない。worktree は親の Phase Final で削除されるため、main へ戻す必要はない。共有 git directory 経由で親 worktree の `HEAD` / `index` が汚染されるリスクを避けるため、自 branch 以外を触らないこと
+- **`--delete-branch` 禁止:** subagent が `gh pr merge` を呼ぶ際、`--delete-branch` フラグは使わない。自 worktree が当該 branch を握っているため `fatal: '<branch>' is already used by worktree at ...` エラーになり、リモート merge は成功するがローカル branch が中途半端に残る。ローカル branch / worktree の整理は親の Phase Final で一括処理する（[Issue #69](https://github.com/ozzy-labs/skills/issues/69)）
 - **ベースブランチ:**
   - 依存元 wave がない target → main からブランチを作る
   - 依存元 wave がある target → 依存元 PR の `headRefName` をベースにブランチを作る（stacked PR）。`--merge` 指定時は依存元がマージ済みのため main をベースにできるが、未指定時はこの stacked 構造が必須
@@ -220,7 +222,11 @@ wave を順に実行する。
 
 ### Phase Final: 集約レポート
 
-集約レポートを出力する前に、**親 worktree の整合性を確認する**。subagent が共有 git directory 経由で親の `HEAD` / `index` を汚染するケースに備えるための fail-safe（[Issue #66](https://github.com/ozzy-labs/skills/issues/66) 由来）。
+Phase Final は次の 3 ステップで構成する。順に実行する。
+
+#### Phase Final-1: 親 worktree 整合性チェック
+
+subagent が共有 git directory 経由で親の `HEAD` / `index` を汚染するケースに備えるための fail-safe（[Issue #66](https://github.com/ozzy-labs/skills/issues/66) 由来）。
 
 1. `git rev-parse HEAD` と `git rev-parse $(git symbolic-ref HEAD)` が一致するか（HEAD が detached でないこと）
 2. `git diff HEAD --stat` が空か（index が HEAD と乖離していないか）
@@ -241,7 +247,41 @@ wave を順に実行する。
     git reset --hard origin/main
 ```
 
-整合性チェックが通った場合は、通常どおり集約レポートを出力する:
+#### Phase Final-2: subagent worktree cleanup
+
+**今回の drive 実行で起動した subagent** の worktree と関連 local branch をクリーンアップする（[Issue #69](https://github.com/ozzy-labs/skills/issues/69) 由来）。今回の実行外の orphan worktree (前回の異常終了で残ったもの等) は対象外。orphan の検出・整理は `/health` 領域 #7 に委譲する（[Issue #71](https://github.com/ozzy-labs/skills/issues/71)）。
+
+1. 今回起動した subagent のリストを保持する。各 subagent の worktree パス（`.claude/worktrees/agent-<id>/`）と戻り値 `status` をひとまず控える
+2. 各 subagent について `status` を参照して扱いを分岐:
+   - **`merged`**: cleanup 対象（リモート merge 完了済み、ローカル iterate 不要）
+     - `git worktree list --porcelain` で当該 worktree が握っている branch を取得する（パターンマッチに頼らない）
+     - `git worktree remove -f -f <path>` を実行する（`-f -f` の二重 force は Claude Code harness の `lock` 解除のため必須）
+     - 取得した branch を `git branch -D <branch>` で削除する
+   - **`auto-merge enabled`**: cleanup **しない**（後で実マージされるまで状態保留、マージ後にユーザーが手動 / `/health` で整理）
+   - **`merge-ready`**: cleanup **しない**（ユーザーが手動マージ前にローカル iterate する余地を残す）
+   - **`failed`**: cleanup **しない**（再実行で resume できるよう残置）
+3. 補助的に `worktree-agent-<id>` 形式の synthetic branch が残っていれば併せて `git branch -D` する（Claude Code harness 実装由来のパターン依存。検出失敗時は warning に留め fail しない）
+4. cleanup 結果を集計し、Phase Final-3 の集約レポートに含める
+
+`merged` 以外で残置された worktree がある場合、または cleanup 自体に失敗した worktree がある場合、集約レポート末尾に warning を出す:
+
+```text
+⚠️ Stale worktrees / branches detected:
+  preserved (not yet merged):
+    .claude/worktrees/agent-<id>  [<branch>]  ← #<N> auto-merge enabled; マージ後に手動削除
+    .claude/worktrees/agent-<id>  [<branch>]  ← #<N> merge-ready; iterate 用に残置
+  preserved (failed):
+    .claude/worktrees/agent-<id>  [<branch>]  ← #<N> failed; resume 可能
+  cleanup failed:
+    .claude/worktrees/agent-<id>  [<branch>]  reason: <error>
+  Manual cleanup:
+    git worktree remove -f -f <path>
+    git branch -D <branch>
+```
+
+#### Phase Final-3: 集約レポート
+
+整合性チェックと worktree cleanup の結果を踏まえ、集約レポートを出力する:
 
 ```text
 drive 完了 (3/5 merged, 1 merge-ready, 1 skipped):
@@ -252,11 +292,12 @@ drive 完了 (3/5 merged, 1 merge-ready, 1 skipped):
   #5 refactor: ...    | failed (test loop)
 
 集計:
-  merged:       2
-  merge-ready:  1
-  skipped:      1
-  failed:       1
-  総レビュー反復: 5 回
+  merged:           2
+  merge-ready:      1
+  skipped:          1
+  failed:           1
+  総レビュー反復:    5 回
+  worktree cleanup: 2/5 removed (3 preserved: 1 merge-ready, 1 failed, 1 skipped)
 ```
 
 ## 失敗 semantics
