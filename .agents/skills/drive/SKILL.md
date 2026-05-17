@@ -222,7 +222,7 @@ wave を順に実行する。
 
 集約レポートを出力する前に、**親 worktree の整合性を確認する**。subagent が共有 git directory 経由で親の `HEAD` / `index` を汚染するケースに備えるための fail-safe（[Issue #66](https://github.com/ozzy-labs/skills/issues/66) 由来）。
 
-1. `git rev-parse HEAD` と `git rev-parse $(git symbolic-ref HEAD)` が一致するか（HEAD が想定 branch を指しているか）
+1. `git rev-parse HEAD` と `git rev-parse $(git symbolic-ref HEAD)` が一致するか（HEAD が detached でないこと）
 2. `git diff HEAD --stat` が空か（index が HEAD と乖離していないか）
 3. `git status --short` が空か（working tree が clean か）
 4. 親のベースブランチ（通常 `main`）が `git rev-parse origin/<base-branch>` と一致するか、または `--merge` で merged された PR の SHA を含むか
