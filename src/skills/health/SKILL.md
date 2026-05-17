@@ -92,7 +92,13 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 「追加 commit の有無」の判定: PR の merge commit と local branch の `git rev-list --count <merge-commit>..<branch>` を比較し、結果が 0 なら追加なし、1 以上なら追加あり。
 
-`worktree-agent-<id>` の id 部分は `.claude/worktrees/agent-<id>/` の id と 1:1 対応する。`git worktree list --porcelain` の結果（#7 worktree チェックで取得した内容）から id 集合を抽出し、branch 名の id と join して存在判定する（branch ごとに `git worktree list` を呼ばない）。
+`worktree-agent-<id>` の id 部分は `.claude/worktrees/agent-<id>/` の id と 1:1 対応する。判定手順:
+
+1. #7 worktree チェックで取得した `git worktree list --porcelain` 結果から、`.claude/worktrees/agent-<id>/` パスの `<id>` を抽出して集合を作る（例: `{a33c59a3504b6dc3e, a6658497dd970cd6d}`）
+2. 各 local branch 名のうち `worktree-agent-` で始まるものから prefix を除いた残り部分を id 候補として抽出
+3. id 候補が手順 1 の集合に **含まれない** branch を orphan synthetic と判定する
+
+branch ごとに `git worktree list` を呼ばない（#7 の結果を使い回す）。
 
 表示例:
 
