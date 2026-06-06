@@ -255,7 +255,10 @@ subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/
   working tree:         <files>
   Recovery (push 前の汚染に対する確実な回復シーケンス):
 
-    # 1. 現状把握 (1 メッセージで全部出す)
+    # 1. 現状把握 + subagent branch 名を保存
+    #    step 3 で HEAD を main に切替えると `git symbolic-ref HEAD` は main を返すため、
+    #    step 5 で参照する branch 名はここで変数に保存しておく必要がある
+    SUBAGENT_BRANCH=$(git symbolic-ref --short HEAD)
     git rev-parse HEAD
     git rev-parse refs/heads/main
     git rev-parse origin/main
@@ -272,8 +275,8 @@ subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/
     # 4. index + working tree を HEAD (= origin/main) と同期
     git reset --hard HEAD
 
-    # 5. subagent stuck branch を削除 (HEAD だったため deletable に変わる)
-    git branch -D <subagent-branch>
+    # 5. subagent stuck branch を削除 (HEAD だったため deletable に変わる。step 1 で保存した変数を使う)
+    git branch -D "$SUBAGENT_BRANCH"
 ```
 
 `git checkout main` 系は意図的に使わない（親 worktree が main を握っているため `fatal: 'main' is already used by worktree at ...` で失敗する）。`git update-ref refs/heads/main` を **先に**実行する点が load-bearing — 後にすると `reset --hard origin/main` が subagent branch を target にしてしまい、main ref が古い SHA で stuck したまま残る。
