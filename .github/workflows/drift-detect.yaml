@@ -1,0 +1,302 @@
+name: Drift detect
+
+# Weekly drift detection between this repo's HEAD (SSOT for dist/) and
+# the `skills_commit:` SHA pinned in each consumer's `.commons/sync.yaml`.
+#
+# Severity is decided by Conventional Commits in the diff range:
+#   - feat!: / fix!: / chore!: ... !: / BREAKING CHANGE: in body -> critical
+#   - everything else                                            -> low
+#
+# critical -> open a dedicated issue per consumer (label drift-detect:critical)
+# low      -> append to / open a single weekly summary issue
+#             (label drift-detect:weekly, one open issue at a time)
+#
+# Detection only. The actual sync is driven by `/sync-consumers` (sub-issue #83).
+#
+# NOTE: Consumer list is embedded as a static array below. Once sub-issue #81
+# (`sync-targets.yaml`) lands, replace the `consumers` matrix with a list
+# parsed from `sync-targets.yaml` (skip entries where `disabled: true`).
+on:
+  schedule:
+    # Every Monday 09:00 UTC.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect drift against skills HEAD
+    runs-on: ubuntu-latest
+    env:
+      # TODO(#81): replace with `yq` over `sync-targets.yaml` once sub-issue A
+      # (sync-targets.yaml schema + 14 entry) lands. Until then keep this
+      # static list as the SSOT for drift detection.
+      CONSUMERS: >-
+        agentyard
+        feedradar
+        handbook
+        create-agentic-app
+        create-agentic-aws
+        gh-tasks
+        mcp-server-knowledge
+        opshub
+        ozzylabs.com
+        presets
+        road
+        starlight-theme
+        tech-notes
+        writing-studio
+    steps:
+      - name: Checkout skills (HEAD only)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+
+      - name: Resolve skills HEAD SHA
+        id: head
+        run: |
+          set -euo pipefail
+          HEAD_SHA=$(git rev-parse HEAD)
+          echo "sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "skills HEAD: ${HEAD_SHA}"
+
+      - name: Detect drift per consumer
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.head.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p drift-reports
+          : > drift-reports/critical.tsv
+          : > drift-reports/low.tsv
+
+          # Pattern matching Conventional Commits with `!:` (any type / scope)
+          # plus the `BREAKING CHANGE:` footer convention.
+          BREAKING_RE='(^[a-z]+(\([^)]*\))?!:)|(BREAKING CHANGE:)'
+
+          for repo in $CONSUMERS; do
+            full="ozzy-labs/${repo}"
+            echo "::group::${full}"
+
+            # Fetch consumer's `.commons/sync.yaml`. Tolerate missing file.
+            tmp=$(mktemp)
+            if ! gh api "repos/${full}/contents/.commons/sync.yaml" \
+                  -H "Accept: application/vnd.github.raw" > "$tmp" 2>/dev/null; then
+              echo "skip: ${full} has no .commons/sync.yaml"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Extract `skills_commit:` (allow empty string -> "never synced").
+            consumer_sha=$(awk -F: '/^skills_commit:/ {gsub(/[ \t]/, "", $2); print $2; exit}' "$tmp" || true)
+
+            if [ -z "${consumer_sha:-}" ]; then
+              echo "${full}: skills_commit is empty (never synced) — treat as critical"
+              reason="never synced; consumer has no skills_commit pin"
+              printf '%s\t%s\t%s\t%s\n' "$full" "(never synced)" "?" "$reason" \
+                >> drift-reports/critical.tsv
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Sanitize: consumer_sha must be a hex SHA prefix. A malformed
+            # or malicious consumer file could otherwise inject path
+            # segments into the compare URL. Reject anything non-hex.
+            if ! printf '%s' "$consumer_sha" | grep -qE '^[0-9a-f]{7,40}$'; then
+              echo "${full}: skills_commit value rejected (not a hex SHA): ${consumer_sha}"
+              reason="skills_commit is not a valid hex SHA: ${consumer_sha}"
+              printf '%s\t%s\t%s\t%s\n' "$full" "(invalid)" "?" "$reason" \
+                >> drift-reports/critical.tsv
+              echo "::endgroup::"
+              continue
+            fi
+
+            if [ "$consumer_sha" = "$HEAD_SHA" ]; then
+              echo "${full}: in sync (${consumer_sha})"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Compute diff commits via compare API. Tolerate API errors (e.g. consumer SHA
+            # no longer present on skills main due to history rewrite).
+            compare_json=$(mktemp)
+            if ! gh api "/repos/${{ github.repository }}/compare/${consumer_sha}...${HEAD_SHA}" \
+                  > "$compare_json" 2>/dev/null; then
+              echo "${full}: compare API failed (consumer SHA may be unreachable). Marking critical."
+              reason="compare API failed; consumer SHA unreachable from skills HEAD"
+              printf '%s\t%s\t%s\t%s\n' "$full" "$consumer_sha" "?" "$reason" \
+                >> drift-reports/critical.tsv
+              rm -f "$compare_json"
+              echo "::endgroup::"
+              continue
+            fi
+
+            ahead=$(jq -r '.ahead_by // 0' "$compare_json")
+            if [ "$ahead" = "0" ]; then
+              echo "${full}: consumer is ahead-or-equal (ahead_by=0)"
+              rm -f "$compare_json"
+              echo "::endgroup::"
+              continue
+            fi
+
+            messages=$(jq -r '.commits[].commit.message' "$compare_json")
+            if printf '%s\n' "$messages" | grep -qE "$BREAKING_RE"; then
+              severity="critical"
+            else
+              severity="low"
+            fi
+
+            # First line of each commit message (for low summary).
+            subjects=$(printf '%s\n' "$messages" \
+              | awk 'BEGIN{first=1} /^$/{first=1; next} first==1{print; first=0}')
+            # Encode newlines so we can store one record per TSV row.
+            subjects_b64=$(printf '%s' "$subjects" | base64 -w0)
+
+            printf '%s\t%s\t%s\t%s\n' "$full" "$consumer_sha" "$ahead" "$subjects_b64" \
+              >> "drift-reports/${severity}.tsv"
+
+            echo "${full}: severity=${severity} ahead_by=${ahead}"
+            rm -f "$compare_json"
+            echo "::endgroup::"
+          done
+
+          crit_count=$(wc -l < drift-reports/critical.tsv | tr -d ' ')
+          low_count=$(wc -l < drift-reports/low.tsv | tr -d ' ')
+          echo "critical=${crit_count}" >> "$GITHUB_OUTPUT"
+          echo "low=${low_count}" >> "$GITHUB_OUTPUT"
+          echo "summary: critical=${crit_count}, low=${low_count}"
+
+      - name: Open critical issues
+        if: steps.detect.outputs.critical != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.head.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          # Ensure the label exists (idempotent).
+          gh label create "drift-detect:critical" \
+            --color "B60205" \
+            --description "drift-detect: consumer is behind a BREAKING change" \
+            2>/dev/null || true
+
+          while IFS=$'\t' read -r full consumer_sha ahead _subjects_b64; do
+            [ -z "$full" ] && continue
+            title="drift-detect: ${full} behind by ${ahead} commits (BREAKING change未反映)"
+
+            # Upsert: dedupe by title against existing open issues.
+            existing=$(gh issue list \
+              --label "drift-detect:critical" \
+              --state open \
+              --search "in:title \"${title}\"" \
+              --json number,title \
+              --jq ".[] | select(.title == \"${title}\") | .number" \
+              | head -n 1)
+
+            short_consumer="${consumer_sha:0:7}"
+            short_head="${HEAD_SHA:0:7}"
+            body_file=$(mktemp)
+            # shellcheck disable=SC2016  # backticks in printf format are literal markdown, not subshells
+            {
+              printf 'Consumer: `%s`\n' "$full"
+              printf 'Consumer skills_commit: `%s` (`%s`)\n' "$consumer_sha" "$short_consumer"
+              printf 'skills HEAD: `%s` (`%s`)\n' "$HEAD_SHA" "$short_head"
+              printf 'Behind by: %s commits\n\n' "$ahead"
+              printf 'Detected by `.github/workflows/drift-detect.yaml`.\n'
+              printf 'At least one commit in the range carries a Conventional Commits BREAKING marker\n'
+              printf '(`<type>(...)!:` or `BREAKING CHANGE:`), so the consumer is unlikely to pick up\n'
+              printf 'the change without a manual review.\n\n'
+              printf 'To resync run `/sync-consumers --filter %s` (sub-issue #83). Close this\n' "${full##*/}"
+              printf 'issue once `.commons/sync.yaml` is updated.\n'
+            } > "$body_file"
+
+            if [ -n "$existing" ]; then
+              echo "critical issue already open for ${full}: #${existing} — skipping"
+              rm -f "$body_file"
+              continue
+            fi
+
+            gh issue create \
+              --title "$title" \
+              --label "drift-detect:critical" \
+              --body-file "$body_file"
+            rm -f "$body_file"
+          done < drift-reports/critical.tsv
+
+      - name: Upsert weekly low-severity summary issue
+        if: steps.detect.outputs.low != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.head.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          gh label create "drift-detect:weekly" \
+            --color "FBCA04" \
+            --description "drift-detect: weekly low-severity summary" \
+            2>/dev/null || true
+
+          today=$(date -u +%Y-%m-%d)
+          short_head="${HEAD_SHA:0:7}"
+
+          # Build summary body.
+          summary_file=$(mktemp)
+          {
+            echo "drift-detect weekly summary (run on ${today})"
+            echo ""
+            echo "skills HEAD: \`${HEAD_SHA}\` (\`${short_head}\`)"
+            echo ""
+            echo "| consumer | behind | recent subjects |"
+            echo "| --- | --- | --- |"
+            while IFS=$'\t' read -r full _consumer_sha ahead subjects_b64; do
+              [ -z "$full" ] && continue
+              subjects=$(printf '%s' "$subjects_b64" | base64 -d)
+              # Compact subjects to first 3 lines, escape pipe for markdown.
+              compact=$(printf '%s\n' "$subjects" \
+                | head -n 3 \
+                | sed 's/|/\\|/g' \
+                | tr '\n' ';' \
+                | sed 's/;$//')
+              echo "| ${full} | ${ahead} | ${compact} |"
+            done < drift-reports/low.tsv
+            echo ""
+            echo "_Detected by \`.github/workflows/drift-detect.yaml\`._"
+          } > "$summary_file"
+          body=$(cat "$summary_file")
+
+          # Upsert: reuse single open issue with label drift-detect:weekly.
+          existing=$(gh issue list \
+            --label "drift-detect:weekly" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "appended to existing weekly issue #${existing}"
+          else
+            gh issue create \
+              --title "drift-detect: weekly summary ${today}" \
+              --label "drift-detect:weekly" \
+              --body "$body"
+          fi
+
+      - name: No drift detected
+        if: steps.detect.outputs.critical == '0' && steps.detect.outputs.low == '0'
+        run: echo "All consumers are in sync with skills HEAD."
+
+    # TODO(#83 stable): once `/sync-consumers` is in regular use, add a
+    # follow-up step that compares the static CONSUMERS list above with
+    # ozzy-labs repos that actually carry `.commons/sync.yaml` (via
+    # `gh api search/code -q "filename:sync.yaml path:.commons"`) and
+    # opens an issue with label `drift-detect:onboarding-missing` when a
+    # repo is opted-in on disk but missing from `sync-targets.yaml`.
