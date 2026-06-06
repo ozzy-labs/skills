@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ozzy-labs/skills/main/schemas/sync-targets.schema.json
+# Targets for the push-based /sync-consumers skill (skills side).
+# See issue #80 / sub-issue #81 and plan structured-nibbling-harbor.md.
+# amazon-quick-feedradar is intentionally excluded (no .commons/sync.yaml).
+version: 1
+owner: ozzy-labs
+source: skills
+defaults:
+  branch_prefix: chore/sync-skills
+  base_branch: main
+  auto_merge: true
+  merge_method: squash
+  reuse_open_pr: true
+  tolerate_existing_branch: false
+targets:
+  - repo: ozzy-labs/agentyard
+  - repo: ozzy-labs/feedradar
+  - repo: ozzy-labs/handbook
+  - repo: ozzy-labs/create-agentic-app
+  - repo: ozzy-labs/create-agentic-aws
+  - repo: ozzy-labs/gh-tasks
+  - repo: ozzy-labs/mcp-server-knowledge
+  - repo: ozzy-labs/opshub
+  - repo: ozzy-labs/ozzylabs.com
+  - repo: ozzy-labs/presets
+  - repo: ozzy-labs/road
+  - repo: ozzy-labs/starlight-theme
+  - repo: ozzy-labs/tech-notes
+  - repo: ozzy-labs/writing-studio
