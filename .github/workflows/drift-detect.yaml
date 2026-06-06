@@ -101,7 +101,20 @@ jobs:
 
             if [ -z "${consumer_sha:-}" ]; then
               echo "${full}: skills_commit is empty (never synced) — treat as critical"
-              printf '%s\t%s\t%s\t%s\n' "$full" "(never synced)" "?" "never synced; consumer has no skills_commit pin" \
+              reason="never synced; consumer has no skills_commit pin"
+              printf '%s\t%s\t%s\t%s\n' "$full" "(never synced)" "?" "$reason" \
+                >> drift-reports/critical.tsv
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Sanitize: consumer_sha must be a hex SHA prefix. A malformed
+            # or malicious consumer file could otherwise inject path
+            # segments into the compare URL. Reject anything non-hex.
+            if ! printf '%s' "$consumer_sha" | grep -qE '^[0-9a-f]{7,40}$'; then
+              echo "${full}: skills_commit value rejected (not a hex SHA): ${consumer_sha}"
+              reason="skills_commit is not a valid hex SHA: ${consumer_sha}"
+              printf '%s\t%s\t%s\t%s\n' "$full" "(invalid)" "?" "$reason" \
                 >> drift-reports/critical.tsv
               echo "::endgroup::"
               continue
