@@ -20,6 +20,7 @@
 - `/drive` — implement + ship + review loop（Issue から merge-ready な PR まで自律駆動）。`--review=quick|final-deep|deep` で review モード切替（既定 quick）
 - `/health` — リポジトリ状態と skill catalog 整合性を 16 領域確認し、推奨アクションを inline 表示（`--deep` で `要確認` 項目を追加調査）
 - `/topics` — research-driven な GitHub topics 設定（ozzy-labs scope）。候補を公式制約検証 → 人気度測定（session キャッシュ）→ broad+narrow / 単数複数比較 → ozzy-labs 慣行ハードコードで選定し、`--apply` で `gh repo edit --add-topic` を実行、`--dry-run` で分析のみ
+- `/lessons-triage` — セッション教訓 queue（`~/.agents/lessons/queue.jsonl`）を消化し、User Skills 改善の教訓を承認制で ozzy-labs/skills へ issue 起票（HITL、起票のみ）
 
 ## Skills の共通ルール
 
