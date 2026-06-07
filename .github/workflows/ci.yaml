@@ -50,6 +50,13 @@ jobs:
       - name: Lint (GitHub Actions)
         run: actionlint
 
+      - name: Validate sync-targets.yaml against JSON Schema
+        run: |
+          pnpm exec ajv validate \
+            -s schemas/sync-targets.schema.json \
+            -d sync-targets.yaml \
+            --strict=true --spec=draft2020
+
       - name: Security (Gitleaks)
         run: gitleaks detect --no-banner
 
