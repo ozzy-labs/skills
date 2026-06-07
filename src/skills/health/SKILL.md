@@ -20,7 +20,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 - **並列実行:** 全領域のチェックコマンドを **同一メッセージ内の複数 Bash 呼び出し** で並列起動する（直列実行は禁止）。Phase 2 の追加調査も同様に並列起動する
 - **per-check error handling:** あるチェックが失敗（gh 未認証、コマンド不在、network エラー等）しても他チェックは継続する。失敗した領域は section 内にエラー行を出力する
-- **対話禁止:** AskUserQuestion を使わない
+- **対話禁止:** ユーザーへの確認・質問を一切行わない（ホストの確認 UI も使わない）
 - **実行禁止:** 削除・drop・prune・close 等の解消アクションを実行しない（推奨を表示するのみ）。Phase 2 でも read-only コマンドのみ
 - **推奨は固定語彙のみ:** 後述の語彙以外は使わない。Phase 2 でも語彙拡張はしない（既存ラベルへの書き換え or `要確認` 維持 + 根拠付与のみ）。Claude の自由判断で文言を生成しない
 - **section 順序固定:** Broken state → Local artifacts → Triage(mine) → Triage(automation) の順で出力する。順序が暗黙の優先度を表現する
