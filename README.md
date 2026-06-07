@@ -10,7 +10,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-13 skills total: 10 generic workflow skills shared across all OzzyLabs repositories, plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. Only the 10 generic skills are subject to `npx @ozzylabs/skills migrate` when removing the legacy project-scoped layout.
+14 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. Only the 10 original generic skills are subject to `npx @ozzylabs/skills migrate` when removing the legacy project-scoped layout (`lessons-triage` was never distributed project-scoped).
 
 | Skill | Description |
 | --- | --- |
@@ -20,6 +20,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 | `health` | Inspect repo state and skill catalog consistency across 16 areas with inline recommended actions (`--deep` for follow-up investigation of `要確認` items) |
 | `implement` | Branch creation and implementation from an issue or instructions |
 | `lint` | Run all linters with auto-fix |
+| `lessons-triage` | Triage the session-lessons queue (`~/.agents/lessons/queue.jsonl`, filled by the dotfiles `lesson-capture.sh` hook): extract User-Skills improvement lessons from session transcripts and file approved ones as issues on ozzy-labs/skills. HITL — every issue requires per-item approval; no repo edits, no auto-apply |
 | `lint-rules` | Lint configuration reference |
 | `pr` | Push changes and open or update a PR |
 | `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
