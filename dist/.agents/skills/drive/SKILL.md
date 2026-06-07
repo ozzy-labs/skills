@@ -169,7 +169,13 @@ wave を順に実行する。
 
 - **隔離:** worktree 隔離で起動する（必須。並列実行時の作業ディレクトリ衝突防止）
 - **委譲粒度:** subagent には `.agents/skills/drive/SKILL.md` を Read させ、target #N について単一モードのワークフロー（Phase 1-5）を実行するよう指示する。slash command は subagent からは呼べないため、SKILL.md を直接実行する
-- **main への checkout 禁止:** subagent は自 worktree branch で完結する。`git checkout main` / `git switch main` / `git checkout HEAD~` 等で worktree の HEAD を移動させない。worktree は親の Phase Final で削除されるため、main へ戻す必要はない。共有 git directory 経由で親 worktree の `HEAD` / `index` が汚染されるリスクを避けるため、自 branch 以外を触らないこと
+- **main / 親側 ref への書き込み禁止:** subagent は自 worktree branch で完結する。worktree は親の Phase Final で削除されるため、main へ戻す必要はない。以下のコマンドは全て**禁止** — 親 worktree の `HEAD` / `index` / `refs/heads/main` を汚染し、共有 git directory 経由で伝搬する ([Issue #66](https://github.com/ozzy-labs/skills/issues/66) / [Issue #89](https://github.com/ozzy-labs/skills/issues/89) 由来):
+  - `git checkout main` / `git switch main` / `git checkout HEAD~` (HEAD 移動)
+  - `git symbolic-ref HEAD refs/heads/main` (HEAD を符号的に main へ切替)
+  - `git update-ref refs/heads/main <sha>` (main ref を直接書き換え)
+  - `git reset --hard origin/main` (HEAD が自 branch を指す状態で実行すると自 branch を origin/main にリセット、間接的に親に影響)
+  - `git branch -m <new-name>` (自 worktree branch の rename、worktree-branch binding を壊す)
+  - `git push origin main` / `git push origin HEAD:main` (リモート main への直接 push)
 - **Edit / Write tool の `file_path` 制約:** subagent の Edit / Write tool に渡す `file_path` は必ず自 worktree path（通常 `.claude/worktrees/agent-<id>/`）で始まる absolute path に限定する。親 worktree path（`.claude/worktrees/` を含まない repo root 直下の path）を渡してはならない。Phase 20 (opshub) で観察した汚染は **Bash の `cd` ではなく Edit/Write tool の絶対 path 引数経由**で発生したため、prompt 対策としてはこの制約が決定的。実行前に `pwd` で自 worktree path を確認してから tool に渡すと安全（[Issue #77](https://github.com/ozzy-labs/skills/issues/77)）
 - **`--delete-branch` 禁止:** subagent が `gh pr merge` を呼ぶ際、`--delete-branch` フラグは使わない。自 worktree が当該 branch を握っているため `fatal: '<branch>' is already used by worktree at ...` エラーになり、リモート merge は成功するがローカル branch が中途半端に残る。ローカル branch / worktree の整理は親の Phase Final で一括処理する（[Issue #69](https://github.com/ozzy-labs/skills/issues/69)）
 - **scope 外波及の最低限チェック:** 自 issue で schema enum / field / CLI flag を追加した場合、リポ全体で対応する help 文字列・エラーメッセージ・サンプル/docs を grep し、同期されているか確認する（例: `rg -n '<old-enum-list>' src/ docs/`）。同期されていなければ **可能なら自 PR に含める**（自 scope の自然な拡張として）。判断に迷う / 自 scope を明確に超える場合は修正せず、戻り値 `cross_cutting_gaps` に `<file>:<line> — <symbol> not synced` 形式で記録し、親の Phase Final-3 audit に集約する（[Issue #70](https://github.com/ozzy-labs/skills/issues/70)）
@@ -197,11 +203,18 @@ wave を順に実行する。
     "src/cli/foo.ts:213 — help text missing new kind 'html-js'",
     "src/cli/foo.ts:299 — validation error message lists old enum set"
   ],
+  "final_head_state": {
+    "symbolic_ref": "<git symbolic-ref HEAD 出力、例: refs/heads/feat/foo>",
+    "rev_parse_HEAD": "<git rev-parse HEAD 出力>",
+    "status_short": "<git status --short 出力、clean なら空文字列>"
+  },
   "error": "<message if failed>"
 }
 ```
 
 `cross_cutting_gaps` は subagent が「scope 外波及の最低限チェック」で気付いたが自 PR では修正しなかった項目を記録する任意フィールド（空配列でも可）。フィールドが欠落している戻り値も後方互換のためエラーにせず、`[]` として扱う。親は Phase Final-3 post-merge audit でこれを集約し、独自検出した gap と統合して warning として list-up する。
+
+`final_head_state` は subagent 完了時点の自 worktree の HEAD 状態を必ず申告するフィールド（[Issue #89](https://github.com/ozzy-labs/skills/issues/89) 由来）。「main checkout なし」の自己申告と実態が乖離した観察例があるため、戻り値で実測値を提出させて親側 Phase Final-1 で交差確認する。`symbolic_ref` が `refs/heads/main` または空文字列（detached）なら親側で warning。フィールドが欠落している場合は後方互換のため `null` 扱いとし、交差確認を skip する。
 
 #### 観測性
 
@@ -234,9 +247,9 @@ Phase Final は次の 3 ステップで構成する。順に実行する。
 
 #### Phase Final-1: 親 worktree 整合性チェック
 
-subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/main` を汚染するケースに備えるための fail-safe（[Issue #66](https://github.com/ozzy-labs/skills/issues/66) / [Issue #77](https://github.com/ozzy-labs/skills/issues/77) 由来）。Phase 20 (opshub) 実行で「prompt 禁止だけでは subagent 4 並列のうち 3 件で汚染再発」が観察されたため、検出は 6 軸、recovery は worktree lock を確実に回避するシーケンスで構成する。
+subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/main` を汚染するケースに備えるための fail-safe（[Issue #66](https://github.com/ozzy-labs/skills/issues/66) / [Issue #77](https://github.com/ozzy-labs/skills/issues/77) / [Issue #89](https://github.com/ozzy-labs/skills/issues/89) 由来）。Phase 20 (opshub) 実行で「prompt 禁止だけでは subagent 4 並列のうち 3 件で汚染再発」、`/sync-consumers` epic 実行で「subagent 戻り値の自己申告と実態が乖離（worktree が `refs/heads/main` を握っていた）」が観察された。検出は 7 軸 + subagent 戻り値の `final_head_state` 交差確認で構成し、recovery は worktree lock を確実に回避するシーケンスで実行する。
 
-検出は以下 6 軸で行う:
+検出は以下 7 軸 + 戻り値交差確認で行う:
 
 1. `git rev-parse HEAD` と `git rev-parse $(git symbolic-ref HEAD)` が一致するか（HEAD が detached でないこと）
 2. `git diff HEAD --stat` が空か（index が HEAD と乖離していないか）
@@ -244,6 +257,13 @@ subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/
 4. 親のベースブランチ（通常 `main`）が `git rev-parse origin/<base-branch>` と一致するか、または `--merge` で merged された PR の SHA を含むか
 5. `git rev-parse refs/heads/main` と `git rev-parse origin/main` が一致するか（`refs/heads/main` ref が stuck していないか。`git reset --hard origin/main` だけでは ref が更新されず、HEAD が subagent branch を指す場合は subagent branch が reset されるだけで main ref は古い SHA のまま残る）
 6. `git symbolic-ref HEAD` が `refs/heads/main`（ベースブランチ）を指しているか（subagent branch を指していないか）
+7. **subagent worktree が `refs/heads/main` を握っていないか**（[Issue #89](https://github.com/ozzy-labs/skills/issues/89) 由来）。`git worktree list --porcelain` で各 subagent worktree (`.claude/worktrees/agent-<id>/`) を走査し、`branch refs/heads/main` を出すものがあれば warning。subagent は自 worktree branch (`feat/...` 等) で完結すべきで、`refs/heads/main` を握る = subagent が prompt 違反の操作 (例: `git symbolic-ref HEAD refs/heads/main`) を行った signal:
+
+   ```bash
+   git worktree list --porcelain | awk '/^worktree/{w=$2} /^branch refs\/heads\/main/{if(w!="<parent-root>") print "WARN: "w" holds refs/heads/main"}'
+   ```
+
+加えて、subagent 戻り値の `final_head_state.symbolic_ref` が `refs/heads/main` または空（detached）の場合は self-申告とも乖離している signal として warning に記録する（[Issue #89](https://github.com/ozzy-labs/skills/issues/89)）。
 
 いずれかが不一致なら、集約レポート末尾に warning を出す。recovery シーケンスは worktree lock を確実に回避する順序で記載する:
 
@@ -283,10 +303,27 @@ subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/
 
 #### Phase Final-2: subagent worktree cleanup
 
-**今回の drive 実行で起動した subagent** の worktree と関連 local branch をクリーンアップする（[Issue #69](https://github.com/ozzy-labs/skills/issues/69) 由来）。今回の実行外の orphan worktree (前回の異常終了で残ったもの等) は対象外。orphan の検出・整理は `/health` 領域 #7 に委譲する（[Issue #71](https://github.com/ozzy-labs/skills/issues/71)）。
+**今回の drive 実行で起動した subagent** の worktree と関連 local branch をクリーンアップする（[Issue #69](https://github.com/ozzy-labs/skills/issues/69) / [Issue #90](https://github.com/ozzy-labs/skills/issues/90) 由来）。今回の実行外の orphan worktree (前回の異常終了で残ったもの等) は対象外。orphan の検出・整理は `/health` 領域 #7 に委譲する（[Issue #71](https://github.com/ozzy-labs/skills/issues/71)）。
 
 1. 今回起動した subagent のリストを保持する。各 subagent の worktree パス（`.claude/worktrees/agent-<id>/`）と戻り値 `status` をひとまず控える
-2. 各 subagent について `status` を参照して扱いを分岐:
+2. **各 worktree の処理は subshell で囲む**（[Issue #90](https://github.com/ozzy-labs/skills/issues/90) 由来）。`git worktree remove` の副作用で親 shell の cwd が「No such file or directory」状態になり、以降の git コマンド全てが fail する現象が観察されたため、subshell で囲って cwd 喪失を伝播させない。Bash の中で以下のパターンで実行する:
+
+   ```bash
+   for WT_ID in <agent-id-1> <agent-id-2> ...; do
+     (
+       cd <parent-worktree-root>  # subshell 内で明示的に親 root に cd
+       WT_PATH=".claude/worktrees/agent-$WT_ID"
+       BRANCH=$(git worktree list --porcelain | awk -v p="$WT_PATH" '$1=="worktree" && $2 ~ p {getline; getline; if($1=="branch") print $2}' | sed 's|refs/heads/||')
+       git worktree remove -f -f "$WT_PATH"
+       [ -n "$BRANCH" ] && git branch -D "$BRANCH"
+       git branch -D "worktree-agent-$WT_ID"
+     )
+   done
+   ```
+
+   subshell の終了で cwd 変化は親に伝播せず、次の iteration も clean state で始まる。`cd <parent-worktree-root>` は subshell ごとに明示する（保険）。
+
+3. 各 subagent について `status` を参照して扱いを分岐:
    - **`merged`**: cleanup 対象（リモート merge 完了済み、ローカル iterate 不要）
      - `git worktree list --porcelain` で当該 worktree が握っている branch を取得する（パターンマッチに頼らない）
      - `git worktree remove -f -f <path>` を実行する（`-f -f` の二重 force は Claude Code harness の `lock` 解除のため必須）
@@ -294,8 +331,8 @@ subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/
    - **`auto-merge enabled`**: cleanup **しない**（後で実マージされるまで状態保留、マージ後にユーザーが手動 / `/health` で整理）
    - **`merge-ready`**: cleanup **しない**（ユーザーが手動マージ前にローカル iterate する余地を残す）
    - **`failed`**: cleanup **しない**（再実行で resume できるよう残置）
-3. `worktree-agent-<id>` 形式の synthetic branch（Claude Code harness 実装由来）が残っていれば `git branch -D worktree-agent-<id>` で削除する。Phase 20 (opshub) では 4/4 で残置されたため実態は必須項目。検出失敗時は warning に留めるが、**最後に `git branch --list 'worktree-agent-*'` を必ず実行して残存件数が 0 であることを確認する**（残存ありなら warning に件数と branch 名を出す）
-4. cleanup 結果を集計し、Phase Final-3 の集約レポートに含める
+4. `worktree-agent-<id>` 形式の synthetic branch（Claude Code harness 実装由来）が残っていれば `git branch -D worktree-agent-<id>` で削除する。Phase 20 (opshub) では 4/4 で残置されたため実態は必須項目。検出失敗時は warning に留めるが、**最後に `git branch --list 'worktree-agent-*'` を必ず実行して残存件数が 0 であることを確認する**（残存ありなら warning に件数と branch 名を出す）
+5. cleanup 結果を集計し、Phase Final-3 の集約レポートに含める
 
 `merged` 以外で残置された worktree がある場合、または cleanup 自体に失敗した worktree がある場合、集約レポート末尾に warning を出す:
 
