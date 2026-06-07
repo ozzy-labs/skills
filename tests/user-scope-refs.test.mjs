@@ -82,6 +82,17 @@ test("dist payload contains no repo-root-relative skill refs", async () => {
   }
 });
 
+test("in-repo dogfood mirrors keep repo-root-relative refs", async () => {
+  // The rewrite must apply to dist/ only: dogfood mirrors resolve their
+  // relative refs against the skills/commons repo root, so a rewrite leaking
+  // into the dogfood write path would make dogfood read the user install
+  // instead of the repo HEAD. Guard the inverse invariant here.
+  const canonical = await readFile(join(ROOT, ".agents", "skills", "commit", "SKILL.md"), "utf8");
+  assert.match(canonical, /`\.agents\/skills\/commit-conventions\/SKILL\.md`/);
+  const wrapper = await readFile(join(ROOT, ".claude", "skills", "commit", "SKILL.md"), "utf8");
+  assert.match(wrapper, /`\.agents\/skills\/commit\/SKILL\.md`/);
+});
+
 test("dist claude-code wrappers reference canonical skills via ~/.agents/skills/", async () => {
   const wrapper = await readFile(
     join(DIST, "claude-code", ".claude", "skills", "drive", "SKILL.md"),
