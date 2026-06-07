@@ -26,16 +26,24 @@ runs:
   steps:
     - name: Install @ozzylabs/skills via npx
       shell: bash
+      # Inputs are intentionally passed via env vars so the shell receives
+      # them as plain parameters. Direct ${{ inputs.* }} interpolation in
+      # `run:` is a known script-injection vector for composite actions
+      # because the expression is expanded *before* the shell runs.
+      env:
+        INPUT_SKILLS: ${{ inputs.skills }}
+        INPUT_ADAPTER: ${{ inputs.adapter }}
+        INPUT_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
         mkdir -p "$HOME/.claude/skills" "$HOME/.agents/skills"
-        if [ -n "${{ inputs.skills }}" ]; then
-          npx -y "@ozzylabs/skills@${{ inputs.version }}" install \
-            --adapter="${{ inputs.adapter }}" \
-            --skills="${{ inputs.skills }}" \
+        if [ -n "$INPUT_SKILLS" ]; then
+          npx -y "@ozzylabs/skills@$INPUT_VERSION" install \
+            --adapter="$INPUT_ADAPTER" \
+            --skills="$INPUT_SKILLS" \
             --force
         else
-          npx -y "@ozzylabs/skills@${{ inputs.version }}" install \
-            --adapter="${{ inputs.adapter }}" \
+          npx -y "@ozzylabs/skills@$INPUT_VERSION" install \
+            --adapter="$INPUT_ADAPTER" \
             --force
         fi
