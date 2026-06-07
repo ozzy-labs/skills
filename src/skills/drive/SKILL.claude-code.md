@@ -2,7 +2,7 @@
 description: Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。
 argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N] [--review=quick|final-deep|deep]
 disable-model-invocation: true
-allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent, Workflow
 ---
 
 # drive
@@ -30,7 +30,75 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 計画承認を含め、マージ処理（またはマージ確認）まで AskUserQuestion を使用しない（完全自律実行）。
 
-### subagent dispatch（オーケストレーションモード）
+### オーケストレーション実行機構の選択
+
+オーケストレーションモードの worker 並列実行には 2 つの機構がある。**Workflow tool が利用可能なら Workflow 方式を優先**し、利用不可（dynamic workflows 無効環境・旧バージョン）なら従来の Agent tool 方式（「subagent dispatch」節）に fallback する。
+
+| | Workflow 方式 | Agent tool 方式 |
+|---|---|---|
+| 並列制御 | ランタイムが cap・キュー管理 | 手動 semaphore |
+| worktree 隔離 | `isolation: 'worktree'` | `isolation: "worktree"` |
+| 戻り値検証 | `schema` で構造化検証（不一致は自動リトライ） | JSON 自由記述を親が parse |
+| 進捗監視 | `/workflows` UI + `log()` | `gh pr list` polling |
+| 中断再開 | `resumeFromRunId`（完了 worker はキャッシュ復元） | 手動再実行 |
+
+### Workflow 方式によるオーケストレーション（推奨）
+
+Phase 0（DAG / wave 構築）と計画表示は**Workflow 起動前に会話側で**行う（workflow はミッドランのユーザー入力を受けられないため、承認系はすべて起動前後に置く）。wave 構成を `args` で渡し、以下の形のスクリプトを組む:
+
+```js
+export const meta = {
+  name: 'drive-orchestration',
+  description: 'drive: wave 単位で worker を並列実行し merge-ready PR 群を作る',
+  phases: [{ title: 'Wave 1' }, { title: 'Wave 2' }],  // 実際の wave 数に合わせて起動時に書く（pure literal）
+}
+
+// canonical（.agents/skills/drive/SKILL.md）の戻り値 JSON contract を JSON Schema 化したもの
+const WORKER_SCHEMA = { /* target / title / branch / pr_url / pr_number / status / review / cross_cutting_gaps / final_head_state / error */ }
+
+const results = []
+const failed = new Set()
+for (const [i, wave] of args.waves.entries()) {
+  // 依存元が failed の target は dispatch せず skipped 扱いにする（canonical の失敗 semantics）
+  const runnable = wave.filter(t => !t.deps?.some(d => failed.has(d)))
+  wave.filter(t => !runnable.includes(t)).forEach(t => {
+    results.push({ target: t.target, status: 'skipped', error: `upstream failed: ${t.deps.join(',')}` })
+    log(`${t.target} skipped (upstream failed)`)
+  })
+  // --concurrency N がランタイム cap より小さい場合は runnable を N 件ずつのスライスに割って直列に流す
+  const waveResults = await parallel(runnable.map(t => () =>
+    agent(workerPrompt(t), { label: t.target, phase: `Wave ${i + 1}`, isolation: 'worktree', schema: WORKER_SCHEMA })
+  ))
+  for (const r of waveResults) {
+    if (!r) continue
+    results.push(r)
+    if (r.status === 'failed') failed.add(r.target)
+    log(`${r.target} → ${r.pr_url ?? '-'} (${r.status})`)
+  }
+}
+return { results }
+```
+
+`workerPrompt(t)` には以下を必ず含める（Agent tool 方式の「subagent dispatch」と同一の制約。ランタイムの worktree 隔離は cleanup を肩代わりするが、worker の git 操作自体は防がないため prompt 制約は省略不可）:
+
+- canonical SKILL.md を Read して単一モード Phase 1-5 を実行する指示
+- main / 親側 ref への書き込み禁止コマンド一覧
+- Edit / Write tool の `file_path` 制約（自 worktree path 限定）
+- `--delete-branch` 禁止
+- ベースブランチ規則（依存元 wave の有無で分岐）
+- 戻り値 JSON contract（`final_head_state` / `cross_cutting_gaps` 含む）
+
+Workflow 方式固有の注意:
+
+- **スクリプト内で `Date.now()` / `Math.random()` / 引数なし `new Date()` は使えない**（resume 決定性のためランタイムが throw する）。タイムスタンプが必要なら `args` で渡す
+- 観測性は `/workflows` UI と `log()` が担う。Agent tool 方式の `gh pr list` polling は不要
+- wave 間の `await` は依存関係による**意図的バリア**（pipeline 化しない）
+- workflow 内 worker は `acceptEdits` 固定でセッションの allowlist を継承する。長時間 run で permission prompt が出ないよう、必要コマンドが allowlist にあることを起動前に確認する
+- 途中失敗からの再開は `Workflow({scriptPath, resumeFromRunId})`。完了済み worker はキャッシュから復元される
+- **Phase Final-1 / Final-2 / Final-3 は workflow 終了後に会話側で実行する**。worker の worktree は変更を含むためランタイムの自動削除対象にならず、cleanup 手順（後述の Phase Final-2 節）が引き続き必要。worktree path 規約（`.claude/worktrees/agent-<id>/`）も同一
+- `--merge` 未指定時の一括マージ確認（「完了後」節の AskUserQuestion）は workflow の return 後に行う
+
+### subagent dispatch（オーケストレーションモード・Agent tool 方式 fallback）
 
 オーケストレーションモードでは `Agent` tool で各 target を並列実行する:
 
