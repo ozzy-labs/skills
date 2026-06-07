@@ -43,6 +43,19 @@ test("e2e: install --adapter=claude-code --skills=drive writes ~/.claude/skills/
       /description:/,
       "SKILL.md should declare a description in the frontmatter",
     );
+    // Installed user-scope copies must reference the canonical skill via
+    // `~/.agents/skills/...` — repo-root-relative refs do not resolve in
+    // consumer repos without project skills (ADR-0027).
+    assert.match(
+      content,
+      /~\/\.agents\/skills\/drive\/SKILL\.md/,
+      "installed wrapper should reference the canonical skill via ~/.agents/skills/",
+    );
+    assert.doesNotMatch(
+      content,
+      /[^\w/~.]\.(?:agents|claude)\/skills\//,
+      "installed wrapper must not contain repo-root-relative skill refs",
+    );
   } finally {
     await rm(home, { recursive: true, force: true });
   }

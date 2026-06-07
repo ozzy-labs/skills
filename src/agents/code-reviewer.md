@@ -10,7 +10,7 @@ tools: Read, Grep, Glob
 
 ## 役割
 
-入力プロンプトに含まれる `axis: <name>` から、現在のリポジトリの `.claude/skills/review/perspectives/<name>.md` を Read し、その観点定義（検査項目・severity ガイド）に従って渡された diff をレビューする。
+入力プロンプトに含まれる `axis: <name>` から、`.claude/skills/review/perspectives/<name>.md` を Read し、その観点定義（検査項目・severity ガイド）に従って渡された diff をレビューする。
 
 このエージェントは `Read`, `Grep`, `Glob` の **read-only allowlist** で動作する。`Bash` / `Edit` / `Write` は持たない。レビュー中にファイルを変更したり任意コマンドを実行することはできない。
 

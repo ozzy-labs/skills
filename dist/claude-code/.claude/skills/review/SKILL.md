@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, AskUserQuestion, Work
 
 # review
 
-`.agents/skills/review/SKILL.md` を Read し、ワークフロー手順に従う。
+`~/.agents/skills/review/SKILL.md` を Read し、ワークフロー手順に従う。
 
 ## Claude Code 固有の追加事項
 
@@ -74,5 +74,5 @@ Agent({
 
 **指摘なしの場合:**
 
-- **「コミット・PR まで一括実行する」** → `.claude/skills/ship/SKILL.md` を Read し、その手順に従う
+- **「コミット・PR まで一括実行する」** → `~/.claude/skills/ship/SKILL.md` を Read し、その手順に従う
 - **「このまま進める」** → 終了する

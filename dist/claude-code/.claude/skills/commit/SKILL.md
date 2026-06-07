@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 
 # commit
 
-`.agents/skills/commit/SKILL.md` を Read し、ワークフロー手順に従う。
+`~/.agents/skills/commit/SKILL.md` を Read し、ワークフロー手順に従う。
 
 ## Claude Code 固有の追加事項
 
@@ -20,5 +20,5 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 
 完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）。報告の出力だけでスキルを終了しない:
 
-- **「PR を作成する」** → `.claude/skills/pr/SKILL.md` を Read し、その手順に従う
+- **「PR を作成する」** → `~/.claude/skills/pr/SKILL.md` を Read し、その手順に従う
 - **「追加の変更を行う」** → 終了する

@@ -7,7 +7,7 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 # drive
 
-`.agents/skills/drive/SKILL.md` を Read し、ワークフロー手順に従う。
+`~/.agents/skills/drive/SKILL.md` を Read し、ワークフロー手順に従う。
 
 **重要:** 各フェーズでは対応するスキルの SKILL.md を Read して**ワークフロー手順のみ**を実行する。読み込んだ SKILL.md 内の「次のアクション提案」セクションおよび「完了報告」セクションは**すべて無視**する。フェーズ間の遷移は本スキルが制御する。
 
@@ -53,7 +53,7 @@ export const meta = {
   phases: [{ title: 'Wave 1' }, { title: 'Wave 2' }],  // 実際の wave 数に合わせて起動時に書く（pure literal）
 }
 
-// canonical（.agents/skills/drive/SKILL.md）の戻り値 JSON contract を JSON Schema 化したもの
+// canonical（~/.agents/skills/drive/SKILL.md）の戻り値 JSON contract を JSON Schema 化したもの
 const WORKER_SCHEMA = { /* target / title / branch / pr_url / pr_number / status / review / cross_cutting_gaps / final_head_state / error */ }
 
 const results = []
@@ -104,7 +104,7 @@ Workflow 方式固有の注意:
 
 - **isolation:** `"worktree"`（必須）
 - **subagent_type:** `general-purpose`
-- **prompt:** subagent から slash command は呼べないため、`.agents/skills/drive/SKILL.md` を Read させ、target #N について単一モードのワークフロー（Phase 1-5）を実行するよう指示する。`--merge` 指定時は Phase 4 まで完了し、自 PR の merged まで polling して終了させる。最終結果は JSON で返させる
+- **prompt:** subagent から slash command は呼べないため、`~/.agents/skills/drive/SKILL.md` を Read させ、target #N について単一モードのワークフロー（Phase 1-5）を実行するよう指示する。`--merge` 指定時は Phase 4 まで完了し、自 PR の merged まで polling して終了させる。最終結果は JSON で返させる
 - **main / 親側 ref への書き込み禁止（必ず prompt に明記）:** subagent は自 worktree branch で完結する。以下のコマンドは全て**禁止** — 親 worktree の `HEAD` / `index` / `refs/heads/main` を共有 git directory 経由で汚染する ([Issue #66](https://github.com/ozzy-labs/skills/issues/66) / [Issue #89](https://github.com/ozzy-labs/skills/issues/89))。worktree は親側で削除されるため main へ戻す必要はない:
   - `git checkout main` / `git switch main` / `git checkout HEAD~` (HEAD 移動)
   - `git symbolic-ref HEAD refs/heads/main` (HEAD を符号的に main へ切替)
@@ -188,7 +188,7 @@ subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/
 
 ### Phase Final-2: subagent worktree cleanup
 
-cleanup の status 別ポリシー（どの status を削除し、どれを残置するか）は canonical（`.agents/skills/drive/SKILL.md`）の Phase Final-2 に従う。本節は Claude Code worktree 機構固有の実行手順（[Issue #69](https://github.com/ozzy-labs/skills/issues/69) / [Issue #90](https://github.com/ozzy-labs/skills/issues/90) 由来）。
+cleanup の status 別ポリシー（どの status を削除し、どれを残置するか）は canonical（`~/.agents/skills/drive/SKILL.md`）の Phase Final-2 に従う。本節は Claude Code worktree 機構固有の実行手順（[Issue #69](https://github.com/ozzy-labs/skills/issues/69) / [Issue #90](https://github.com/ozzy-labs/skills/issues/90) 由来）。
 
 1. 今回起動した subagent のリストを保持する。各 subagent の worktree パス（`.claude/worktrees/agent-<id>/`）と戻り値 `status` をひとまず控える
 2. **各 worktree の処理は subshell で囲む**（[Issue #90](https://github.com/ozzy-labs/skills/issues/90) 由来）。`git worktree remove` の副作用で親 shell の cwd が「No such file or directory」状態になり、以降の git コマンド全てが fail する現象が観察されたため、subshell で囲って cwd 喪失を伝播させない。Bash の中で以下のパターンで実行する:
