@@ -55,7 +55,10 @@ test("SKILL.claude-code.md allowed-tools includes Agent (parallel dispatch requi
   const tools = frontmatter["allowed-tools"];
   assert.ok(tools, "allowed-tools must be set");
   assert.ok(
-    tools.split(",").map((s) => s.trim()).includes("Agent"),
+    tools
+      .split(",")
+      .map((s) => s.trim())
+      .includes("Agent"),
     `allowed-tools must include Agent, got: ${tools}`,
   );
 });
@@ -84,11 +87,15 @@ test("SKILL.md documents helper return-value JSON shape (status enum + error)", 
   const body = readFileSync(file, "utf8");
   // The helper return-value section should enumerate the status values that
   // commons/scripts/sync-consumers.sh actually emits.
-  for (const status of ["merged", "merge-ready", "auto-merge enabled", "no-change", "dry-run", "failed"]) {
-    assert.ok(
-      body.includes(`"${status}"`),
-      `SKILL.md must document helper status '${status}'`,
-    );
+  for (const status of [
+    "merged",
+    "merge-ready",
+    "auto-merge enabled",
+    "no-change",
+    "dry-run",
+    "failed",
+  ]) {
+    assert.ok(body.includes(`"${status}"`), `SKILL.md must document helper status '${status}'`);
   }
 });
 
