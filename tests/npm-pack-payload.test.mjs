@@ -110,10 +110,7 @@ test("npm pack excludes internal-use skills (health/topics/phase-issue) from dis
   const [pkg] = npmPackJson();
   const paths = pkg.files.map((f) => f.path);
   const internalSkills = ["health", "topics", "phase-issue"];
-  const adapterRoots = [
-    "dist/claude-code/.claude/skills",
-    "dist/codex-cli/.agents/skills",
-  ];
+  const adapterRoots = ["dist/claude-code/.claude/skills", "dist/codex-cli/.agents/skills"];
   for (const skill of internalSkills) {
     for (const root of adapterRoots) {
       const prefix = `${root}/${skill}/`;
