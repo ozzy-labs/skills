@@ -10,7 +10,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-The 12 common skills shared across all OzzyLabs repositories:
+The 13 common skills shared across all OzzyLabs repositories:
 
 | Skill | Description |
 | --- | --- |
@@ -24,6 +24,7 @@ The 12 common skills shared across all OzzyLabs repositories:
 | `pr` | Push changes and open or update a PR |
 | `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
 | `ship` | Lint + commit + PR creation in one go |
+| `sync-consumers` | Push skills/commons updates to the 14 consumer repos declared in `sync-targets.yaml` in parallel (drive-derived). Reuses drive's Phase Final-1 worktree drift detection and Phase Final-2 cleanup; ships with an extra axis 7 (subagent worktree holding `refs/heads/main`) and a mandatory `cd <parent-worktree-root>` before each `git worktree remove`. `--dry-run` / `--filter <repo,repo>` / `--merge` |
 | `test` | Run build, tests, and type checks |
 | `topics` | Research-driven GitHub topics setup (ozzy-labs scope): validate official constraints (lowercase / hyphen / 50 chars / max 20), measure popularity via `gh api search/repositories` with session-scoped cache, decide broad+narrow / singular-plural pairs, and apply ozzy-labs hardcoded conventions (`claude-code` exception, `*-cli` suffix removal, `multi-agent` canonical form). `--apply` to commit, `--dry-run` for analysis only |
 
