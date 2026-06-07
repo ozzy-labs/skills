@@ -1,10 +1,10 @@
-English | [日本語](README.ja.md)
+English | [日本語](docs/README.ja.md)
 
 # @ozzylabs/skills
 
 Canonical OzzyLabs agent skill bundle for Claude Code, GitHub Copilot, Gemini CLI, and Codex CLI.
 
-`src/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces `dist/.agents/skills/{name}/SKILL.md`, which consumer repositories pull in via Renovate auto-sync (or, optionally, via `npm install`).
+`src/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces per-agent outputs under `dist/{adapter-id}/` (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`). Consumer repositories pull these in via the push-mode `/sync-consumers` flow (or, optionally, via `npm install`).
 
 This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT, while preserving the [ADR-0002](https://github.com/ozzy-labs/handbook/blob/main/adr/0002-skills-distribution-via-renovate.md) Renovate-based distribution model.
 
@@ -43,7 +43,7 @@ skills_adapters:
   - copilot
 ```
 
-Updates are pushed from `ozzy-labs/skills` via the `/sync-consumers` skill (see [issue #80](https://github.com/ozzy-labs/skills/issues/80)). When this repo's `main` advances, a maintainer runs `/sync-consumers --source=skills --auto-merge`, which opens one sync PR per consumer (driven by `commons/scripts/sync-consumers.sh`). The PR bumps `skills_commit` in `.commons/sync.yaml` and runs `sync-skills.sh -y` (from [ozzy-labs/commons](https://github.com/ozzy-labs/commons)) to copy `dist/.agents/skills/` and the opted-in adapter outputs from this repository into the consumer.
+Updates are pushed from `ozzy-labs/skills` via the `/sync-consumers` skill (see [issue #80](https://github.com/ozzy-labs/skills/issues/80)). When this repo's `main` advances, a maintainer runs `/sync-consumers --source=skills --auto-merge`, which opens one sync PR per consumer (driven by `commons/scripts/sync-consumers.sh`). The PR bumps `skills_commit` in `.commons/sync.yaml` and runs `sync-skills.sh -y` (from [ozzy-labs/commons](https://github.com/ozzy-labs/commons)) to copy the opted-in adapter outputs (`dist/{adapter-id}/`) from this repository into the consumer.
 
 ### Adapter opt-in (per-agent outputs)
 
@@ -117,6 +117,38 @@ pnpm lint:all
 ```
 
 `dist/` is committed and the CI verifies it matches `pnpm build` output. After editing any `src/skills/*/SKILL.md` or `src/skills/*/SKILL.claude-code.md`, run `pnpm build` and commit the resulting `dist/` changes.
+
+## Release flow (maintainer)
+
+`@ozzylabs/skills` is published to npm via [release-please](https://github.com/googleapis/release-please) + OIDC [Trusted Publishers](https://docs.npmjs.com/trusted-publishers). The full pipeline lives in `.github/workflows/release.yaml`:
+
+1. **Commits to `main`**: Conventional Commits (`feat:` / `fix:` / `feat!:` etc.) drive the version bump.
+2. **Release PR**: `release-please` opens / updates an automated PR that bumps `version` in `package.json` and `.release-please-manifest.json`, and updates `CHANGELOG.md`. Maintainers review and squash-merge it.
+3. **Tag + GitHub Release**: merging the release PR creates a `v<x.y.z>` tag and a GitHub Release.
+4. **`npm publish --provenance`**: the `publish` job runs `pnpm install --frozen-lockfile` → `pnpm build` → `npm publish --provenance --access public`. Authentication is OIDC-only — no `NPM_TOKEN` secret. The job sets `permissions: { id-token: write, contents: read }` so npm can verify the GitHub Actions OIDC token against the trusted publisher mapping configured at <https://www.npmjs.com/package/@ozzylabs/skills/access>.
+
+### npm payload contents
+
+The npm payload is declared in `package.json#files` and verified by `tests/npm-pack-payload.test.mjs`:
+
+- `dist/{adapter-id}/` — canonical per-adapter outputs that consumers read (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`)
+- `dist/sync/replace-snippet.sh` — snippet sync helper
+- `bin/install.mjs` — CLI installer entry point (see [issue #98](https://github.com/ozzy-labs/skills/issues/98))
+- `schemas/` — sync-target schemas
+- `README.md`, `LICENSE`, `action.yaml`
+
+In-repo dogfood mirrors (`.agents/skills/`, `.claude/skills/`) and source layout (`src/`, `scripts/`, `tests/`) are intentionally excluded.
+
+### Trusted Publishers setup
+
+The OIDC trust relationship is configured once at the npm registry:
+
+- Package: `@ozzylabs/skills`
+- Workflow: `.github/workflows/release.yaml`
+- Repository: `ozzy-labs/skills`
+- Environment: (none)
+
+See the official [npm Trusted Publishers documentation](https://docs.npmjs.com/trusted-publishers) for the management UI walkthrough.
 
 ## Conventions
 
