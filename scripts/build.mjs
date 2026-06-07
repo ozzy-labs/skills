@@ -4,18 +4,26 @@
 // Reads canonical skill files from src/skills/{name}/SKILL.md, validates the
 // frontmatter, and emits two kinds of output:
 //
-//   1. Legacy 3-target copy (kept until the staged migration in #14):
-//        - dist/.agents/skills/{name}/SKILL.md   (npm payload / Renovate consumers)
-//        - .agents/skills/{name}/SKILL.md        (in-repo dogfood)
-//        - .claude/skills/{name}/SKILL.md        (in-repo dogfood)
+//   1. In-repo dogfood mirrors (NOT part of the npm payload; excluded via
+//      `package.json#files`):
+//        - .agents/skills/{name}/SKILL.md        (Codex CLI / Gemini CLI dogfood)
+//        - .claude/skills/{name}/SKILL.md        (Claude Code dogfood)
 //      Plus any non-SKILL.* files under each skill dir (e.g. perspectives/).
+//      These are kept because skills repo dogfoods its own skill bundle via
+//      slash commands, but they are not shipped to npm consumers.
 //
 //   2. Adapter outputs under dist/{adapter-id}/, produced by AdapterBase
-//      subclasses. Adapters are pure functions; this orchestrator is the
-//      sole writer.
+//      subclasses. These are the canonical npm payload for consumers — each
+//      consumer opts in to one or more adapter ids via `skills_adapters` in
+//      `.commons/sync.yaml`. Adapters are pure functions; this orchestrator
+//      is the sole writer.
 //
 //   3. Claude Code agents loaded from src/agents/<name>.md and emitted
 //      as dist/claude-code/.claude/agents/<name>.md (ADR-0026).
+//
+// The legacy `dist/.agents/skills/` and `dist/.claude/skills/` outputs that
+// duplicated adapter content have been removed (issue #97); consumers should
+// read from `dist/{adapter-id}/` instead.
 
 import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -33,12 +41,12 @@ const SRC = join(ROOT, "src", "skills");
 const SRC_AGENTS = join(ROOT, "src", "agents");
 const DIST = join(ROOT, "dist");
 
-const CLAUDE_LEGACY_TARGET = join(ROOT, ".claude", "skills");
-const LEGACY_TARGETS = [
-  join(ROOT, "dist", ".agents", "skills"),
-  join(ROOT, ".agents", "skills"),
-  CLAUDE_LEGACY_TARGET,
-];
+// In-repo dogfood targets: these mirror the canonical skill files into
+// `.agents/skills/` and `.claude/skills/` so the skills repo can use its own
+// slash commands (e.g. `/drive`, `/lint`). They are NOT shipped to npm —
+// `package.json#files` only includes `dist/`, `bin/`, `schemas/`, etc.
+const CLAUDE_DOGFOOD_TARGET = join(ROOT, ".claude", "skills");
+const DOGFOOD_TARGETS = [join(ROOT, ".agents", "skills"), CLAUDE_DOGFOOD_TARGET];
 
 const ADAPTERS = [
   new ClaudeCodeAdapter(),
@@ -152,8 +160,11 @@ async function loadAgents() {
   return agents;
 }
 
-async function writeLegacyTargets(skills) {
-  for (const target of LEGACY_TARGETS) {
+async function writeDogfoodTargets(skills) {
+  // Write in-repo dogfood mirrors at `.agents/skills/` and `.claude/skills/`.
+  // These are excluded from the npm payload by `package.json#files` but kept
+  // in the repo so skills repo can use its own slash commands.
+  for (const target of DOGFOOD_TARGETS) {
     if (existsSync(target)) {
       await rm(target, { recursive: true, force: true });
     }
@@ -162,7 +173,7 @@ async function writeLegacyTargets(skills) {
     // dogfoods its own skills. Use the Claude Code companion when present so
     // dogfood stays in sync with what the Claude Code adapter ships to
     // consumers.
-    const useCompanion = target === CLAUDE_LEGACY_TARGET;
+    const useCompanion = target === CLAUDE_DOGFOOD_TARGET;
     for (const skill of skills) {
       const destDir = join(target, skill.name);
       await mkdir(destDir, { recursive: true });
@@ -174,6 +185,21 @@ async function writeLegacyTargets(skills) {
         await mkdir(dirname(dest), { recursive: true });
         await writeFile(dest, extra.content);
       }
+    }
+  }
+}
+
+async function cleanupRemovedLegacyTargets() {
+  // Defensive: remove the previously-generated `dist/.agents/skills/` and
+  // `dist/.claude/skills/` directories if they exist from an older build.
+  // The new build pipeline (issue #97) no longer writes them — they were
+  // duplicates of `dist/codex-cli/.agents/skills/` and
+  // `dist/claude-code/.claude/skills/` respectively. Consumers should read
+  // from `dist/{adapter-id}/` instead.
+  const removed = [join(DIST, ".agents"), join(DIST, ".claude")];
+  for (const target of removed) {
+    if (existsSync(target)) {
+      await rm(target, { recursive: true, force: true });
     }
   }
 }
@@ -212,16 +238,17 @@ async function writeAdapterOutputs(skills, agents) {
 async function main() {
   const skills = await loadSkills();
   const agents = await loadAgents();
-  await writeLegacyTargets(skills);
+  await cleanupRemovedLegacyTargets();
+  await writeDogfoodTargets(skills);
   await writeAdapterOutputs(skills, agents);
   await writeSyncHelpers();
 
   console.log(`✓ Built ${skills.length} skill(s), ${agents.length} agent(s)`);
-  console.log("Legacy targets:");
-  for (const target of LEGACY_TARGETS) {
+  console.log("In-repo dogfood (excluded from npm payload):");
+  for (const target of DOGFOOD_TARGETS) {
     console.log(`  ${target.replace(ROOT, "").replace(/^\//, "")}`);
   }
-  console.log("Adapters:");
+  console.log("Adapters (npm payload):");
   for (const adapter of ADAPTERS) {
     console.log(`  dist/${adapter.constructor.id}/`);
   }

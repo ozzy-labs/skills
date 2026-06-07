@@ -1,10 +1,10 @@
-[English](README.md) | 日本語
+[English](../README.md) | 日本語
 
 # @ozzylabs/skills
 
 Claude Code / GitHub Copilot / Gemini CLI / Codex CLI 向けの OzzyLabs 正準エージェントスキルバンドル。
 
-`src/skills/{name}/SKILL.md` を SSOT とし、`pnpm build` で `dist/.agents/skills/{name}/SKILL.md` を生成する。consumer リポは Renovate 自動同期で取り込む（npm install での参照も可能）。
+`src/skills/{name}/SKILL.md` を SSOT とし、`pnpm build` で `dist/{adapter-id}/` 配下に各 agent 向けの出力を生成する。consumer リポは `/sync-consumers` 経由の push で取り込む（npm install による参照も可能）。
 
 [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) で決定された、skills を `commons` から切り出して専用リポでバージョニングする方針の実装。配布機構は [ADR-0002](https://github.com/ozzy-labs/handbook/blob/main/adr/0002-skills-distribution-via-renovate.md) の Renovate 同期を継承する。
 
@@ -43,7 +43,7 @@ skills_adapters:
   - copilot
 ```
 
-更新は `ozzy-labs/skills` 側から `/sync-consumers` skill 経由で push される（[issue #80](https://github.com/ozzy-labs/skills/issues/80) 参照）。本リポの `main` が進んだとき、maintainer が `/sync-consumers --source=skills --auto-merge` を実行すると、各 consumer に 1 件ずつ sync PR が作成される（内部的に `commons/scripts/sync-consumers.sh` が driver）。PR は `.commons/sync.yaml` の `skills_commit` を bump し、[ozzy-labs/commons](https://github.com/ozzy-labs/commons) の `sync-skills.sh -y` で本リポの `dist/.agents/skills/` および opt-in した adapter 出力を consumer へコピーする。
+更新は `ozzy-labs/skills` 側から `/sync-consumers` skill 経由で push される（[issue #80](https://github.com/ozzy-labs/skills/issues/80) 参照）。本リポの `main` が進んだとき、maintainer が `/sync-consumers --source=skills --auto-merge` を実行すると、各 consumer に 1 件ずつ sync PR が作成される（内部的に `commons/scripts/sync-consumers.sh` が driver）。PR は `.commons/sync.yaml` の `skills_commit` を bump し、[ozzy-labs/commons](https://github.com/ozzy-labs/commons) の `sync-skills.sh -y` で opt-in した adapter 出力（`dist/{adapter-id}/`）を consumer へコピーする。
 
 ### Adapter opt-in（agent 別出力の取り込み）
 
@@ -117,6 +117,38 @@ pnpm lint:all
 ```
 
 `dist/` は commit 対象で、CI が `pnpm build` の出力と一致することを検証する。`src/skills/*/SKILL.md` または `src/skills/*/SKILL.claude-code.md` を編集したら `pnpm build` を実行し、生成された `dist/` の差分も同じコミットに含める。
+
+## リリース運用 (maintainer 向け)
+
+`@ozzylabs/skills` は [release-please](https://github.com/googleapis/release-please) + OIDC [Trusted Publishers](https://docs.npmjs.com/trusted-publishers) で npm に publish する。パイプラインの実体は `.github/workflows/release.yaml`:
+
+1. **`main` への commit**: Conventional Commits (`feat:` / `fix:` / `feat!:` 等) で version bump を駆動する。
+2. **Release PR**: `release-please` が `package.json` / `.release-please-manifest.json` の `version` と `CHANGELOG.md` を更新する PR を自動で開く / 更新する。maintainer がレビューして squash-merge する。
+3. **Tag + GitHub Release**: release PR の merge で `v<x.y.z>` tag と GitHub Release が作られる。
+4. **`npm publish --provenance`**: `publish` job が `pnpm install --frozen-lockfile` → `pnpm build` → `npm publish --provenance --access public` を実行する。認証は OIDC のみ (`NPM_TOKEN` secret は使わない)。`permissions: { id-token: write, contents: read }` で GitHub Actions の OIDC token を npm 側の trusted publisher 設定 (<https://www.npmjs.com/package/@ozzylabs/skills/access>) と突き合わせて検証する。
+
+### npm payload の中身
+
+payload は `package.json#files` で宣言し、`tests/npm-pack-payload.test.mjs` で検証する:
+
+- `dist/{adapter-id}/` — consumer が読む正準ペイロード (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`)
+- `dist/sync/replace-snippet.sh` — snippet 同期ヘルパー
+- `bin/install.mjs` — CLI installer entry point ([issue #98](https://github.com/ozzy-labs/skills/issues/98) で本体実装)
+- `schemas/` — sync-target 用 schema
+- `README.md`, `LICENSE`, `action.yaml`
+
+skills repo 自身の dogfood mirror (`.agents/skills/`, `.claude/skills/`) と source layout (`src/`, `scripts/`, `tests/`) は意図的に除外する。
+
+### Trusted Publishers 設定
+
+OIDC trust 関係は npm registry 側で 1 度だけ設定する:
+
+- Package: `@ozzylabs/skills`
+- Workflow: `.github/workflows/release.yaml`
+- Repository: `ozzy-labs/skills`
+- Environment: (なし)
+
+詳細は npm 公式の [Trusted Publishers ドキュメント](https://docs.npmjs.com/trusted-publishers) を参照。
 
 ## 規約
 

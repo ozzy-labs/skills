@@ -6,8 +6,16 @@
   "exports": {
     "./package.json": "./package.json"
   },
+  "bin": {
+    "ozzylabs-skills": "./bin/install.mjs"
+  },
   "files": [
-    "dist"
+    "dist/",
+    "bin/",
+    "schemas/",
+    "README.md",
+    "LICENSE",
+    "action.yaml"
   ],
   "scripts": {
     "prepare": "lefthook install || true",
@@ -26,7 +34,8 @@
   "packageManager": "pnpm@10.32.1",
   "publishConfig": {
     "access": "public",
-    "provenance": true
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   },
   "license": "MIT",
   "author": "ozzy-labs",

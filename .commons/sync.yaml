@@ -6,7 +6,7 @@ pinned:
   - CLAUDE.md
   - AGENTS.md
   - README.md
-  - README.ja.md
+  - docs/README.ja.md
   - lefthook.yaml
   - biome.json
   - renovate.json

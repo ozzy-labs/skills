@@ -1,0 +1,43 @@
+# Exclude non-English README from the npm payload. README.md (English) is the
+# canonical consumer-facing doc; README.ja.md is for in-repo browsing only.
+README.ja.md
+
+# Exclude the in-repo dogfood mirrors and source layout. These are also kept
+# off the payload via `package.json#files`, but list them here as a defense in
+# depth in case `files` is loosened in the future.
+.agents/
+.claude/
+.commons/
+.devcontainer/
+.gemini/
+.github/
+.vscode/
+src/
+tests/
+scripts/
+sync-targets.yaml
+release-please-config.json
+.release-please-manifest.json
+biome.json
+pnpm-lock.yaml
+lefthook.yaml
+lefthook-base.yaml
+trivy.yaml
+renovate.json
+SECURITY.md
+CONTRIBUTING.md
+AGENTS.md
+CLAUDE.md
+CHANGELOG.md
+
+# Tooling configs.
+.editorconfig
+.gitattributes
+.gitignore
+.mise.toml
+.mcp.json
+.markdownlint-cli2.yaml
+.mdformat.toml
+.commitlintrc.yaml
+.yamlfmt.yaml
+.yamllint.yaml

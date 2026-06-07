@@ -11,7 +11,7 @@
 
 ## プロジェクト概要
 
-`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/.agents/skills/{name}/SKILL.md` を生成し、push 型 `/sync-consumers` skill（[issue #80](https://github.com/ozzy-labs/skills/issues/80)）で各 consumer リポへ配信する。consumer は `.commons/sync.yaml` に `skills_commit` + `skills_adapters` を pin して opt-in する。
+`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、push 型 `/sync-consumers` skill（[issue #80](https://github.com/ozzy-labs/skills/issues/80)）で各 consumer リポへ配信する。consumer は `.commons/sync.yaml` に `skills_commit` + `skills_adapters` を pin して opt-in する。
 
 ## Tech Stack
 
@@ -42,8 +42,8 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 - `src/skills/{name}/SKILL.claude-code.md` — Claude Code 固有 wrapper（任意）。companion 仕様は README.md を参照
 - `src/skills/{name}/<extra>.md` — 任意の skill 内アセット（例: `review/perspectives/<axis>.md`）。`SKILL.md` / `SKILL.{adapter}.md` 以外のファイルは全配信先（`.claude/skills/{name}/<extra>.md`, `.agents/skills/{name}/<extra>.md` 等）に verbatim でコピーされる
 - `src/agents/{name}.md` — Claude Code 専用 agent（[ADR-0026](https://github.com/ozzy-labs/handbook/blob/main/adr/0026-agent-distribution-via-skills-sync.md)）。`dist/claude-code/.claude/agents/{name}.md` のみに出力される
-- `dist/.agents/skills/{name}/SKILL.md` — npm payload / Renovate consumer 向けビルド出力（commit 対象）
-- `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）
+- `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）。これが npm payload / sync-consumers の正準ペイロード
+- `.agents/skills/{name}/SKILL.md` / `.claude/skills/{name}/SKILL.md` — skills repo 自身が dogfood するための in-repo mirror（npm payload には含めない。`package.json#files` で除外）
 - `dist/sync/replace-snippet.sh` — 下流 sync workflow 向けマーカー間置換ヘルパー（マーカー欠落時は append でフォールバック）
 - `scripts/build.mjs` — ビルドオーケストレータ
 - `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
