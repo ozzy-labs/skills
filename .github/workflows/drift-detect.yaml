@@ -13,9 +13,9 @@ name: Drift detect
 #
 # Detection only. The actual sync is driven by `/sync-consumers` (sub-issue #83).
 #
-# NOTE: Consumer list is embedded as a static array below. Once sub-issue #81
-# (`sync-targets.yaml`) lands, replace the `consumers` matrix with a list
-# parsed from `sync-targets.yaml` (skip entries where `disabled: true`).
+# Consumer list is loaded dynamically from `sync-targets.yaml` (sub-issue #81)
+# via `yq` in the "Load consumer list" step. Entries with `disabled: true` are
+# skipped.
 on:
   schedule:
     # Every Monday 09:00 UTC.
@@ -34,30 +34,20 @@ jobs:
   detect:
     name: Detect drift against skills HEAD
     runs-on: ubuntu-latest
-    env:
-      # TODO(#81): replace with `yq` over `sync-targets.yaml` once sub-issue A
-      # (sync-targets.yaml schema + 14 entry) lands. Until then keep this
-      # static list as the SSOT for drift detection.
-      CONSUMERS: >-
-        agentyard
-        feedradar
-        handbook
-        create-agentic-app
-        create-agentic-aws
-        gh-tasks
-        mcp-server-knowledge
-        opshub
-        ozzylabs.com
-        presets
-        road
-        starlight-theme
-        tech-notes
-        writing-studio
     steps:
       - name: Checkout skills (HEAD only)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 1
+
+      - name: Install mise tools (yq)
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          install: true
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Resolve skills HEAD SHA
         id: head
@@ -67,11 +57,27 @@ jobs:
           echo "sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
           echo "skills HEAD: ${HEAD_SHA}"
 
+      - name: Load consumer list from sync-targets.yaml
+        id: consumers
+        run: |
+          set -euo pipefail
+          # Extract repo names (strip ozzy-labs/ prefix to keep compatibility
+          # with the existing `for repo in $CONSUMERS; do full="ozzy-labs/${repo}"`
+          # loop below). Filter out disabled entries.
+          CONSUMERS=$(yq -r '.targets[] | select(.disabled != true) | .repo | sub("^ozzy-labs/"; "")' sync-targets.yaml | tr '\n' ' ')
+          if [ -z "${CONSUMERS//[[:space:]]/}" ]; then
+            echo "ERROR: sync-targets.yaml yielded no consumers (parse failure or all disabled)" >&2
+            exit 1
+          fi
+          echo "list=${CONSUMERS}" >> "$GITHUB_OUTPUT"
+          echo "Loaded consumers: ${CONSUMERS}"
+
       - name: Detect drift per consumer
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ steps.head.outputs.sha }}
+          CONSUMERS: ${{ steps.consumers.outputs.list }}
         run: |
           set -euo pipefail
 
