@@ -11,14 +11,14 @@
 
 ## プロジェクト概要
 
-`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/.agents/skills/{name}/SKILL.md` を生成し、Renovate sync（`skills-sync/` preset）で各 consumer リポへ配信する。
+`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/.agents/skills/{name}/SKILL.md` を生成し、push 型 `/sync-consumers` skill（[issue #80](https://github.com/ozzy-labs/skills/issues/80)）で各 consumer リポへ配信する。consumer は `.commons/sync.yaml` に `skills_commit` + `skills_adapters` を pin して opt-in する。
 
 ## Tech Stack
 
 - Runtime: Node.js (ESM)
 - Package manager: pnpm
 - Version management: mise (`.mise.toml`)
-- Distribution: Renovate customManagers + git-refs（npm publish も提供）
+- Distribution: push 型 `/sync-consumers` skill（[issue #80](https://github.com/ozzy-labs/skills/issues/80)）。consumer の `.commons/sync.yaml` を起点にした pin/opt-in モデル。npm publish も提供
 
 ## 主要コマンド
 
@@ -49,7 +49,8 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 - `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
 - `scripts/sync/replace-snippet.sh` — `dist/sync/` にコピーされる sync ヘルパーの SSOT
 - `scripts/lib/` — 共通 lib（frontmatter, snippet markers, AdapterBase）
-- `skills-sync/` — consumer 向け Renovate preset（`default.json` がルート preset、`{adapter-id}.json` が adapter opt-in sub-preset）
+- `sync-targets.yaml` — `/sync-consumers` skill が push 配信する consumer リスト（[issue #81](https://github.com/ozzy-labs/skills/issues/81)）
+- `schemas/sync-targets.schema.json` — `sync-targets.yaml` の JSON Schema（lefthook + CI で validate）
 - `.commons/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ
 
 ## 規約

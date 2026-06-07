@@ -32,50 +32,35 @@ Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are in
 
 ## Consumer setup
 
-Add the Renovate preset to your repository's `renovate.json`:
-
-```json
-{
-  "extends": [
-    "github>ozzy-labs/skills//skills-sync"
-  ]
-}
-```
-
 Track the upstream digest in `.commons/sync.yaml`:
 
 ```yaml
 skills_commit: <40-char SHA from main>
+skills_adapters:
+  - claude-code
+  - codex-cli
+  - gemini-cli
+  - copilot
 ```
 
-Renovate detects updates to `ozzy-labs/skills@main` and opens a PR bumping `skills_commit`. The accompanying `sync.sh` (provided by [ozzy-labs/commons](https://github.com/ozzy-labs/commons)) copies `dist/.agents/skills/` from this repository into the consumer's `.agents/skills/`.
+Updates are pushed from `ozzy-labs/skills` via the `/sync-consumers` skill (see [issue #80](https://github.com/ozzy-labs/skills/issues/80)). When this repo's `main` advances, a maintainer runs `/sync-consumers --source=skills --auto-merge`, which opens one sync PR per consumer (driven by `commons/scripts/sync-consumers.sh`). The PR bumps `skills_commit` in `.commons/sync.yaml` and runs `sync-skills.sh -y` (from [ozzy-labs/commons](https://github.com/ozzy-labs/commons)) to copy `dist/.agents/skills/` and the opted-in adapter outputs from this repository into the consumer.
 
 ### Adapter opt-in (per-agent outputs)
 
-To consume per-agent adapter outputs (`dist/{adapter-id}/`), extend the matching adapter sub-presets alongside the root preset:
+To consume per-agent adapter outputs (`dist/{adapter-id}/`), list the adapter ids in `skills_adapters` (shown above). Adapter ids and the corresponding output paths:
 
-```json
-{
-  "extends": [
-    "github>ozzy-labs/skills//skills-sync",
-    "github>ozzy-labs/skills//skills-sync/claude-code",
-    "github>ozzy-labs/skills//skills-sync/codex-cli",
-    "github>ozzy-labs/skills//skills-sync/gemini-cli",
-    "github>ozzy-labs/skills//skills-sync/copilot"
-  ]
-}
-```
-
-Each adapter sub-preset adds an `adapter:<id>` label to the Renovate sync PR. Sub-presets are additive — extend only the adapters you actually sync.
-
-| Sub-preset | Adapter output |
+| Adapter id | Adapter output |
 | --- | --- |
-| `skills-sync/claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` |
-| `skills-sync/codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` |
-| `skills-sync/gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
-| `skills-sync/copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
+| `claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` |
+| `codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` |
+| `gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
+| `copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
 
-Existing consumers keep working with `extends: ["github>ozzy-labs/skills//skills-sync"]` alone — adapter opt-in is non-breaking and additive. The adapter-id-based file copy on the consumer side is provided by a separate `commons/sync.sh` extension (tracked as a sub-issue on the [commons](https://github.com/ozzy-labs/commons) repo); the connection spec between this preset and `sync.sh` is defined there.
+Adapter opt-in is non-breaking and additive — list only the adapters you actually sync. The file copy on the consumer side is driven by `commons/sync-skills.sh` per consumer's `skills_adapters` declaration.
+
+### Legacy Renovate preset (removed)
+
+Earlier versions of this repo shipped a `skills-sync/` Renovate preset (`extends: ["github>ozzy-labs/skills//skills-sync"]`). The preset was removed in [issue #80](https://github.com/ozzy-labs/skills/issues/80) Step 4 in favor of the push-mode `/sync-consumers` flow described above. Existing consumers should remove the `extends` reference from their `renovate.json` (see Step 3 of the transition for the consumer-side cleanup PRs).
 
 ### Snippet sync helper
 
