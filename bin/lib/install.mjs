@@ -15,7 +15,7 @@
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertNoForbiddenFlags, parseFlags } from "./args.mjs";
 
@@ -81,6 +81,8 @@ const ADAPTER_LAYOUT = {
 
 /**
  * Walk a directory tree and return every file path relative to `root`.
+ * Paths are normalized to forward-slash separators so the internal layout
+ * comparisons (e.g. matching `".claude/skills/"`) work on Windows too.
  *
  * @param {string} root
  * @returns {Promise<string[]>}
@@ -94,7 +96,7 @@ async function listFiles(root) {
       if (entry.isDirectory()) {
         await walk(full);
       } else if (entry.isFile()) {
-        out.push(relative(root, full));
+        out.push(relative(root, full).split(sep).join("/"));
       }
     }
   }
@@ -266,7 +268,11 @@ export async function executeInstall(plan, options) {
   for (const [skillKey, files] of bySkill) {
     const skillLabel = skillKey === "__adapter__" ? "(adapter-wide files)" : skillKey;
 
-    // Determine whether anything in this group already exists.
+    // Determine whether anything in this group already exists. Snippet-only
+    // adapters (gemini-cli, copilot) flow through the `__adapter__` group and
+    // can overwrite the user's hand-edited ~/.gemini/settings.json or
+    // ~/AGENTS.md.snippet, so they MUST prompt unless --upgrade / --force is
+    // set just like skill groups do.
     let hasExisting = false;
     for (const file of files) {
       if (existsSync(file.dest)) {
@@ -280,7 +286,7 @@ export async function executeInstall(plan, options) {
         // proceed and mark as upgraded
       } else {
         const yes = await confirm(
-          `Skill '${skillLabel}' is already installed at ${plan.target_dir}. Overwrite?`,
+          `'${skillLabel}' is already installed at ${plan.target_dir}. Overwrite?`,
           false,
         );
         if (!yes) {
