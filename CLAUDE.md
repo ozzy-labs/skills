@@ -24,3 +24,15 @@
 
 - スキル完了時のネクストアクション提案には `AskUserQuestion` を使用する
 - ネクストアクションはユーザーの確認なく実行しない
+
+## CLI Installer (user scope)
+
+各 skill を自分の `$HOME` に user-scope で install したい場合は npm 経由の CLI を使う:
+
+```bash
+npx @ozzylabs/skills install --adapter=claude-code             # 全 skill を ~/.claude/skills/ に
+npx @ozzylabs/skills install --skills=drive,review --dry-run   # JSON で計画のみ
+npx @ozzylabs/skills migrate --dry-run                         # 旧 project-scope 配信の片付け
+```
+
+詳細は `README.md` の「CLI installer (user-scoped)」を参照。

@@ -1,14 +1,54 @@
 #!/usr/bin/env node
-// @ozzylabs/skills CLI installer — placeholder.
+// @ozzylabs/skills CLI entry point — dispatcher for `install` and `migrate`.
 //
-// The real installer (adapter detection, payload copy into consumer repos)
-// is tracked in ozzy-labs/skills sub-issue B (#98). Until then this binary
-// only emits an informational message and exits 0 so packaging / dry-run
-// remain green.
+// Usage:
+//   npx @ozzylabs/skills install [options]
+//   npx @ozzylabs/skills migrate [options]
 //
-// Refs:
-//   - sub-issue A (this PR): #97 — package.json publish setup + payload slim
-//   - sub-issue B           : #98 — CLI installer body
+// The installer writes user-scoped skill files (always under the user's HOME
+// directory — never project-scoped). The migrate command removes the legacy
+// project-scoped skill copies left over by the older Renovate-based sync flow.
+//
+// See ozzy-labs/skills#96 (parent epic) and #98 (this sub-issue) for the
+// design discussion.
 
-console.log("install: see ozzy-labs/skills#98 (sub-issue B)");
-process.exit(0);
+import { runInstall } from "./lib/install.mjs";
+import { runMigrate } from "./lib/migrate.mjs";
+
+const TOP_LEVEL_HELP = `npx @ozzylabs/skills <subcommand> [options]
+
+Subcommands:
+  install   Install canonical skills into the user-scoped skills directory
+            (~/.claude/skills/, ~/.agents/skills/, etc.) for the chosen adapter.
+  migrate   Remove the legacy project-scoped skill copies and the related
+            .commons/sync.yaml entries (skills_adapters / skills_commit).
+
+Run 'npx @ozzylabs/skills <subcommand> --help' for subcommand-specific options.
+`;
+
+async function main(argv) {
+  const subcommand = argv[0];
+  const rest = argv.slice(1);
+
+  if (!subcommand || subcommand === "-h" || subcommand === "--help") {
+    process.stdout.write(TOP_LEVEL_HELP);
+    return 0;
+  }
+
+  if (subcommand === "install") {
+    return await runInstall(rest);
+  }
+  if (subcommand === "migrate") {
+    return await runMigrate(rest);
+  }
+
+  process.stderr.write(`Unknown subcommand: ${subcommand}\n\n${TOP_LEVEL_HELP}`);
+  return 1;
+}
+
+main(process.argv.slice(2))
+  .then((code) => process.exit(code ?? 0))
+  .catch((err) => {
+    process.stderr.write(`error: ${err?.stack ?? err}\n`);
+    process.exit(1);
+  });
