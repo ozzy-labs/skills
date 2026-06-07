@@ -30,6 +30,45 @@ OzzyLabs 全リポジトリ共通の 13 件:
 
 リポ固有スキル（例: `road` の `improve-loop` / `road-repo-context`）は本パッケージには含まない。
 
+## CLI installer (user scope)
+
+`@ozzylabs/skills` パッケージは canonical な skill バンドルを user-scope の skills ディレクトリへインストールする CLI を同梱する。出力先は常に `$HOME` 配下（project-scope 配信は意図的に未サポート）:
+
+```bash
+# 全 skill を ~/.claude/skills/ に install (Claude Code、default adapter)
+npx @ozzylabs/skills install
+
+# 一部の skill を ~/.agents/skills/ に install (Codex CLI)
+npx @ozzylabs/skills install --adapter=codex-cli --skills=drive,review
+
+# dry-run: JSON で計画のみ出力し、実コピーなし
+npx @ozzylabs/skills install --skills=drive --dry-run
+
+# 既存 install を上書き
+npx @ozzylabs/skills install --upgrade
+
+# 対話 prompt を skip (CI 等)
+npx @ozzylabs/skills install --force
+```
+
+対応 adapter: `claude-code`（default）、`codex-cli`、`gemini-cli`、`copilot`。出力 path は build pipeline が `dist/{adapter-id}/` 配下に書く構造をそのまま `$HOME` に転写する。`--target` などの project-scope 用 flag は意図的に未サポート — repo ごとの mirror が必要な場合は `/sync-consumers` flow を使う。
+
+### 旧 project-scope レイアウトからの移行
+
+旧 Renovate-based `/sync-consumers` flow で配信した汎用 skill コピーを project から取り除くには migrate subcommand を使う:
+
+```bash
+# 削除計画の確認
+npx @ozzylabs/skills migrate --dry-run
+
+# 実適用 (汎用 10 skill を .claude/skills/ と .agents/skills/ から削除し、
+# .commons/sync.yaml の skills_adapters / skills_commit も削除する。
+# --keep-sync-yaml で YAML 更新を skip 可能)
+npx @ozzylabs/skills migrate --force
+```
+
+リポ固有の skill（汎用 10 件以外）はそのまま残す。
+
 ## Consumer セットアップ
 
 skills を **user skills** として 1 コマンドで install する:

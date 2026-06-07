@@ -29,6 +29,18 @@ pnpm run lint              # Biome
 pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 ```
 
+## CLI Installer (user scope)
+
+`npx @ozzylabs/skills install` で canonical skill バンドルを user-scope（`$HOME` 配下）に install できる。`migrate` subcommand は旧 project-scope レイアウト（汎用 10 件の `.claude/skills/` / `.agents/skills/` と `.commons/sync.yaml` の `skills_adapters` / `skills_commit`）を片付ける:
+
+```bash
+npx @ozzylabs/skills install --adapter=claude-code --skills=drive,review
+npx @ozzylabs/skills install --adapter=codex-cli --upgrade
+npx @ozzylabs/skills migrate --dry-run
+```
+
+詳細は `README.md` の「CLI installer (user-scoped)」セクションを参照。
+
 ## 検証（必須）
 
 コード変更後、報告前に以下を通すこと:

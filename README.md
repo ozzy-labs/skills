@@ -30,6 +30,45 @@ The 13 common skills shared across all OzzyLabs repositories:
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 
+## CLI installer (user-scoped)
+
+The `@ozzylabs/skills` package ships a CLI that installs the canonical skill bundle into the user-scoped skills directory (always under `$HOME` — there is intentionally no project-scoped target):
+
+```bash
+# Install every skill into ~/.claude/skills/ (Claude Code, default adapter)
+npx @ozzylabs/skills install
+
+# Install a subset into ~/.agents/skills/ (Codex CLI)
+npx @ozzylabs/skills install --adapter=codex-cli --skills=drive,review
+
+# Dry-run: print the JSON plan and do nothing
+npx @ozzylabs/skills install --skills=drive --dry-run
+
+# Overwrite skills that are already installed
+npx @ozzylabs/skills install --upgrade
+
+# Skip the interactive overwrite prompt (e.g. CI)
+npx @ozzylabs/skills install --force
+```
+
+Supported adapters: `claude-code` (default), `codex-cli`, `gemini-cli`, `copilot`. The output path mirrors what the build pipeline writes under `dist/{adapter-id}/`, transplanted onto `$HOME`. Project-scoped install flags (`--target` etc.) are not supported and never will be — use the `/sync-consumers` flow if you need per-repo mirrors.
+
+### Migrating off the legacy project-scoped layout
+
+For repos that previously consumed the generic skills via the Renovate-based `/sync-consumers` flow, the migrate subcommand removes the now-redundant project-scoped copies:
+
+```bash
+# Preview the cleanup plan
+npx @ozzylabs/skills migrate --dry-run
+
+# Apply the cleanup (removes the 10 generic skills under .claude/skills/ and
+# .agents/skills/, and strips skills_adapters / skills_commit from
+# .commons/sync.yaml). Pass --keep-sync-yaml to leave the YAML untouched.
+npx @ozzylabs/skills migrate --force
+```
+
+Repo-local skills (anything outside the documented generic 10) are left untouched.
+
 ## Consumer setup
 
 Install the skills as **user skills** with a single command:
