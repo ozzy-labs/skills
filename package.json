@@ -47,6 +47,9 @@
     "@biomejs/biome": "^2.4.8",
     "@commitlint/cli": "^20.0.0",
     "@commitlint/config-conventional": "^20.0.0",
+    "ajv": "^8.17.1",
+    "ajv-cli": "^5.0.0",
+    "js-yaml": "^4.1.0",
     "prettier": "3.8.3"
   }
 }
