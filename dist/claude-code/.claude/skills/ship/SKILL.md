@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 
 # ship
 
-`.agents/skills/ship/SKILL.md` を Read し、ワークフロー手順に従う。
+`~/.agents/skills/ship/SKILL.md` を Read し、ワークフロー手順に従う。
 
 **重要:** 各ステップの実行中、読み込んだスキル内の「次のアクション提案」セクションおよび「完了報告」セクションは**すべて無視**する。ステップ間の遷移は本スキルが制御する。
 
@@ -16,5 +16,5 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 
 完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
 
-- **「PR をレビューする」** → `.claude/skills/review/SKILL.md` を Read し、その手順に従う
+- **「PR をレビューする」** → `~/.claude/skills/review/SKILL.md` を Read し、その手順に従う
 - **「PR をマージする」** → `gh pr merge --squash --delete-branch` でマージを実行し、結果を報告する

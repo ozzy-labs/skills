@@ -7,7 +7,7 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 # implement
 
-`.agents/skills/implement/SKILL.md` を Read し、ワークフロー手順に従う。
+`~/.agents/skills/implement/SKILL.md` を Read し、ワークフロー手順に従う。
 
 ## Claude Code 固有の追加事項
 
@@ -32,6 +32,6 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 実装完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
 
-- **「lint・コミット・PR まで一括実行する」** → `.claude/skills/ship/SKILL.md` を Read し、その手順に従う
-- **「個別に lint を実行する」** → `.claude/skills/lint/SKILL.md` を Read し、その手順に従う
+- **「lint・コミット・PR まで一括実行する」** → `~/.claude/skills/ship/SKILL.md` を Read し、その手順に従う
+- **「個別に lint を実行する」** → `~/.claude/skills/lint/SKILL.md` を Read し、その手順に従う
 - **「追加の変更を行う」** → 終了する

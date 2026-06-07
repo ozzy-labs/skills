@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Edit, AskUserQuestion
 
 # lint
 
-`.agents/skills/lint/SKILL.md` を Read し、ワークフロー手順に従う。
+`~/.agents/skills/lint/SKILL.md` を Read し、ワークフロー手順に従う。
 
 ## Claude Code 固有の追加事項
 
@@ -14,8 +14,8 @@ allowed-tools: Bash, Read, Edit, AskUserQuestion
 
 **全て通過した場合:**
 
-- **「コミットする」** → `.claude/skills/commit/SKILL.md` を Read し、その手順に従う
-- **「コミット・PR まで一括実行する」** → `.claude/skills/ship/SKILL.md` を Read し、その手順に従う
+- **「コミットする」** → `~/.claude/skills/commit/SKILL.md` を Read し、その手順に従う
+- **「コミット・PR まで一括実行する」** → `~/.claude/skills/ship/SKILL.md` を Read し、その手順に従う
 - **「追加の変更を行う」** → 終了する
 
 **エラーがある場合:**

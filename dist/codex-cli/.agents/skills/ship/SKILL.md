@@ -12,14 +12,14 @@ description: lint・コミット・PR 作成を一括実行する。変更に対
 ### Step 1: lint
 
 1. `git status` で変更ファイルを特定する
-2. `.agents/skills/lint-rules/SKILL.md` を参照し、対象ファイルの lint・フォーマット・型チェックを実行する
+2. `~/.agents/skills/lint-rules/SKILL.md` を参照し、対象ファイルの lint・フォーマット・型チェックを実行する
 3. エラーがある場合は報告して中断する
 
 ### Step 2: commit
 
 1. `git status` で変更ファイルの一覧を取得する
 2. 変更ファイルを個別に `git add <file>` でステージする。`.env` ファイルはステージングしない
-3. `.agents/skills/commit-conventions/SKILL.md` を参照し、Conventional Commits に従いコミットメッセージを生成する
+3. `~/.agents/skills/commit-conventions/SKILL.md` を参照し、Conventional Commits に従いコミットメッセージを生成する
 4. `git commit -m "<message>"` でコミットする
 
 変更がない場合、既にコミット済みの未プッシュコミットがあれば Step 3 に進む。なければ終了する。

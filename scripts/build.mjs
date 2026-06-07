@@ -34,6 +34,7 @@ import { CodexCliAdapter } from "./adapters/codex-cli.mjs";
 import { CopilotAdapter } from "./adapters/copilot.mjs";
 import { GeminiCliAdapter } from "./adapters/gemini-cli.mjs";
 import { assertRequiredFields, parseSkillDocument } from "./lib/frontmatter.mjs";
+import { rewriteSkillRefsToUserScope } from "./lib/user-scope-refs.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -238,7 +239,10 @@ async function writeAdapterOutputs(skills, agents) {
     for (const out of outputs) {
       const dest = join(adapterRoot, out.relativePath);
       await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, out.content);
+      // dist/ is the user-scope install payload (ADR-0027): repo-root-relative
+      // skill refs must become `~/`-prefixed here. Dogfood mirrors above keep
+      // the relative form, and adapters stay verbatim (pure functions).
+      await writeFile(dest, rewriteSkillRefsToUserScope(out.content));
     }
   }
 }
