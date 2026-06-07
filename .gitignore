@@ -13,3 +13,7 @@ Thumbs.db
 
 # Dependencies
 node_modules/
+
+# Claude Code runtime artifacts
+.claude/scheduled_tasks.lock
+.claude/worktrees/
