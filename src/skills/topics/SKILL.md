@@ -102,7 +102,7 @@ Final 16 topics: ai, ai-agents, agentic, multi-agent, cli, claude, claude-code, 
 
 - `--dry-run` 指定時: 出力のみ、API 呼び出しなし
 - `--apply` 指定時: 確認なしで `gh repo edit <owner/repo> --add-topic <topic1>,<topic2>,...` を実行
-- どちらも未指定時: AskUserQuestion で適用可否を確認する（テキスト出力で `Apply? [Y/n]` のような選択肢を列挙しない）
+- どちらも未指定時: ホストの確認 UI で適用可否を確認する（テキスト出力で `Apply? [Y/n]` のような選択肢を列挙しない。Claude Code では AskUserQuestion — `SKILL.claude-code.md` 参照）
 
 適用後、結果を確認する:
 
