@@ -50,6 +50,9 @@ jobs:
       - name: Lint (GitHub Actions)
         run: actionlint
 
+      - name: Lint (GitHub Actions — examples/)
+        run: actionlint examples/*.yaml
+
       - name: Validate sync-targets.yaml against JSON Schema
         run: |
           pnpm exec ajv validate \

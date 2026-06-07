@@ -1,0 +1,41 @@
+name: 'Setup ozzylabs skills'
+# Installs into $HOME/.claude/skills/ (user scope). target input is
+# intentionally omitted so consumers cannot write into repo-local .claude/.
+description: 'Install @ozzylabs/skills into the GitHub Actions runner ($HOME/.claude/skills/, user scope only).'
+author: 'ozzy-labs'
+branding:
+  icon: 'download'
+  color: 'blue'
+
+inputs:
+  skills:
+    description: 'Comma-separated skill list (empty for all skills bundled with the package).'
+    required: false
+    default: ''
+  adapter:
+    description: 'Adapter id: claude-code / codex-cli / gemini-cli / copilot.'
+    required: false
+    default: 'claude-code'
+  version:
+    description: 'Package version (default: latest from npm). Pin to a specific version for reproducible installs.'
+    required: false
+    default: 'latest'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install @ozzylabs/skills via npx
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.claude/skills" "$HOME/.agents/skills"
+        if [ -n "${{ inputs.skills }}" ]; then
+          npx -y "@ozzylabs/skills@${{ inputs.version }}" install \
+            --adapter="${{ inputs.adapter }}" \
+            --skills="${{ inputs.skills }}" \
+            --force
+        else
+          npx -y "@ozzylabs/skills@${{ inputs.version }}" install \
+            --adapter="${{ inputs.adapter }}" \
+            --force
+        fi

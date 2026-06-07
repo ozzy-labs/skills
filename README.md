@@ -98,7 +98,19 @@ See `npx @ozzylabs/skills install --help` for the full list of options and the e
 
 ### Using the skills in CI
 
-A reusable GitHub Action that runs `npx @ozzylabs/skills install` on the runner is planned (see [issue #101](https://github.com/ozzy-labs/skills/issues/101)). Until it lands, invoke the CLI directly from a step:
+For GitHub Actions, use the `ozzy-labs/skills` composite action — it wraps `npx @ozzylabs/skills install` and writes into the runner's `$HOME/.claude/skills/` (and `$HOME/.agents/skills/`):
+
+```yaml
+- uses: ozzy-labs/skills@v1
+  with:
+    skills: drive,review   # default: '' (install all bundled skills)
+    adapter: claude-code   # default: claude-code
+    # version: latest      # default: latest from npm; pin a version for reproducibility
+```
+
+The action installs at the user scope only (`$HOME/.claude/skills/`); a `target` input is intentionally omitted so consumers cannot accidentally write into repo-local `.claude/skills/`. A runnable end-to-end sample lives at [`examples/ci-with-skills.yaml`](examples/ci-with-skills.yaml).
+
+If you would rather call the CLI directly (e.g. to share a custom install step across multiple jobs), invoke it from a `run:` step:
 
 ```yaml
 - name: Install OzzyLabs skills
