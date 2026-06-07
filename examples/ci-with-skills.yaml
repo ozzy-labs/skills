@@ -1,0 +1,31 @@
+# Sample GitHub Actions workflow showing how to use the
+# `ozzy-labs/skills` composite action to install @ozzylabs/skills into
+# the runner's $HOME/.claude/skills/.
+#
+# Pin `ozzy-labs/skills@v1` to a SHA for production use. This sample uses
+# the floating `@v1` tag (cut by release-please once the first stable
+# release ships).
+name: example CI with skills
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ozzy-labs/skills@v1
+        with:
+          skills: drive,review # default: '' (all bundled skills)
+          adapter: claude-code # default: claude-code
+
+      - name: Verify install
+        run: |
+          test -f "$HOME/.claude/skills/drive/SKILL.md"
+          test -f "$HOME/.claude/skills/review/SKILL.md"
+          echo "skills installed"

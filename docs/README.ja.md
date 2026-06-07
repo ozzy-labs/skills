@@ -98,7 +98,19 @@ npx @ozzylabs/skills install --adapter claude-code --adapter codex-cli
 
 ### CI で利用する場合
 
-CI runner 上で `npx @ozzylabs/skills install` を実行する再利用可能な GitHub Action を別途整備予定（[issue #101](https://github.com/ozzy-labs/skills/issues/101) を参照）。Action 提供までは step から直接 CLI を呼び出す:
+GitHub Actions 上では `ozzy-labs/skills` composite action を使う。action は内部で `npx @ozzylabs/skills install` を呼び出し、ランナーの `$HOME/.claude/skills/`（および `$HOME/.agents/skills/`）にスキルを取り込む:
+
+```yaml
+- uses: ozzy-labs/skills@v1
+  with:
+    skills: drive,review   # 既定: '' (バンドルされた全スキルを取り込む)
+    adapter: claude-code   # 既定: claude-code
+    # version: latest      # 既定: npm の latest。再現性が必要なら version を pin する
+```
+
+action は user scope (`$HOME/.claude/skills/`) のみにインストールする。`target` input は意図的に持たず、consumer がリポジトリ直下の `.claude/skills/` に誤って書き込めない設計とした。実際に動く end-to-end サンプルは [`examples/ci-with-skills.yaml`](../examples/ci-with-skills.yaml) を参照。
+
+複数 job 共通の install step を独自に書きたい場合は、CLI を `run:` step から直接呼んでもよい:
 
 ```yaml
 - name: Install OzzyLabs skills

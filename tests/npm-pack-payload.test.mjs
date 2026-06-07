@@ -88,9 +88,9 @@ test("npm pack excludes the removed legacy duplicates", () => {
   }
 });
 
-test("npm pack only ships .mjs (bin), .md (docs), .json (manifests/schemas), .snippet, .sh, and .settings.json under dist/", () => {
+test("npm pack only ships .mjs (bin), .md (docs), .json (manifests/schemas), .snippet, .sh, .settings.json under dist/, and the action.yaml composite action manifest", () => {
   const [pkg] = npmPackJson();
-  const allowedExts = [".md", ".json", ".snippet", ".sh", ".mjs"];
+  const allowedExts = [".md", ".json", ".snippet", ".sh", ".mjs", ".yaml"];
   for (const file of pkg.files) {
     const path = file.path;
     if (path === "LICENSE") continue; // no extension
@@ -100,4 +100,15 @@ test("npm pack only ships .mjs (bin), .md (docs), .json (manifests/schemas), .sn
       `unexpected file in pack payload: ${path} (extension not in ${allowedExts.join(", ")})`,
     );
   }
+});
+
+test("npm pack ships the action.yaml composite action manifest at the package root", () => {
+  // Ships `ozzy-labs/skills@v1` composite action for GitHub Actions CI
+  // integration. See sub-issue #101.
+  const [pkg] = npmPackJson();
+  const paths = pkg.files.map((f) => f.path);
+  assert.ok(
+    paths.includes("action.yaml"),
+    `expected pack to include action.yaml at root; got ${paths.join(", ")}`,
+  );
 });
