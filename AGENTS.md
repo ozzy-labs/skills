@@ -18,7 +18,7 @@
 - Runtime: Node.js (ESM)
 - Package manager: pnpm
 - Version management: mise (`.mise.toml`)
-- Distribution: npm package + CLI installer（`npx @ozzylabs/skills install`）のみ。user skills only モデル（handbook ADR-0027 にて整理予定）。push 型 `/sync-consumers` フローおよび Renovate preset は廃止
+- Distribution: npm package + CLI installer（`npx @ozzylabs/skills install`）のみ。user skills only モデル（[handbook ADR-0027](https://github.com/ozzy-labs/handbook/blob/main/adr/0027-skill-distribution-user-only.md)）。旧 push 型 sync フローおよび Renovate preset は廃止
 
 ## 主要コマンド
 
@@ -54,15 +54,15 @@ npx @ozzylabs/skills migrate --dry-run
 - `src/skills/{name}/SKILL.claude-code.md` — Claude Code 固有 wrapper（任意）。companion 仕様は README.md を参照
 - `src/skills/{name}/<extra>.md` — 任意の skill 内アセット（例: `review/perspectives/<axis>.md`）。`SKILL.md` / `SKILL.{adapter}.md` 以外のファイルは全配信先（`.claude/skills/{name}/<extra>.md`, `.agents/skills/{name}/<extra>.md` 等）に verbatim でコピーされる
 - `src/agents/{name}.md` — Claude Code 専用 agent（[ADR-0026](https://github.com/ozzy-labs/handbook/blob/main/adr/0026-agent-distribution-via-skills-sync.md)）。`dist/claude-code/.claude/agents/{name}.md` のみに出力される
-- `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）。これが npm payload / sync-consumers の正準ペイロード
+- `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）。これが npm payload の正準ペイロード
 - `.agents/skills/{name}/SKILL.md` / `.claude/skills/{name}/SKILL.md` — skills repo 自身が dogfood するための in-repo mirror（npm payload には含めない。`package.json#files` で除外）
-- `dist/sync/replace-snippet.sh` — 下流 sync workflow 向けマーカー間置換ヘルパー（マーカー欠落時は append でフォールバック）
+- `dist/sync/replace-snippet.sh` — `npx @ozzylabs/skills migrate` / 内部 sync helper 向けマーカー間置換ヘルパー（マーカー欠落時は append でフォールバック）
 - `scripts/build.mjs` — ビルドオーケストレータ
 - `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
 - `scripts/sync/replace-snippet.sh` — `dist/sync/` にコピーされる sync ヘルパーの SSOT
 - `scripts/lib/` — 共通 lib（frontmatter, snippet markers, AdapterBase）
-- `sync-targets.yaml` — `/sync-consumers` skill が push 配信する consumer リスト（[issue #81](https://github.com/ozzy-labs/skills/issues/81)）
-- `schemas/sync-targets.schema.json` — `sync-targets.yaml` の JSON Schema（lefthook + CI で validate）
+- `bin/install.mjs` + `bin/lib/` — CLI installer / migrate サブコマンド本体（npm publish payload に含まれる）
+- `action.yaml` — composite GitHub Action `ozzy-labs/skills@v1` (CI integration)
 - `.commons/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ
 
 ## 規約

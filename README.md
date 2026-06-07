@@ -24,7 +24,6 @@ The 13 common skills shared across all OzzyLabs repositories:
 | `pr` | Push changes and open or update a PR |
 | `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
 | `ship` | Lint + commit + PR creation in one go |
-| `sync-consumers` | Push skills/commons updates to the 14 consumer repos declared in `sync-targets.yaml` in parallel (drive-derived). Reuses drive's Phase Final-1 worktree drift detection and Phase Final-2 cleanup; ships with an extra axis 7 (subagent worktree holding `refs/heads/main`) and a mandatory `cd <parent-worktree-root>` before each `git worktree remove`. `--dry-run` / `--filter <repo,repo>` / `--merge` |
 | `test` | Run build, tests, and type checks |
 | `topics` | Research-driven GitHub topics setup (ozzy-labs scope): validate official constraints (lowercase / hyphen / 50 chars / max 20), measure popularity via `gh api search/repositories` with session-scoped cache, decide broad+narrow / singular-plural pairs, and apply ozzy-labs hardcoded conventions (`claude-code` exception, `*-cli` suffix removal, `multi-agent` canonical form). `--apply` to commit, `--dry-run` for analysis only |
 
@@ -51,11 +50,11 @@ npx @ozzylabs/skills install --upgrade
 npx @ozzylabs/skills install --force
 ```
 
-Supported adapters: `claude-code` (default), `codex-cli`, `gemini-cli`, `copilot`. The output path mirrors what the build pipeline writes under `dist/{adapter-id}/`, transplanted onto `$HOME`. Project-scoped install flags (`--target` etc.) are not supported and never will be — use the `/sync-consumers` flow if you need per-repo mirrors.
+Supported adapters: `claude-code` (default), `codex-cli`, `gemini-cli`, `copilot`. The output path mirrors what the build pipeline writes under `dist/{adapter-id}/`, transplanted onto `$HOME`. Project-scoped install flags (`--target` etc.) are not supported and never will be — `~/.claude/skills/` is the only supported target.
 
 ### Migrating off the legacy project-scoped layout
 
-For repos that previously consumed the generic skills via the Renovate-based `/sync-consumers` flow, the migrate subcommand removes the now-redundant project-scoped copies:
+For repos that previously consumed the generic skills via the legacy Renovate / push-mode sync flow, the migrate subcommand removes the now-redundant project-scoped copies:
 
 ```bash
 # Preview the cleanup plan
@@ -119,9 +118,9 @@ If you would rather call the CLI directly (e.g. to share a custom install step a
 
 ### Migrating from the legacy push-mode flow
 
-Consumers that previously consumed skills as **project skills** via the push-mode `/sync-consumers` flow (`dist/{adapter-id}/` copied into `.claude/skills/` etc.) need to migrate to user skills only. A migration guide and a pilot rollout are planned in [issue #100](https://github.com/ozzy-labs/skills/issues/100); the short version is:
+Consumers that previously consumed skills as **project skills** via the legacy push-mode sync flow (`dist/{adapter-id}/` copied into `.claude/skills/` etc.) need to migrate to user skills only. The migration was completed in [issue #100](https://github.com/ozzy-labs/skills/issues/100) by delivering a one-off `chore/migrate-to-user-skills` PR to each consumer. For new consumers, the manual steps are:
 
-1. Remove `.claude/skills/`, `.agents/skills/`, and equivalent in-repo skill mirrors.
+1. Remove `.claude/skills/`, `.agents/skills/`, and equivalent in-repo skill mirrors (or run `npx @ozzylabs/skills migrate`).
 2. Drop `skills_commit` / `skills_adapters` from `.commons/sync.yaml`.
 3. Have each contributor run `npx @ozzylabs/skills install` once on their machine.
 
