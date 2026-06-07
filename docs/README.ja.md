@@ -4,9 +4,9 @@
 
 Claude Code / GitHub Copilot / Gemini CLI / Codex CLI 向けの OzzyLabs 正準エージェントスキルバンドル。
 
-`src/skills/{name}/SKILL.md` を SSOT とし、`pnpm build` で `dist/{adapter-id}/` 配下に各 agent 向けの出力を生成する。consumer リポは `/sync-consumers` 経由の push で取り込む（npm install による参照も可能）。
+`src/skills/{name}/SKILL.md` を SSOT とし、`pnpm build` で `dist/{adapter-id}/` 配下に各 agent 向けの出力を生成する。エンドユーザーは npm package に同梱された CLI installer 経由で **user skills**（例: `~/.claude/skills/`）として install する。
 
-[OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) で決定された、skills を `commons` から切り出して専用リポでバージョニングする方針の実装。配布機構は [ADR-0002](https://github.com/ozzy-labs/handbook/blob/main/adr/0002-skills-distribution-via-renovate.md) の Renovate 同期を継承する。
+[OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) で決定された、skills を `commons` から切り出して専用リポでバージョニングする方針の実装。配布形態は **user skills only**（handbook ADR-0027 にて整理予定）に統一されており、consumer は `npx @ozzylabs/skills install` で導入する。各 consumer リポ配下への project skills (`.claude/skills/`) 配信は廃止し、project skills は `skills` / `commons` リポ自身の dogfood 用途のみ残す（build pipeline が SSOT から生成）。
 
 ## v0.x 同梱スキル
 
@@ -32,53 +32,47 @@ OzzyLabs 全リポジトリ共通の 13 件:
 
 ## Consumer セットアップ
 
-`.commons/sync.yaml` に upstream digest と opt-in adapter を記録:
-
-```yaml
-skills_commit: <40-char SHA from main>
-skills_adapters:
-  - claude-code
-  - codex-cli
-  - gemini-cli
-  - copilot
-```
-
-更新は `ozzy-labs/skills` 側から `/sync-consumers` skill 経由で push される（[issue #80](https://github.com/ozzy-labs/skills/issues/80) 参照）。本リポの `main` が進んだとき、maintainer が `/sync-consumers --source=skills --auto-merge` を実行すると、各 consumer に 1 件ずつ sync PR が作成される（内部的に `commons/scripts/sync-consumers.sh` が driver）。PR は `.commons/sync.yaml` の `skills_commit` を bump し、[ozzy-labs/commons](https://github.com/ozzy-labs/commons) の `sync-skills.sh -y` で opt-in した adapter 出力（`dist/{adapter-id}/`）を consumer へコピーする。
-
-### Adapter opt-in（agent 別出力の取り込み）
-
-agent 別 adapter 出力（`dist/{adapter-id}/`）を取り込む場合は、`skills_adapters` に adapter id を列挙する（上記サンプル参照）。adapter id と出力パスの対応:
-
-| Adapter id | Adapter 出力 |
-| --- | --- |
-| `claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` |
-| `codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` |
-| `gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
-| `copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
-
-Adapter opt-in は非破壊・加算的で、実際に sync する adapter のみ列挙すればよい。consumer 側のファイルコピーは `commons/sync-skills.sh` が `skills_adapters` の宣言に従って実行する。
-
-### 旧 Renovate preset（削除済み）
-
-旧版では `skills-sync/` Renovate preset（`extends: ["github>ozzy-labs/skills//skills-sync"]`）を提供していた。本 preset は [issue #80](https://github.com/ozzy-labs/skills/issues/80) Step 4 で削除し、上記の push 型 `/sync-consumers` フローに置換した。既存 consumer は `renovate.json` から `extends` 参照を削除する必要がある（transition の Step 3 で consumer 側 cleanup PR を配信予定）。
-
-### Snippet sync ヘルパー
-
-`dist/sync/replace-snippet.sh` は、snippet ファイル（`AGENTS.md.snippet` / `copilot-instructions.md.snippet`）を consumer 所有ファイルへマージする下流 sync workflow 向けのドロップインヘルパーとして配布される:
+skills を **user skills** として 1 コマンドで install する:
 
 ```bash
-.sync-skills/dist/sync/replace-snippet.sh \
-  AGENTS.md \
-  .sync-skills/dist/codex-cli/AGENTS.md.snippet
+npx @ozzylabs/skills install
 ```
 
-挙動:
+このコマンドは canonical skills を user-scope の skill ディレクトリ（Claude Code なら `~/.claude/skills/{name}/SKILL.md`）に配置する。マシン上の全プロジェクトが per-repo 設定なしで skills を利用できる。
 
-- ターゲットに begin マーカーがある場合 → マーカーブロック（begin..end 包括）を snippet 内容で置換する
-- マーカーが欠落している場合（別 sync — 典型的には `commons` — がファイルを上書きしてマネージド領域を消した場合）→ ファイル末尾に snippet を append する。snippet 自体がマーカーを含むため、次回以降は in-place 置換に戻る
-- ターゲットファイルが存在しない場合 → snippet から新規作成する
+### Adapter opt-in
 
-この自動復旧により、下流 workflow がマーカー処理ロジックを自前で持つ必要がなくなり、`.github/copilot-instructions.md` のような共有ファイルの所有権が複数の sync 元にまたがる場合でも hard failure を回避できる。
+既定では Claude Code 向け adapter 出力のみ書き出される。他の agent 向け出力を追加で取り込む場合は `--adapter` を繰り返し指定する:
+
+```bash
+npx @ozzylabs/skills install --adapter claude-code --adapter codex-cli
+```
+
+| Adapter id | User-scope install target |
+| --- | --- |
+| `claude-code` | `~/.claude/skills/{name}/SKILL.md` |
+| `codex-cli` | `~/.codex/agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` のマージ |
+| `gemini-cli` | `~/.gemini/settings.json` のマージ + `AGENTS.md.snippet` のマージ |
+| `copilot` | `~/.github/copilot-instructions.md` への snippet マージ |
+
+オプション・install target の詳細は `npx @ozzylabs/skills install --help` を参照。
+
+### CI で利用する場合
+
+CI runner 上で `npx @ozzylabs/skills install` を実行する再利用可能な GitHub Action を別途整備予定（[issue #101](https://github.com/ozzy-labs/skills/issues/101) を参照）。Action 提供までは step から直接 CLI を呼び出す:
+
+```yaml
+- name: Install OzzyLabs skills
+  run: npx --yes @ozzylabs/skills install --adapter claude-code
+```
+
+### 旧 push 型フローからの移行
+
+以前は push 型 `/sync-consumers` 経由で skills を **project skills** として配信していた（`dist/{adapter-id}/` を consumer リポの `.claude/skills/` 等にコピー）。本方針変更により全 consumer が user skills only への移行対象となる。移行ガイドと pilot rollout は [issue #100](https://github.com/ozzy-labs/skills/issues/100) で整備予定。概要は以下:
+
+1. `.claude/skills/` / `.agents/skills/` 等、in-repo skill ミラーを削除する。
+2. `.commons/sync.yaml` から `skills_commit` / `skills_adapters` を取り除く。
+3. 各 contributor が自分のマシンで `npx @ozzylabs/skills install` を 1 度実行する。
 
 ## Adapter 出力
 

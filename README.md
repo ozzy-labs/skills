@@ -4,9 +4,9 @@ English | [日本語](docs/README.ja.md)
 
 Canonical OzzyLabs agent skill bundle for Claude Code, GitHub Copilot, Gemini CLI, and Codex CLI.
 
-`src/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces per-agent outputs under `dist/{adapter-id}/` (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`). Consumer repositories pull these in via the push-mode `/sync-consumers` flow (or, optionally, via `npm install`).
+`src/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces per-agent outputs under `dist/{adapter-id}/` (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`). End users install these skills as **user skills** (e.g. `~/.claude/skills/`) via the CLI installer shipped in the npm package.
 
-This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT, while preserving the [ADR-0002](https://github.com/ozzy-labs/handbook/blob/main/adr/0002-skills-distribution-via-renovate.md) Renovate-based distribution model.
+This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT. Distribution is **user skills only** (see handbook ADR-0027, in preparation): consumers install via `npx @ozzylabs/skills install`, and project-scope skills (`.claude/skills/` under each consumer repo) are no longer pushed. Project-scope skills remain in use only inside the `skills` / `commons` repos themselves for dogfooding, where the build pipeline emits them from the SSOT.
 
 ## Skills in v0.x
 
@@ -32,53 +32,47 @@ Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are in
 
 ## Consumer setup
 
-Track the upstream digest in `.commons/sync.yaml`:
-
-```yaml
-skills_commit: <40-char SHA from main>
-skills_adapters:
-  - claude-code
-  - codex-cli
-  - gemini-cli
-  - copilot
-```
-
-Updates are pushed from `ozzy-labs/skills` via the `/sync-consumers` skill (see [issue #80](https://github.com/ozzy-labs/skills/issues/80)). When this repo's `main` advances, a maintainer runs `/sync-consumers --source=skills --auto-merge`, which opens one sync PR per consumer (driven by `commons/scripts/sync-consumers.sh`). The PR bumps `skills_commit` in `.commons/sync.yaml` and runs `sync-skills.sh -y` (from [ozzy-labs/commons](https://github.com/ozzy-labs/commons)) to copy the opted-in adapter outputs (`dist/{adapter-id}/`) from this repository into the consumer.
-
-### Adapter opt-in (per-agent outputs)
-
-To consume per-agent adapter outputs (`dist/{adapter-id}/`), list the adapter ids in `skills_adapters` (shown above). Adapter ids and the corresponding output paths:
-
-| Adapter id | Adapter output |
-| --- | --- |
-| `claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` |
-| `codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` |
-| `gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` |
-| `copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` |
-
-Adapter opt-in is non-breaking and additive — list only the adapters you actually sync. The file copy on the consumer side is driven by `commons/sync-skills.sh` per consumer's `skills_adapters` declaration.
-
-### Legacy Renovate preset (removed)
-
-Earlier versions of this repo shipped a `skills-sync/` Renovate preset (`extends: ["github>ozzy-labs/skills//skills-sync"]`). The preset was removed in [issue #80](https://github.com/ozzy-labs/skills/issues/80) Step 4 in favor of the push-mode `/sync-consumers` flow described above. Existing consumers should remove the `extends` reference from their `renovate.json` (see Step 3 of the transition for the consumer-side cleanup PRs).
-
-### Snippet sync helper
-
-`dist/sync/replace-snippet.sh` is shipped as a drop-in helper for downstream sync workflows that merge snippet files (`AGENTS.md.snippet`, `copilot-instructions.md.snippet`) into consumer-owned files:
+Install the skills as **user skills** with a single command:
 
 ```bash
-.sync-skills/dist/sync/replace-snippet.sh \
-  AGENTS.md \
-  .sync-skills/dist/codex-cli/AGENTS.md.snippet
+npx @ozzylabs/skills install
 ```
 
-Behavior:
+This drops the canonical skills into your user-scope skill directory (e.g. `~/.claude/skills/{name}/SKILL.md` for Claude Code) so every project on the machine can use them without per-repo configuration.
 
-- Target contains the begin marker → replace the marker block (begin..end inclusive) with the snippet contents.
-- Target is missing the marker (e.g. another sync — typically `commons` — overwrote the file and stripped the managed region) → append the snippet to the end of the file. The snippet itself carries the markers, so the next run resumes in-place replacement.
-- Target file does not exist → create it from the snippet.
+### Adapter opt-in
 
-This auto-recovery removes the need for downstream workflows to carry their own marker-handling logic and avoids hard failures when ownership of a shared file like `.github/copilot-instructions.md` shifts between sync sources.
+By default the installer writes the Claude Code adapter output. Pass `--adapter` (repeatable) to opt into additional agents:
+
+```bash
+npx @ozzylabs/skills install --adapter claude-code --adapter codex-cli
+```
+
+| Adapter id | User-scope install target |
+| --- | --- |
+| `claude-code` | `~/.claude/skills/{name}/SKILL.md` |
+| `codex-cli` | `~/.codex/agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` merge |
+| `gemini-cli` | `~/.gemini/settings.json` merge + `AGENTS.md.snippet` merge |
+| `copilot` | `~/.github/copilot-instructions.md` snippet merge |
+
+See `npx @ozzylabs/skills install --help` for the full list of options and the exact target paths.
+
+### Using the skills in CI
+
+A reusable GitHub Action that runs `npx @ozzylabs/skills install` on the runner is planned (see [issue #101](https://github.com/ozzy-labs/skills/issues/101)). Until it lands, invoke the CLI directly from a step:
+
+```yaml
+- name: Install OzzyLabs skills
+  run: npx --yes @ozzylabs/skills install --adapter claude-code
+```
+
+### Migrating from the legacy push-mode flow
+
+Consumers that previously consumed skills as **project skills** via the push-mode `/sync-consumers` flow (`dist/{adapter-id}/` copied into `.claude/skills/` etc.) need to migrate to user skills only. A migration guide and a pilot rollout are planned in [issue #100](https://github.com/ozzy-labs/skills/issues/100); the short version is:
+
+1. Remove `.claude/skills/`, `.agents/skills/`, and equivalent in-repo skill mirrors.
+2. Drop `skills_commit` / `skills_adapters` from `.commons/sync.yaml`.
+3. Have each contributor run `npx @ozzylabs/skills install` once on their machine.
 
 ## Adapter outputs
 

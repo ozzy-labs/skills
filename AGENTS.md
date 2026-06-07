@@ -11,14 +11,14 @@
 
 ## プロジェクト概要
 
-`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、push 型 `/sync-consumers` skill（[issue #80](https://github.com/ozzy-labs/skills/issues/80)）で各 consumer リポへ配信する。consumer は `.commons/sync.yaml` に `skills_commit` + `skills_adapters` を pin して opt-in する。
+`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、npm package + CLI installer（`npx @ozzylabs/skills install`）で end user のマシンに **user skills** として install する（例: `~/.claude/skills/`）。consumer リポ配下への project skills 配信は廃止。
 
 ## Tech Stack
 
 - Runtime: Node.js (ESM)
 - Package manager: pnpm
 - Version management: mise (`.mise.toml`)
-- Distribution: push 型 `/sync-consumers` skill（[issue #80](https://github.com/ozzy-labs/skills/issues/80)）。consumer の `.commons/sync.yaml` を起点にした pin/opt-in モデル。npm publish も提供
+- Distribution: npm package + CLI installer（`npx @ozzylabs/skills install`）のみ。user skills only モデル（handbook ADR-0027 にて整理予定）。push 型 `/sync-consumers` フローおよび Renovate preset は廃止
 
 ## 主要コマンド
 
