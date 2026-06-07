@@ -10,7 +10,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-The 13 common skills shared across all OzzyLabs repositories:
+13 skills total: 10 generic workflow skills shared across all OzzyLabs repositories, plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. Only the 10 generic skills are subject to `npx @ozzylabs/skills migrate` when removing the legacy project-scoped layout.
 
 | Skill | Description |
 | --- | --- |
@@ -89,7 +89,7 @@ npx @ozzylabs/skills install --adapter claude-code --adapter codex-cli
 | Adapter id | User-scope install target |
 | --- | --- |
 | `claude-code` | `~/.claude/skills/{name}/SKILL.md` |
-| `codex-cli` | `~/.codex/agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` merge |
+| `codex-cli` | `~/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` merge |
 | `gemini-cli` | `~/.gemini/settings.json` merge + `AGENTS.md.snippet` merge |
 | `copilot` | `~/.github/copilot-instructions.md` snippet merge |
 
