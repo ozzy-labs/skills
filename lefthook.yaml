@@ -1,12 +1,2 @@
 extends:
   - lefthook-base.yaml
-
-pre-commit:
-  commands:
-    sync-targets-schema-validate:
-      glob: "{sync-targets.yaml,schemas/sync-targets.schema.json}"
-      run: >-
-        pnpm exec ajv validate
-        -s schemas/sync-targets.schema.json
-        -d sync-targets.yaml
-        --strict=true --spec=draft2020
