@@ -102,6 +102,31 @@ test("npm pack only ships .mjs (bin), .md (docs), .json (manifests/schemas), .sn
   }
 });
 
+test("npm pack excludes internal-use skills (health/topics/phase-issue) from dist/{adapter-id}/", () => {
+  // ADR-0027: internal-use skills are kept in src/skills/ for skills/commons
+  // dogfooding but never reach npm consumers. They must be absent from every
+  // dist/{adapter-id}/ tree so `npx @ozzylabs/skills install` cannot resurrect
+  // the residue we removed from 14 consumers in epic #96.
+  const [pkg] = npmPackJson();
+  const paths = pkg.files.map((f) => f.path);
+  const internalSkills = ["health", "topics", "phase-issue"];
+  const adapterRoots = [
+    "dist/claude-code/.claude/skills",
+    "dist/codex-cli/.agents/skills",
+  ];
+  for (const skill of internalSkills) {
+    for (const root of adapterRoots) {
+      const prefix = `${root}/${skill}/`;
+      const hit = paths.filter((p) => p.startsWith(prefix));
+      assert.equal(
+        hit.length,
+        0,
+        `expected pack to exclude internal skill ${prefix}; found ${JSON.stringify(hit)}`,
+      );
+    }
+  }
+});
+
 test("npm pack ships the action.yaml composite action manifest at the package root", () => {
   // Ships `ozzy-labs/skills@v1` composite action for GitHub Actions CI
   // integration. See sub-issue #101.

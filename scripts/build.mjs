@@ -48,6 +48,14 @@ const DIST = join(ROOT, "dist");
 const CLAUDE_DOGFOOD_TARGET = join(ROOT, ".claude", "skills");
 const DOGFOOD_TARGETS = [join(ROOT, ".agents", "skills"), CLAUDE_DOGFOOD_TARGET];
 
+// Internal-use skills are kept in src/skills/ for skills/commons repo's own
+// dogfooding (via DOGFOOD_TARGETS) but MUST NOT be shipped to npm consumers.
+// See handbook ADR-0027: project skills are limited to skills/commons internal
+// use; the npm payload only carries the generic 10. Excluding them from
+// `writeAdapterOutputs` keeps them out of `dist/{adapter-id}/` and therefore
+// out of `npm pack` (which only ships `dist/`).
+const INTERNAL_SKILLS = new Set(["health", "topics", "phase-issue"]);
+
 const ADAPTERS = [
   new ClaudeCodeAdapter(),
   new CodexCliAdapter(),
@@ -240,17 +248,22 @@ async function main() {
   const agents = await loadAgents();
   await cleanupRemovedLegacyTargets();
   await writeDogfoodTargets(skills);
-  await writeAdapterOutputs(skills, agents);
+  const publicSkills = skills.filter((s) => !INTERNAL_SKILLS.has(s.name));
+  await writeAdapterOutputs(publicSkills, agents);
   await writeSyncHelpers();
 
+  const internalNames = skills.filter((s) => INTERNAL_SKILLS.has(s.name)).map((s) => s.name);
   console.log(`✓ Built ${skills.length} skill(s), ${agents.length} agent(s)`);
   console.log("In-repo dogfood (excluded from npm payload):");
   for (const target of DOGFOOD_TARGETS) {
     console.log(`  ${target.replace(ROOT, "").replace(/^\//, "")}`);
   }
-  console.log("Adapters (npm payload):");
+  console.log(`Adapters (npm payload, ${publicSkills.length} public skill(s)):`);
   for (const adapter of ADAPTERS) {
     console.log(`  dist/${adapter.constructor.id}/`);
+  }
+  if (internalNames.length > 0) {
+    console.log(`Internal skills (dogfood only, not shipped): ${internalNames.join(", ")}`);
   }
   console.log("Sync helpers:");
   console.log("  dist/sync/replace-snippet.sh");
