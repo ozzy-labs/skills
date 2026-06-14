@@ -40,10 +40,30 @@ jobs:
         with:
           script: |
             const branch = context.payload.pull_request.head.ref;
+            const actor = context.payload.pull_request.user?.login ?? '';
             const pattern = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)\/.+/;
 
             if (branch === 'main') {
               core.info('Branch is main, skipping check');
+              return;
+            }
+
+            if (branch.startsWith('release-please--')) {
+              core.info('Branch is a release-please auto PR, skipping check');
+              return;
+            }
+
+            if (actor === 'dependabot[bot]' || branch.startsWith('dependabot/')) {
+              core.info(`Branch is managed by Dependabot (${branch}), skipping check`);
+              return;
+            }
+
+            // Claude Code's GitHub app creates PRs from branches like
+            // `claude/<slug>-<id>`. The naming is bot-controlled and does
+            // not match the type/description convention; skip the check
+            // for those PRs the same way Dependabot is exempted.
+            if (branch.startsWith('claude/')) {
+              core.info(`Branch is managed by Claude Code (${branch}), skipping check`);
               return;
             }
 
