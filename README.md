@@ -172,6 +172,19 @@ Companion frontmatter contract:
 
 `name` is derived from the directory and must not appear in companion frontmatter.
 
+### Adapter gating
+
+A skill may restrict which adapters emit it via an optional `adapters` frontmatter field — the per-skill counterpart of `src/agents/` being Claude Code only. This is for skills that depend on a single agent's runtime (e.g. `usage-guard` needs Claude Code's OAuth usage endpoint + `ScheduleWakeup`) and must not ship to the others.
+
+Because the SKILL.md frontmatter parser is a flat, string-only subset of YAML (no arrays), `adapters` is a **comma-separated string**, not a YAML array:
+
+```yaml
+adapters: claude-code               # claude-code only
+adapters: claude-code, codex-cli    # both
+```
+
+When the field is absent, the skill is emitted by every adapter (the default). Known ids: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`; an unknown id fails the build. Gating applies uniformly to per-skill outputs, the Gemini CLI / Copilot aggregate listings, the project-scope payload (`dist/claude-code-project/`), and the in-repo dogfood mirrors (an `adapters: claude-code` skill is kept out of `.agents/skills/`).
+
 ## Local development
 
 ```bash

@@ -10,6 +10,7 @@
 
 import prettier from "prettier";
 import { AdapterBase } from "../lib/adapter-base.mjs";
+import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
 import { renderAgentsMdSnippet } from "../lib/agents-md-snippet.mjs";
 
 /**
@@ -46,7 +47,8 @@ export class GeminiCliAdapter extends AdapterBase {
    * @returns {Promise<OutputFile[]>}
    */
   async generate(skills) {
-    const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name));
+    const allowed = filterSkillsForAdapter(skills, GeminiCliAdapter.id);
+    const sorted = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
     return [
       {
         relativePath: ".gemini/settings.json",

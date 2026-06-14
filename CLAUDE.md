@@ -10,6 +10,7 @@
 
 - `/drive` などの汎用 skill は **user skills** (`~/.claude/skills/`) として配置されることを想定。エンドユーザーは `npx @ozzylabs/skills install` で installation する
 - skills / commons リポ内部 (本リポ等) では project skills として `.claude/skills/` 配下に置かれている (build pipeline で SSOT から生成)
+- 特定アダプタ限定の skill は SSOT 側 frontmatter `adapters`（カンマ区切り・例 `adapters: claude-code`）で配信先を絞れる (詳細は AGENTS.md / README.md「Adapter gating」)
 - `/implement` — Issue または指示をもとに、ブランチ作成・実装
 - `/lint` — 全リンターを自動修正付きで実行
 - `/test` — ビルド・テスト・型チェックを実行

@@ -21,6 +21,7 @@
 // Reference: https://docs.claude.com/en/docs/claude-code/skills
 
 import { AdapterBase } from "../lib/adapter-base.mjs";
+import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
 import { assertRequiredFields } from "../lib/frontmatter.mjs";
 
 /**
@@ -39,7 +40,8 @@ export class ClaudeCodeAdapter extends AdapterBase {
    * @returns {Promise<OutputFile[]>}
    */
   async generate(skills, options = {}) {
-    const sortedSkills = [...skills].sort((a, b) => a.name.localeCompare(b.name));
+    const allowed = filterSkillsForAdapter(skills, ClaudeCodeAdapter.id);
+    const sortedSkills = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
     const outputs = [];
     for (const skill of sortedSkills) {
       const canonicalLabel = `src/skills/${skill.name}/SKILL.md`;

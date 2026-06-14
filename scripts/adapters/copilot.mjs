@@ -9,6 +9,7 @@
 // Reference: https://docs.github.com/en/copilot/customizing-copilot
 
 import { AdapterBase } from "../lib/adapter-base.mjs";
+import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
 import { wrapSnippet } from "../lib/snippet.mjs";
 
 /**
@@ -37,10 +38,11 @@ export class CopilotAdapter extends AdapterBase {
    * @returns {Promise<OutputFile[]>}
    */
   async generate(skills) {
+    const allowed = filterSkillsForAdapter(skills, CopilotAdapter.id);
     return [
       {
         relativePath: ".github/copilot-instructions.md.snippet",
-        content: renderCopilotSnippet(skills),
+        content: renderCopilotSnippet(allowed),
       },
     ];
   }
