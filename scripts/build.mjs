@@ -64,6 +64,13 @@ const ADAPTERS = [
   new CopilotAdapter(),
 ];
 
+// Project-scope payload id (dist subdirectory). Unlike the per-adapter outputs
+// above, this one keeps repo-root-relative skill refs (no user-scope rewrite)
+// so it can be committed into a consumer repo for Claude mobile / web (cloud)
+// sessions. See writeProjectScopeOutput + handbook ADR-0027 (project-scope
+// opt-in) for the rationale.
+const PROJECT_SCOPE_ID = "claude-code-project";
+
 async function readSkillNames() {
   const entries = await readdir(SRC, { withFileTypes: true });
   return entries
@@ -247,6 +254,42 @@ async function writeAdapterOutputs(skills, agents) {
   }
 }
 
+async function writeProjectScopeOutput(skills, agents) {
+  // Project-scope payload for Claude mobile / web (cloud) sessions.
+  //
+  // Cloud sessions run "repo only": they see a consumer repo's committed
+  // `.claude/skills/` but never the user-scope `~/.claude/skills/` that the CLI
+  // installer populates. So `dist/{adapter}/` is useless there — its refs were
+  // rewritten to `~/.agents/skills/<name>/SKILL.md` by writeAdapterOutputs and
+  // resolve against an empty HOME.
+  //
+  // This payload is the project-scope counterpart. It ships the Claude Code
+  // wrappers (`.claude/skills/`, `.claude/agents/`) AND the canonical
+  // `.agents/skills/` SKILL.md files those wrappers Read, all with
+  // repo-root-relative refs PRESERVED (the user-scope rewrite is intentionally
+  // skipped). `npx @ozzylabs/skills sync-project --target <repo>` copies it into
+  // a consumer repo so cloud Claude can discover and run the skills.
+  const root = join(DIST, PROJECT_SCOPE_ID);
+  if (existsSync(root)) {
+    await rm(root, { recursive: true, force: true });
+  }
+  const claudeOutputs = await new ClaudeCodeAdapter().generate(skills, { agents });
+  const codexOutputs = await new CodexCliAdapter().generate(skills);
+  const outputs = [
+    ...claudeOutputs,
+    // Only the canonical SKILL.md (+ extras) under .agents/skills/ — the files
+    // the Claude wrapper Reads. The AGENTS.md.snippet is an AGENTS.md
+    // aggregation artifact, irrelevant to skill discovery, so it is dropped.
+    ...codexOutputs.filter((out) => out.relativePath.startsWith(".agents/skills/")),
+  ];
+  for (const out of outputs) {
+    const dest = join(root, out.relativePath);
+    await mkdir(dirname(dest), { recursive: true });
+    // Verbatim — NO rewriteSkillRefsToUserScope. Relative refs are the point.
+    await writeFile(dest, out.content);
+  }
+}
+
 async function main() {
   const skills = await loadSkills();
   const agents = await loadAgents();
@@ -254,6 +297,7 @@ async function main() {
   await writeDogfoodTargets(skills);
   const publicSkills = skills.filter((s) => !INTERNAL_SKILLS.has(s.name));
   await writeAdapterOutputs(publicSkills, agents);
+  await writeProjectScopeOutput(publicSkills, agents);
   await writeSyncHelpers();
 
   const internalNames = skills.filter((s) => INTERNAL_SKILLS.has(s.name)).map((s) => s.name);
@@ -266,6 +310,8 @@ async function main() {
   for (const adapter of ADAPTERS) {
     console.log(`  dist/${adapter.constructor.id}/`);
   }
+  console.log("Project-scope payload (Claude mobile/web, relative refs):");
+  console.log(`  dist/${PROJECT_SCOPE_ID}/`);
   if (internalNames.length > 0) {
     console.log(`Internal skills (dogfood only, not shipped): ${internalNames.join(", ")}`);
   }

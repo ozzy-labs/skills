@@ -127,7 +127,7 @@ async function listSubdirs(dir) {
  *
  * @returns {Promise<string>}
  */
-async function findPackageRoot() {
+export async function findPackageRoot() {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 6; i++) {
     if (existsSync(join(dir, "package.json")) && existsSync(join(dir, "dist"))) {

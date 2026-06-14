@@ -89,7 +89,7 @@ export function assertNoForbiddenFlags(argv) {
     const head = arg.split("=")[0];
     if (forbidden.has(arg) || forbidden.has(head) || forbidden.has(`${head}=`)) {
       throw new Error(
-        `flag ${arg.split("=")[0]} is not supported — @ozzylabs/skills installs into the user-scoped skills directory only. See 'npx @ozzylabs/skills install --help'.`,
+        `flag ${arg.split("=")[0]} is not supported by 'install' — it writes to the user-scoped skills directory only. For project-scope delivery into a repo (Claude mobile / web), use 'npx @ozzylabs/skills sync-project --target <repo>'.`,
       );
     }
   }
