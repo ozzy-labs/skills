@@ -33,6 +33,7 @@ import { ClaudeCodeAdapter } from "./adapters/claude-code.mjs";
 import { CodexCliAdapter } from "./adapters/codex-cli.mjs";
 import { CopilotAdapter } from "./adapters/copilot.mjs";
 import { GeminiCliAdapter } from "./adapters/gemini-cli.mjs";
+import { isAdapterAllowed, parseAdapters } from "./lib/adapter-gating.mjs";
 import { assertRequiredFields, parseSkillDocument } from "./lib/frontmatter.mjs";
 import { rewriteSkillRefsToUserScope } from "./lib/user-scope-refs.mjs";
 
@@ -47,7 +48,15 @@ const DIST = join(ROOT, "dist");
 // slash commands (e.g. `/drive`, `/lint`). They are NOT shipped to npm —
 // `package.json#files` only includes `dist/`, `bin/`, `schemas/`, etc.
 const CLAUDE_DOGFOOD_TARGET = join(ROOT, ".claude", "skills");
-const DOGFOOD_TARGETS = [join(ROOT, ".agents", "skills"), CLAUDE_DOGFOOD_TARGET];
+// Each dogfood target mirrors the canonical skills for the adapter(s) that
+// read from it: `.agents/skills/` feeds Codex CLI + Gemini CLI, `.claude/skills/`
+// feeds Claude Code. A skill restricted via frontmatter `adapters` is mirrored
+// into a target only when it is allowed for at least one of that target's
+// adapters (e.g. an `adapters: claude-code` skill is kept out of `.agents/skills/`).
+const DOGFOOD_TARGETS = [
+  { dir: join(ROOT, ".agents", "skills"), adapterIds: ["codex-cli", "gemini-cli"] },
+  { dir: CLAUDE_DOGFOOD_TARGET, adapterIds: ["claude-code"] },
+];
 
 // Internal-use skills are kept in src/skills/ for skills/commons repo's own
 // dogfooding (via DOGFOOD_TARGETS) but MUST NOT be shipped to npm consumers.
@@ -141,6 +150,9 @@ async function loadSkills() {
     }
     const claudeCodeCompanion = await loadCompanion(name, "claude-code", ["description"]);
     const extraFiles = await loadExtraFiles(name);
+    // Validate + normalize the optional `adapters` gate once at load time so a
+    // typo'd adapter id fails the build early (rather than per-adapter later).
+    const adapters = parseAdapters(frontmatter, label);
     skills.push({
       name,
       description: frontmatter.description,
@@ -149,6 +161,7 @@ async function loadSkills() {
       raw,
       claudeCodeCompanion,
       extraFiles,
+      adapters,
     });
   }
   return skills;
@@ -181,17 +194,22 @@ async function writeDogfoodTargets(skills) {
   // These are excluded from the npm payload by `package.json#files` but kept
   // in the repo so skills repo can use its own slash commands.
   for (const target of DOGFOOD_TARGETS) {
-    if (existsSync(target)) {
-      await rm(target, { recursive: true, force: true });
+    if (existsSync(target.dir)) {
+      await rm(target.dir, { recursive: true, force: true });
     }
-    await mkdir(target, { recursive: true });
+    await mkdir(target.dir, { recursive: true });
     // The in-repo .claude/skills/ mirror is what this repo loads when it
     // dogfoods its own skills. Use the Claude Code companion when present so
     // dogfood stays in sync with what the Claude Code adapter ships to
     // consumers.
-    const useCompanion = target === CLAUDE_DOGFOOD_TARGET;
-    for (const skill of skills) {
-      const destDir = join(target, skill.name);
+    const useCompanion = target.dir === CLAUDE_DOGFOOD_TARGET;
+    // Mirror a skill only when it is allowed for one of this target's adapters
+    // (adapter gating — keeps e.g. `adapters: claude-code` skills out of `.agents/skills/`).
+    const targetSkills = skills.filter((skill) =>
+      target.adapterIds.some((id) => isAdapterAllowed(skill, id)),
+    );
+    for (const skill of targetSkills) {
+      const destDir = join(target.dir, skill.name);
       await mkdir(destDir, { recursive: true });
       const content =
         useCompanion && skill.claudeCodeCompanion ? skill.claudeCodeCompanion.raw : skill.raw;
@@ -304,7 +322,7 @@ async function main() {
   console.log(`✓ Built ${skills.length} skill(s), ${agents.length} agent(s)`);
   console.log("In-repo dogfood (excluded from npm payload):");
   for (const target of DOGFOOD_TARGETS) {
-    console.log(`  ${target.replace(ROOT, "").replace(/^\//, "")}`);
+    console.log(`  ${target.dir.replace(ROOT, "").replace(/^\//, "")}`);
   }
   console.log(`Adapters (npm payload, ${publicSkills.length} public skill(s)):`);
   for (const adapter of ADAPTERS) {

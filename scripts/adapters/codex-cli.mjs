@@ -11,6 +11,7 @@
 // skill's `.agents/skills/{name}/` directory.
 
 import { AdapterBase } from "../lib/adapter-base.mjs";
+import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
 import { renderAgentsMdSnippet } from "../lib/agents-md-snippet.mjs";
 import { assertRequiredFields } from "../lib/frontmatter.mjs";
 
@@ -29,7 +30,8 @@ export class CodexCliAdapter extends AdapterBase {
    * @returns {Promise<OutputFile[]>}
    */
   async generate(skills, _options = {}) {
-    const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name));
+    const allowed = filterSkillsForAdapter(skills, CodexCliAdapter.id);
+    const sorted = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
     const outputs = [];
     for (const skill of sorted) {
       const label = `src/skills/${skill.name}/SKILL.md`;
