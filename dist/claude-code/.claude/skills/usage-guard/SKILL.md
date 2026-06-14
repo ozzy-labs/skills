@@ -112,9 +112,53 @@ drive 非依存で、任意の長い作業を auto pause/resume で guard する
 USAGE_GUARD_THRESHOLD=80 /usage-guard "<継続コマンド>"   # 閾値を一時的に 80% へ
 ```
 
-## PreToolUse hook との併用（推奨）
+## PreToolUse hook を有効化（推奨併用）
 
-本スキルの停止粒度は resumable unit の境界。長い unit 内での超過に備え、全 tool 呼び出し前に効く PreToolUse hook（`#123`）を mid-unit ceiling として併用することを推奨する（hook は同じ `~/.claude/usage-guard/cache.json` を読む）。hook の有効化手順は `#123` 実装時に本節へ追記する。
+本スキルの停止粒度は resumable unit の境界。`--usage-guard` フラグ（#122）は unit 境界でしか止められないのに対し、PreToolUse hook（`usage-guard-hook.mjs`）は **全 tool 呼び出し前**に効く mid-unit ceiling で、長い unit の途中で閾値を超えてもその場で止める。両者は役割分担して併用する:
+
+| 仕組み | 粒度 | 止まる場所 |
+|---|---|---|
+| `--usage-guard` フラグ（#122） | resumable unit 境界 | Phase 入口 / wave 入口 / worker dispatch 前など、クリーンに再入できる checkpoint |
+| PreToolUse hook（本節） | tool 呼び出し単位（subagent 内含む） | unit の途中（in-flight ceiling） |
+
+> hook はエンドポイントを叩かない。`usage-check.mjs` が書いた**同じキャッシュ**（`~/.claude/usage-guard/cache.json`、30–60s TTL）を読むだけなので、全 tool 呼び出しで連打しない。閾値超なら deny（exit 2）+ `resets_at` を `HH:MM` で提示、usage を読めなければ fail-open（allow + stderr 警告）。subagent 由来の呼び出しは payload の `agent_id` でログ上区別する。
+
+### 仕組みと配置
+
+hook 本体は extra file として skill ディレクトリ直下に同梱される（`usage-check.mjs` と同経路）。本リポは settings/hook を**配信しない**（build は skill / agent のみ出力）ため、有効化は**手動 opt-in**。
+
+### settings.local.json スニペット（`update-config` 方式）
+
+`~/.claude/settings.local.json` に PreToolUse hook を 1 つ追加する（settings は mid-session reload されるため再起動不要）:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /home/<you>/.claude/skills/usage-guard/usage-guard-hook.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **M3: hook スクリプトパスは絶対パスを手で埋める。** settings 内では skill-dir 相対参照が効かないため `command` には**絶対パス**を書く。パスは環境で揺れる:
+>
+> - **user-scope**（`npx @ozzylabs/skills install` で配置）: `~/.claude/skills/usage-guard/usage-guard-hook.mjs`（`~` は展開されないので `/home/<you>/.claude/...` の形でフルに書く）
+> - **dogfood**（skills/commons リポ内で動かす）: `<repo>/.claude/skills/usage-guard/usage-guard-hook.mjs`（例 `/home/<you>/github/ozzy-labs/skills/.claude/skills/usage-guard/usage-guard-hook.mjs`）
+>
+> どちらも「`usage-check.mjs` と同じ階層の `usage-guard-hook.mjs`」を指す。自分の環境のフルパスを確認してから埋めること。閾値を上書きする場合は env も settings 側に付ける（例 `"command": "USAGE_GUARD_THRESHOLD=80 node /home/<you>/.claude/skills/usage-guard/usage-guard-hook.mjs"`）。
+
+### 無効化
+
+`~/.claude/settings.local.json` から上記 PreToolUse エントリを削除すれば即時に無効化される（mid-session reload）。
 
 ## 注意事項
 

@@ -1,0 +1,251 @@
+// Tests for the usage-guard PreToolUse ceiling hook (issue #123).
+//
+// Everything is exercised through injected deps (usage JSON, cache reader,
+// stdin payload, clock, warn/deny sinks) — no network, no real ~/.claude reads,
+// no spawned process. The 4 issue cases:
+//   (1) under threshold → allow (exit 0)
+//   (2) over threshold → deny (exit 2) + reset-time message
+//   (3) fresh cache within TTL → no endpoint re-fetch
+//   (4) usage unavailable → allow (fail-open) + stderr warn
+// Plus: subagent agent_id is parsed for logging, and structural asserts that
+// the hook extra file ships ONLY to the claude-code payload (adapter gating).
+
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { readFile as realReadFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import {
+  decide,
+  formatResetTime,
+  parsePayload,
+  resolveUsage,
+  run,
+} from "../src/skills/usage-guard/usage-guard-hook.mjs";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const FIXED_NOW = Date.parse("2026-06-15T00:00:00.000Z");
+const now = () => FIXED_NOW;
+
+// A usage result with both windows comfortably under threshold.
+const okUsage = {
+  five_hour: { utilization: 40, resets_at: "2026-06-15T04:00:00.000Z" },
+  seven_day: { utilization: 60, resets_at: "2026-06-20T00:00:00.000Z" },
+  ok: true,
+  wait_seconds: 0,
+  resets_at: null,
+  source: "endpoint",
+};
+
+// A usage result with the 5h window over threshold (reset at 03:30 local).
+const overUsage = {
+  five_hour: { utilization: 97, resets_at: "2026-06-15T03:30:00.000Z" },
+  seven_day: { utilization: 60, resets_at: "2026-06-20T00:00:00.000Z" },
+  ok: false,
+  wait_seconds: 12_600,
+  resets_at: "2026-06-15T03:30:00.000Z",
+  source: "endpoint",
+};
+
+// --- (1) under threshold → allow ---------------------------------------------
+
+test("(1) under threshold → allow (exit 0), no deny output", async () => {
+  const warnings = [];
+  const denies = [];
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => okUsage,
+    env: {},
+    now,
+    warn: (m) => warnings.push(m),
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 0, "allow → exit 0");
+  assert.equal(denies.length, 0, "no deny message when under threshold");
+  assert.equal(warnings.length, 0, "no warning when signal is fine");
+});
+
+// --- (2) over threshold → deny + reset message -------------------------------
+
+test("(2) over threshold → deny (exit 2) with reset time in the message", async () => {
+  const denies = [];
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => overUsage,
+    env: {},
+    now,
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 2, "over threshold → exit 2 (deny)");
+  assert.equal(denies.length, 1, "exactly one deny message");
+  const expected = formatResetTime(overUsage.resets_at); // local HH:MM
+  assert.match(denies[0], /Usage Limit reached/);
+  assert.match(denies[0], new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(denies[0], /5h 97%/, "names the exceeded window");
+});
+
+test("(2b) decide() is pure: over → not allowed with reset HH:MM in reason", () => {
+  const { allow, reason } = decide(overUsage, 95, now);
+  assert.equal(allow, false);
+  assert.match(reason, /resets at \d{2}:\d{2}/);
+});
+
+test("(2c) decide() allows fail-open usage (ok !== false)", () => {
+  const failOpen = {
+    five_hour: { utilization: 0, resets_at: null },
+    seven_day: { utilization: 0, resets_at: null },
+    ok: true,
+    source: "fail-open",
+  };
+  assert.equal(decide(failOpen, 95, now).allow, true);
+});
+
+// --- (3) fresh cache within TTL → no endpoint re-fetch -----------------------
+
+test("(3) fresh cache within TTL → served from cache, no getUsage fetch", async () => {
+  let getUsageCalls = 0;
+  const usage = await resolveUsage({
+    readCacheImpl: async () => ({ ...okUsage }), // cache hit
+    getUsageImpl: async () => {
+      getUsageCalls += 1;
+      return okUsage;
+    },
+  });
+  assert.equal(getUsageCalls, 0, "endpoint path must NOT run on a cache hit");
+  assert.equal(usage.source, "cache", "served from cache");
+  assert.equal(usage.five_hour.utilization, 40);
+});
+
+test("(3b) cold cache → falls through to getUsage (still cache-first internally)", async () => {
+  let getUsageCalls = 0;
+  const usage = await resolveUsage({
+    readCacheImpl: async () => null, // cold cache
+    getUsageImpl: async () => {
+      getUsageCalls += 1;
+      return okUsage;
+    },
+  });
+  assert.equal(getUsageCalls, 1, "cold cache → exactly one getUsage call");
+  assert.equal(usage.source, "endpoint");
+});
+
+// --- (4) usage unavailable → allow (fail-open) + warn ------------------------
+
+test("(4) usage unavailable (null) → allow (exit 0) + stderr warn", async () => {
+  const warnings = [];
+  const denies = [];
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => null, // signal could not be read
+    env: {},
+    now,
+    warn: (m) => warnings.push(m),
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 0, "fail-open → allow");
+  assert.equal(denies.length, 0, "must not deny when the signal is unavailable");
+  assert.equal(warnings.length, 1, "exactly one fail-open warning");
+  assert.match(warnings[0], /fail-open/);
+});
+
+test("(4b) resolveUsage returns null when both cache and getUsage throw", async () => {
+  const usage = await resolveUsage({
+    readCacheImpl: async () => {
+      throw new Error("cache parse error");
+    },
+    getUsageImpl: async () => {
+      throw new Error("no signal");
+    },
+  });
+  assert.equal(usage, null, "both sources failing → null → caller fails open");
+});
+
+// --- subagent agent_id parsing (logging) -------------------------------------
+
+test("parsePayload extracts agent_id from a subagent hook payload", () => {
+  assert.equal(parsePayload('{"agent_id":"worker-7","tool_name":"Bash"}').agentId, "worker-7");
+  assert.equal(parsePayload('{"tool_name":"Bash"}').agentId, null, "no agent_id → null");
+  assert.equal(parsePayload("").agentId, null, "empty stdin → null");
+  assert.equal(parsePayload("not json").agentId, null, "malformed → null (tolerated)");
+});
+
+test("run() tags the deny message with the subagent origin", async () => {
+  const denies = [];
+  await run({
+    readStdinImpl: async () => '{"agent_id":"worker-7"}',
+    resolveUsageImpl: async () => overUsage,
+    env: {},
+    now,
+    deny: (m) => denies.push(m),
+  });
+  assert.match(denies[0], /subagent worker-7/, "deny message records the subagent origin");
+});
+
+// --- formatResetTime ---------------------------------------------------------
+
+test("formatResetTime: ISO → local HH:MM, junk → null", () => {
+  assert.match(formatResetTime("2026-06-15T03:30:00.000Z"), /^\d{2}:\d{2}$/);
+  assert.equal(formatResetTime(null), null);
+  assert.equal(formatResetTime("not-a-date"), null);
+  assert.equal(formatResetTime(undefined), null);
+});
+
+// --- threshold env override flows into the decision --------------------------
+
+test("threshold env override (80) denies at 85% utilization", async () => {
+  const denies = [];
+  const at85 = {
+    five_hour: { utilization: 85, resets_at: "2026-06-15T03:30:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false, // usage-check.mjs already evaluated at threshold 80
+    wait_seconds: 12_600,
+    resets_at: "2026-06-15T03:30:00.000Z",
+    source: "endpoint",
+  };
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => at85,
+    env: { USAGE_GUARD_THRESHOLD: "80" },
+    now,
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 2, "85 ≥ 80 → deny");
+  assert.match(denies[0], /≥ 80%/, "deny message reflects the overridden threshold");
+});
+
+// --- structural: hook extra file ships ONLY to claude-code (adapter gating) ---
+
+test("usage-guard-hook.mjs ships in the claude-code payload", async () => {
+  const script = await realReadFile(
+    join(ROOT, "dist", "claude-code", ".claude", "skills", "usage-guard", "usage-guard-hook.mjs"),
+    "utf8",
+  );
+  assert.match(script, /PreToolUse/, "hook extra file must ship verbatim");
+  // M2: the dist rewrite must not have corrupted a HOME-anchored / self path.
+  assert.doesNotMatch(
+    script,
+    /~\/\.claude\/skills\/usage-guard\/usage-guard-hook\.mjs/,
+    "hook must not contain a rewritten .claude/skills/ self-path literal",
+  );
+});
+
+test("usage-guard-hook.mjs is ABSENT from non-claude adapter payloads (gating)", () => {
+  for (const adapterDir of ["codex-cli", "gemini-cli", "copilot"]) {
+    const p = join(ROOT, "dist", adapterDir);
+    if (!existsSync(p)) continue;
+    // usage-guard is gated `adapters: claude-code` → no usage-guard dir at all.
+    const hookPath = join(p, ".agents", "skills", "usage-guard", "usage-guard-hook.mjs");
+    assert.equal(
+      existsSync(hookPath),
+      false,
+      `hook must not ship to ${adapterDir} (usage-guard is claude-code-gated)`,
+    );
+  }
+  // Also absent from the codex canonical .agents/skills mirror in the repo root.
+  assert.equal(
+    existsSync(join(ROOT, ".agents", "skills", "usage-guard", "usage-guard-hook.mjs")),
+    false,
+    "hook must not appear under .agents/skills/ (claude-code-gated skill)",
+  );
+});
