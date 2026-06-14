@@ -16,7 +16,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 | --- | --- |
 | `commit` | Stage changes and create a Conventional Commit |
 | `commit-conventions` | Commit / branch / PR naming conventions |
-| `drive` | Issue → merge-ready PR autonomous loop |
+| `drive` | Issue → merge-ready PR autonomous loop. `--usage-guard` (Claude Code only) makes the loop budget-aware: at resumable-unit boundaries (Phase 1 start / each review-loop pass / each wave / before worker dispatch) it Reads the `usage-guard` engine and, when over the Usage Limit threshold, waits for the window to reset then re-enters via `/drive --usage-guard <args>` (idempotent resume). Orchestration pauses at wave-boundary granularity; an in-flight worker's ceiling is the PreToolUse hook |
 | `health` | Inspect repo state and skill catalog consistency across 16 areas with inline recommended actions (`--deep` for follow-up investigation of `要確認` items) |
 | `implement` | Branch creation and implementation from an issue or instructions |
 | `lint` | Run all linters with auto-fix |
