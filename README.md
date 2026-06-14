@@ -199,6 +199,8 @@ pnpm lint:all
 
 `dist/` is committed and the CI verifies it matches `pnpm build` output. After editing any `src/skills/*/SKILL.md` or `src/skills/*/SKILL.claude-code.md`, run `pnpm build` and commit the resulting `dist/` changes.
 
+Verifying the `usage-guard` skill: the deterministic signal runs in CI (`tests/usage-guard-integration.test.mjs`); the live `ScheduleWakeup` pause/resume is driven manually via `scripts/usage-guard-smoke.mjs`. See [docs/usage-guard-verification.md](docs/usage-guard-verification.md).
+
 ## Release flow (maintainer)
 
 `@ozzylabs/skills` is published to npm via [release-please](https://github.com/googleapis/release-please) + OIDC [Trusted Publishers](https://docs.npmjs.com/trusted-publishers). The full pipeline lives in `.github/workflows/release.yaml`:
