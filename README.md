@@ -6,7 +6,7 @@ Canonical OzzyLabs agent skill bundle for Claude Code, GitHub Copilot, Gemini CL
 
 `src/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces per-agent outputs under `dist/{adapter-id}/` (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`). End users install these skills as **user skills** (e.g. `~/.claude/skills/`) via the CLI installer shipped in the npm package.
 
-This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT. Distribution is **user skills only** (see handbook ADR-0027, in preparation): consumers install via `npx @ozzylabs/skills install`, and project-scope skills (`.claude/skills/` under each consumer repo) are no longer pushed. Project-scope skills remain in use only inside the `skills` / `commons` repos themselves for dogfooding, where the build pipeline emits them from the SSOT.
+This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT. Distribution is **user skills by default** (see handbook ADR-0027, in preparation): consumers install via `npx @ozzylabs/skills install`, and project-scope skills (`.claude/skills/` under each consumer repo) are no longer pushed automatically. The supported exception is **Claude mobile / web (cloud) sessions**, which run "repo only" and never see `~/.claude/skills/`: for repos developed that way, `npx @ozzylabs/skills sync-project --target <repo>` opts in to a relative-ref project-scope payload (`dist/claude-code-project/`) — see [Project-scope sync](#project-scope-sync-for-claude-mobile--web-cloud) below. Project-scope skills otherwise remain in use only inside the `skills` / `commons` repos themselves for dogfooding, where the build pipeline emits them from the SSOT.
 
 ## Skills in v0.x
 
@@ -51,7 +51,27 @@ npx @ozzylabs/skills install --upgrade
 npx @ozzylabs/skills install --force
 ```
 
-Supported adapters: `claude-code` (default), `codex-cli`, `gemini-cli`, `copilot`. The output path mirrors what the build pipeline writes under `dist/{adapter-id}/`, transplanted onto `$HOME`. Project-scoped install flags (`--target` etc.) are not supported and never will be — `~/.claude/skills/` is the only supported target.
+Supported adapters: `claude-code` (default), `codex-cli`, `gemini-cli`, `copilot`. The output path mirrors what the build pipeline writes under `dist/{adapter-id}/`, transplanted onto `$HOME`. The `install` subcommand has no project-scoped target — `~/.claude/skills/` is the only target it writes to. To deliver skills at **project scope** (the Claude mobile / web cloud case), use the separate `sync-project` subcommand described next.
+
+### Project-scope sync for Claude mobile / web (cloud)
+
+Claude mobile / web (cloud) sessions run "repo only": they discover skills from a consumer repo's committed `.claude/skills/` but never from `~/.claude/skills/`, so `install` (user scope) does not reach them. The per-adapter `dist/{adapter-id}/` payloads also can't be committed as-is — their skill refs are rewritten to `~/.agents/skills/…`, which resolves against an empty `$HOME` in the cloud VM.
+
+`sync-project` is the opt-in project-scope path. It copies `dist/claude-code-project/` — where refs stay **repo-root-relative** and the canonical `.agents/skills/<name>/SKILL.md` files the Claude Code wrappers `Read` are shipped alongside the `.claude/skills/` wrappers (plus `.claude/agents/`) — into a target repo:
+
+```bash
+# Sync every skill into ./my-repo (writes .claude/skills/, .agents/skills/, .claude/agents/)
+npx @ozzylabs/skills sync-project --target=./my-repo
+
+# Sync just the /drive workflow set (drive depends on the others — keep them together)
+npx @ozzylabs/skills sync-project --target=./my-repo \
+  --skills=drive,implement,ship,review,commit,pr,lint,test,commit-conventions,lint-rules
+
+# Preview the plan as JSON without writing
+npx @ozzylabs/skills sync-project --target=./my-repo --dry-run
+```
+
+`--target` is required; there is no implicit default. The command writes files only — review the diff and commit them in the target repo so the cloud session picks them up. Use this only for repos you actually develop via the Claude mobile / web app; everywhere else, user-scope `install` remains the norm.
 
 ### Migrating off the legacy project-scoped layout
 
