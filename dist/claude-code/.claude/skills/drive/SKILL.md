@@ -1,6 +1,6 @@
 ---
 description: Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。
-argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N] [--review=quick|final-deep|deep]
+argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N] [--review=quick|final-deep|deep] [--usage-guard]
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent, Workflow
 ---
@@ -15,7 +15,7 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 ### 入力解析
 
-`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`, `--review=<mode>`）を特定する。
+`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`, `--review=<mode>`, `--usage-guard`）を特定する。
 
 - target が 1 件かつ依存記法（`->`）なし → 単一モード
 - target が 2 件以上、または依存記法あり → オーケストレーションモード
@@ -26,9 +26,56 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 - 単一モード: `quick` / `final-deep` / `deep` をすべて受け付ける
 - オーケストレーションモード: `--review=quick` を強制し、`final-deep` / `deep` 指定時は警告を表示して `quick` にフォールバックする（コスト管理）
 
+`--usage-guard` の取り扱い:
+
+- **opt-in フラグ。未指定時は drive 本体の挙動を一切変えない**（checkpoint を挟まない素の drive）。
+- 指定時のみ、後述「usage-guard 配線（`--usage-guard`）」の checkpoint で usage-guard エンジンを呼び、Usage Limit 超過時は枠回復まで待機してから自己再入する。
+- 解析時に**元の引数列を保存**する（継続コマンド `/drive --usage-guard <元の引数>` の組み立てに使う）。`--usage-guard` 自体も保存対象に含める（resume 後も guard を効かせ続けるため）。
+
 ### 自律実行
 
 計画承認を含め、マージ処理（またはマージ確認）まで AskUserQuestion を使用しない（完全自律実行）。
+
+### usage-guard 配線（`--usage-guard`）
+
+`--usage-guard` 指定時のみ有効。Claude Code の Usage Limit（5 時間 = Current / 週次 = Weekly）が 100% に達する前に作業を一時停止し、枠が回復したら自動再開する。**フラグ未指定なら本節の処理は一切実行せず、drive 本体の挙動を変えない**（pause/resume は Claude 固有なので配線を本 overlay に閉じる。前例: `review --deep`）。
+
+> **Claude 専用**: usage-guard エンジンは OAuth 使用率エンドポイントと `ScheduleWakeup` に依存するため Claude Code でのみ動作する（`adapters: claude-code` で gate された `usage-guard` skill = #121）。
+
+#### checkpoint の発火点
+
+`--usage-guard` 指定時、以下の **resumable unit の入口**でのみ usage-guard を呼ぶ:
+
+| モード | checkpoint |
+|---|---|
+| 単一モード | 各 target の **Phase 1（implement）開始前** |
+| 単一モード | **review loop の各反復前**（Phase 3 の各 pass 開始前） |
+| オーケストレーション | 各 **wave の開始前**（Phase 1..N の wave ループ先頭） |
+| オーケストレーション | 各 **worker dispatch 前**（同一 wave 内で worker を起動する直前） |
+
+**checkpoint は常にクリーンに再入できる境界に置く**。mid-implement（PR がまだ存在しない実装途中）や review pass の途中、コミット/push の途中では**止めない** — そこで停止すると再入時に進捗を取りこぼす恐れがある。drive は冪等 resume（既存 PR を検出して Phase 3 から再開）なので、上記の境界はいずれも再実行で安全に続きから再開できる。
+
+#### checkpoint での手順
+
+各 checkpoint で以下を実行する:
+
+1. `usage-guard` エンジン（`~/.claude/skills/usage-guard/SKILL.md`、user-scope では `~/.claude/skills/usage-guard/SKILL.md`）を Read し、その「軽量 wait-loop」を実行する（= 同階層の `usage-check.mjs` を Bash 実行して JSON を得る）。
+2. `ok: true`（両枠とも閾値未満）→ **通常進行**。次のフェーズ／wave／worker dispatch へそのまま進む。
+3. `ok: false`（いずれかの枠が閾値超過）→ usage-guard の wait-loop に委譲する:
+   - `ScheduleWakeup(min(wait_seconds, 3600))` で heartbeat を仕込み、**待機する**（待機中は再入せず予算を消費しない）。`wait_seconds` が 3600 を超える場合は複数回に分けて再チェックする。
+   - 起床したら継続コマンド **`/drive --usage-guard <元の引数>`** を自己再入する。drive の冪等 resume が既存 PR / ブランチ / 完了済み worker を検出して**続きから再開**する（待機を挟んでも重複副作用を生まない）。
+   - `usage-check.mjs` が `ok: true` を返すまで 3〜4 を繰り返す。
+
+> 継続コマンドには `--usage-guard` を含めた**元の引数列**を渡す（resume 後も guard を効かせ続けるため）。
+
+#### 粒度と二重化
+
+- orchestration の停止は **wave 境界 / worker dispatch 境界の粒度**。一度起動した worker の**走行中（mid-unit）の超過**はこのフラグでは止められない。長い unit 内の ceiling は #123 の **PreToolUse hook**（全 tool 呼び出し前に効き、subagent 内にも届く）が担う（推奨併用）。
+- worker（subagent）に渡す prompt 自体は無改変でよい。worker は単一モードを実行するため、**親が `--usage-guard` で worker dispatch 前に checkpoint を挟む**ことで wave 粒度の予算対応になる。
+
+#### fail-open
+
+usage-check のシグナル取得が全滅（endpoint → JSONL フォールバックともに失敗）した場合、usage-guard は `ok: true`（fail-open）を返す。drive はそのまま通常進行する — **ガードが自バグで drive を hard-stop させない**。
 
 ### オーケストレーション実行機構の選択
 
@@ -97,6 +144,7 @@ Workflow 方式固有の注意:
 - 途中失敗からの再開は `Workflow({scriptPath, resumeFromRunId})`。完了済み worker はキャッシュから復元される
 - **Phase Final-1 / Final-2 / Final-3 は workflow 終了後に会話側で実行する**。worker の worktree は変更を含むためランタイムの自動削除対象にならず、cleanup 手順（後述の Phase Final-2 節）が引き続き必要。worktree path 規約（`.claude/worktrees/agent-<id>/`）も同一
 - `--merge` 未指定時の一括マージ確認（「完了後」節の AskUserQuestion）は workflow の return 後に行う
+- **`--usage-guard` 指定時の wave checkpoint は会話側で挟む**。workflow スクリプトは決定論実行で SKILL.md の Read も `ScheduleWakeup` も呼べないため、wave 単位で workflow を起動し、各 wave の起動**前**に会話側で「usage-guard 配線」節の checkpoint を実行する（`ok` なら次 wave の workflow を起動、超過なら待機 → `/drive --usage-guard <元の引数>` で再入し、`resumeFromRunId` で完了済み worker をキャッシュ復元して続行）
 
 ### subagent dispatch（オーケストレーションモード・Agent tool 方式 fallback）
 

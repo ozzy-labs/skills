@@ -40,6 +40,11 @@ Issue または指示を受け取り、実装 → ship → セルフレビュー
 
   オーケストレーションモードでは `--review=quick` を強制し、`final-deep` / `deep` 指定時は警告を出して `quick` にフォールバックする。
 
+- `--usage-guard`: Claude Code の Usage Limit 超過手前で作業を pause し、枠回復後に自動再開する（opt-in）。**Claude Code 環境のみ**（`review --deep` と同じ扱い。OAuth 使用率エンドポイント + `ScheduleWakeup` 依存のため他アダプタでは無効）。pause/resume の配線はホスト依存なので `SKILL.claude-code.md` の「usage-guard 配線（`--usage-guard`）」で吸収する。未指定時は drive 本体の挙動を一切変えない。
+  - 停止は **resumable unit の入口**でのみ行う（単一モード: Phase 1 開始前 / review loop 各反復前、オーケストレーション: 各 wave 開始前 / worker dispatch 前）。mid-implement（PR 作成前）では止めない。
+  - orchestration の停止粒度は **wave 境界**。一度起動した走行中 worker の mid-unit 超過はこのフラグでは止められず、PreToolUse hook（#123）が ceiling を担う。
+  - 超過時は枠リセットまで待機してから継続コマンド `/drive --usage-guard <元の引数>` を自己再入する（drive 冪等 resume で続行）。
+
 ### モード分岐
 
 - target が 1 件かつ依存記法なし → **単一モード**
