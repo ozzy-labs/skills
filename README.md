@@ -10,7 +10,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-14 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. Only the 10 original generic skills are subject to `npx @ozzylabs/skills migrate` when removing the legacy project-scoped layout (`lessons-triage` was never distributed project-scoped).
+15 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, 1 Claude-Code-only skill (`usage-guard`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. Only the 10 original generic skills are subject to `npx @ozzylabs/skills migrate` when removing the legacy project-scoped layout (`lessons-triage` and `usage-guard` were never distributed project-scoped).
 
 | Skill | Description |
 | --- | --- |
@@ -27,6 +27,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 | `ship` | Lint + commit + PR creation in one go |
 | `test` | Run build, tests, and type checks |
 | `topics` | Research-driven GitHub topics setup (ozzy-labs scope): validate official constraints (lowercase / hyphen / 50 chars / max 20), measure popularity via `gh api search/repositories` with session-scoped cache, decide broad+narrow / singular-plural pairs, and apply ozzy-labs hardcoded conventions (`claude-code` exception, `*-cli` suffix removal, `multi-agent` canonical form). `--apply` to commit, `--dry-run` for analysis only |
+| `usage-guard` | **Claude Code only.** Monitor the Usage Limit (5-hour / 7-day) via the OAuth usage endpoint and auto pause/resume work at 95% (env-overridable): exceeded → `ScheduleWakeup` until the latest exceeded window resets, then re-enter. Doubles as a pause/resume engine (callers like `drive` Read it at checkpoints) and a standalone `/usage-guard "<continuation>"` form (idempotent continuation assumed). Endpoint → JSONL fallback → fail-open |
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 
