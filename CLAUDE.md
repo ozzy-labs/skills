@@ -22,6 +22,7 @@
 - `/health` — リポジトリ状態と skill catalog 整合性を 16 領域確認し、推奨アクションを inline 表示（`--deep` で `要確認` 項目を追加調査）
 - `/topics` — research-driven な GitHub topics 設定（ozzy-labs scope）。候補を公式制約検証 → 人気度測定（session キャッシュ）→ broad+narrow / 単数複数比較 → ozzy-labs 慣行ハードコードで選定し、`--apply` で `gh repo edit --add-topic` を実行、`--dry-run` で分析のみ
 - `/lessons-triage` — セッション教訓 queue（`~/.agents/lessons/queue.jsonl`）を消化し、User Skills 改善の教訓を承認制で ozzy-labs/skills へ issue 起票（HITL、起票のみ）
+- `/usage-guard` — **Claude 専用**。Usage Limit（5 時間 / 週次）を OAuth 使用率エンドポイントで監視し、95%（env で上書き可）超過で自動 pause→`ScheduleWakeup` で待機→回復後に自動再開。drive 等の caller が checkpoint で Read するエンジン形態と、`/usage-guard "<継続コマンド>"`（継続コマンド冪等前提）の単体形態を同梱。endpoint → JSONL → fail-open
 
 ## Skills の共通ルール
 
