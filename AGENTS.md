@@ -11,14 +11,14 @@
 
 ## プロジェクト概要
 
-`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、npm package + CLI installer（`npx @ozzylabs/skills install`）で end user のマシンに **user skills** として install する（例: `~/.claude/skills/`）。consumer リポ配下への project skills 配信は廃止。
+`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、npm package + CLI installer（`npx @ozzylabs/skills install`）で end user のマシンに **user skills** として install する（例: `~/.claude/skills/`）。consumer リポ配下への project skills 自動配信は廃止し、例外として Claude mobile / web (cloud) で開発する repo のみ `sync-project` subcommand で project-scope を opt-in 配信する。
 
 ## Tech Stack
 
 - Runtime: Node.js (ESM)
 - Package manager: pnpm
 - Version management: mise (`.mise.toml`)
-- Distribution: npm package + CLI installer（`npx @ozzylabs/skills install`）のみ。user skills only モデル（[handbook ADR-0027](https://github.com/ozzy-labs/handbook/blob/main/adr/0027-skill-distribution-user-only.md)）。旧 push 型 sync フローおよび Renovate preset は廃止
+- Distribution: npm package + CLI installer。既定は **user-scope**（`npx @ozzylabs/skills install`、[handbook ADR-0027](https://github.com/ozzy-labs/handbook/blob/main/adr/0027-skill-distribution-user-only.md)）。Claude mobile / web (cloud) 用に `sync-project` で project-scope を opt-in 配信する経路を持つ。旧 push 型 sync フローおよび Renovate preset は廃止
 
 ## 主要コマンド
 
@@ -37,6 +37,12 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 npx @ozzylabs/skills install --adapter=claude-code --skills=drive,review
 npx @ozzylabs/skills install --adapter=codex-cli --upgrade
 npx @ozzylabs/skills migrate --dry-run
+```
+
+`sync-project` subcommand は project-scope への opt-in 配信。Claude mobile / web (cloud) は "repo only" 動作で `~/.claude/skills/` を参照できないため、対象 repo へ相対 ref を保った `dist/claude-code-project/`（`.claude/skills/` + canonical `.agents/skills/` + `.claude/agents/`）をコピーする:
+
+```bash
+npx @ozzylabs/skills sync-project --target=./my-repo --skills=drive,implement,ship,review,commit,pr,lint,test,commit-conventions,lint-rules
 ```
 
 詳細は `README.md` の「CLI installer (user-scoped)」セクションを参照。
