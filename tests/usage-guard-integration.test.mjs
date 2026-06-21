@@ -55,6 +55,26 @@ async function seedCache(result) {
   await writeFile(join(dir, "cache.json"), JSON.stringify({ cached_at: Date.now(), result }));
 }
 
+/**
+ * Seed `<tmpHome>/.claude/usage-guard/hook-state.json` (#139 (b) debounce).
+ * Defaults the consecutive-over counter to debounceCount-1 = 1 so that the next
+ * over-threshold spawn denies immediately — the deny-contract cases below
+ * assert the SUSTAINED-overage behaviour, not the first lone reading.
+ * @param {object} state
+ */
+async function seedHookState(state = { consecutive_over: 1 }) {
+  const dir = join(tmpHome, ".claude", "usage-guard");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "hook-state.json"), JSON.stringify(state));
+}
+
+/** Create the kill-switch file so the hook is an instant no-op (#139 (a)). */
+async function seedKillSwitch() {
+  const dir = join(tmpHome, ".claude", "usage-guard");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "DISABLE"), "");
+}
+
 /** A reset timestamp ~1h out (so the hook can render `resets at HH:MM`). */
 function resetInOneHour() {
   return new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -117,6 +137,7 @@ function spawnScript(script, { stdin = null, env = {} } = {}) {
 // ── Case 1: hook + over-threshold seeded cache → deny (exit 2) ───────────────
 test("hook: over-threshold seeded cache → exit 2 with 'Usage Limit reached' + reset time", async () => {
   await seedCache(overResult());
+  await seedHookState(); // sustained overage (counter already at debounce-1)
   const { code, stdout, stderr } = await spawnScript(HOOK, { stdin: "{}" });
   assert.equal(code, 2, "over threshold → DENY (exit 2)");
   assert.match(stderr, /Usage Limit reached/, "deny reason names the limit");
@@ -129,6 +150,7 @@ test("hook: over-threshold seeded cache → exit 2 with 'Usage Limit reached' + 
 // ── Case 2: hook + subagent agent_id over-threshold → deny tagged subagent ───
 test("hook: over-threshold + agent_id payload → exit 2 tagged 'subagent abc123'", async () => {
   await seedCache(overResult());
+  await seedHookState();
   const { code, stderr } = await spawnScript(HOOK, { stdin: '{"agent_id":"abc123"}' });
   assert.equal(code, 2, "over threshold → DENY (exit 2)");
   assert.match(stderr, /Usage Limit reached/);
@@ -178,6 +200,7 @@ test("hook: USAGE_GUARD_THRESHOLD=10 over an ok:false cache → deny names the o
     resets_at: resetsAt,
     source: "endpoint",
   });
+  await seedHookState();
   const { code, stderr } = await spawnScript(HOOK, {
     stdin: "{}",
     env: { USAGE_GUARD_THRESHOLD: "10" },
@@ -186,6 +209,31 @@ test("hook: USAGE_GUARD_THRESHOLD=10 over an ok:false cache → deny names the o
   assert.match(stderr, /Usage Limit reached/);
   assert.match(stderr, /5h 12%/, "names the (low) exceeded window");
   assert.match(stderr, /≥ 10%/, "the overridden threshold env is parsed and surfaced");
+});
+
+// ── Case 5a: hook + kill-switch file → exit 0 even with an over cache (#139 a) ─
+test("hook: DISABLE kill-switch present → exit 0 (no-op) despite an over-threshold cache", async () => {
+  await seedCache(overResult());
+  await seedHookState(); // even with a deny-ready counter, the kill-switch wins
+  await seedKillSwitch();
+  const { code, stdout, stderr } = await spawnScript(HOOK, { stdin: "{}" });
+  assert.equal(code, 0, "kill-switch → instant no-op ALLOW");
+  assert.equal(stdout, "", "no-op is silent on stdout");
+  assert.doesNotMatch(stderr, /Usage Limit reached/, "kill-switch must never deny");
+  assert.match(stderr, /kill-switch/, "warns it is disabled via the kill-switch");
+});
+
+// ── Case 5b: hook debounce across spawns → first over ALLOWs, second DENYs ────
+test("hook: debounce — first over spawn ALLOWs (exit 0), second consecutive over DENYs (exit 2)", async () => {
+  await seedCache(overResult()); // fresh tmpHome → no hook-state → counter 0
+  const first = await spawnScript(HOOK, { stdin: "{}" });
+  assert.equal(first.code, 0, "lone over reading does not deny (debounce)");
+  assert.doesNotMatch(first.stderr, /Usage Limit reached/, "no deny on the first over reading");
+  assert.match(first.stderr, /debounce/, "explains the soft-allow");
+  // The first spawn persisted consecutive_over=1; the second reaches the count.
+  const second = await spawnScript(HOOK, { stdin: "{}" });
+  assert.equal(second.code, 2, "second consecutive over reading denies (exit 2)");
+  assert.match(second.stderr, /Usage Limit reached/, "the sustained overage is blocked");
 });
 
 // ── Case 6: usage-check CLI + over seeded cache → JSON, source=cache, ok=false ─

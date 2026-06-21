@@ -22,10 +22,12 @@ import {
   getUsage,
   normalizeWindows,
   readAccessToken,
+  readCache,
   resolveLagEpsilon,
   resolveLagRecheck,
   resolveResumeBuffer,
   resolveThreshold,
+  writeCache,
 } from "../src/skills/usage-guard/usage-check.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -549,6 +551,98 @@ test("(#133) getUsage DOES cache a normal (non-lag) over-threshold result", asyn
   });
   assert.equal(result.suspected_reflection_lag, false);
   assert.equal(wrote, true, "non-lag results still cache normally");
+});
+
+// --- (#139 (e)) cache hygiene: over-threshold reads get a shortened TTL -------
+
+test("(#139 e) getUsage caches an over-threshold read with a SHORT embedded ttl_ms", async () => {
+  let record = null;
+  await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: {
+        utilization: 99,
+        resets_at: new Date(FIXED_NOW + 4 * 60 * 60 * 1000).toISOString(),
+      },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    readFileImpl: credsReader(),
+    writeFileImpl: async (_p, data) => {
+      record = JSON.parse(data);
+    },
+    mkdirImpl: async () => {},
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(record.result.ok, false, "over-threshold result is cached");
+  assert.equal(typeof record.ttl_ms, "number", "over read embeds a per-record TTL");
+  assert.ok(record.ttl_ms <= 10_000, "over read TTL is shortened (≤10s) vs the 45s default");
+});
+
+test("(#139 e) getUsage caches a sub-threshold read with NO embedded ttl_ms (default TTL)", async () => {
+  let record = null;
+  await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: { utilization: 40, resets_at: "2026-06-15T04:00:00.000Z" },
+      seven_day: { utilization: 60, resets_at: "2026-06-20T00:00:00.000Z" },
+    }),
+    readFileImpl: credsReader(),
+    writeFileImpl: async (_p, data) => {
+      record = JSON.parse(data);
+    },
+    mkdirImpl: async () => {},
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(record.result.ok, true, "sub-threshold result is cached");
+  assert.equal(
+    record.ttl_ms,
+    undefined,
+    "sub read uses the caller's default TTL (no embedded ttl_ms)",
+  );
+});
+
+test("(#139 e) readCache honors a per-record ttl_ms over the caller's ttlMs", async () => {
+  // Record is 12s old with an embedded 10s TTL → expired even though the
+  // caller's default (45s) would still consider it fresh.
+  const readFileImpl = async () =>
+    JSON.stringify({ cached_at: FIXED_NOW - 12_000, ttl_ms: 10_000, result: { ok: false } });
+  const expired = await readCache({ readFileImpl, cachePath: "/fake/cache.json", now });
+  assert.equal(expired, null, "embedded short TTL expires the record before the default would");
+
+  // Same record but only 5s old → still fresh under its 10s TTL.
+  const fresh = await readCache({
+    readFileImpl: async () =>
+      JSON.stringify({ cached_at: FIXED_NOW - 5_000, ttl_ms: 10_000, result: { ok: false } }),
+    cachePath: "/fake/cache.json",
+    now,
+  });
+  assert.deepEqual(fresh, { ok: false }, "within the embedded TTL → served");
+});
+
+test("(#139 e) writeCache embeds ttl_ms only when provided", async () => {
+  let withTtl = null;
+  let withoutTtl = null;
+  await writeCache(
+    { ok: false },
+    {
+      writeFileImpl: async (_p, d) => (withTtl = JSON.parse(d)),
+      mkdirImpl: async () => {},
+      now,
+      ttlMs: 10_000,
+    },
+  );
+  await writeCache(
+    { ok: true },
+    {
+      writeFileImpl: async (_p, d) => (withoutTtl = JSON.parse(d)),
+      mkdirImpl: async () => {},
+      now,
+    },
+  );
+  assert.equal(withTtl.ttl_ms, 10_000, "ttlMs option is embedded");
+  assert.equal(withoutTtl.ttl_ms, undefined, "no ttlMs option → no embedded ttl_ms");
 });
 
 test("(#133) endpoint OK (ok:true) result carries suspected_reflection_lag:false", async () => {
