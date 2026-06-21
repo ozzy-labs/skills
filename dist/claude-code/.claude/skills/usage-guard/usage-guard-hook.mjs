@@ -103,6 +103,26 @@ export function decide(usage, threshold = 95, now = Date.now) {
 }
 
 /**
+ * Build the degradation warning for a non-endpoint usage source.
+ *
+ * `fail-open` means BOTH the OAuth endpoint and the JSONL fallback failed, so
+ * the guard is effectively OFF (it can no longer detect an over-threshold
+ * window). `jsonl` means only the coarse local fallback is in play. Either way
+ * the work is still allowed, but the operator/caller must know the guard is
+ * degraded.
+ *
+ * @param {string} source the usage `source` (e.g. "fail-open", "jsonl")
+ * @param {string} origin "main session" | "subagent <id>"
+ * @returns {string}
+ */
+export function degradedSourceWarning(source, origin) {
+  if (source === "fail-open") {
+    return `⚠️ usage-guard DEGRADED: source=fail-open (${origin}) — the budget signal is unavailable (OAuth endpoint + JSONL both failed); the guard is NOT actually monitoring usage. Allowing, but you may hit 100%. See SKILL.md §環境要件.`;
+  }
+  return `⚠️ usage-guard degraded: source=${source} (${origin}) — live OAuth signal unavailable; using a coarse fallback. Allowing, but the ceiling may be inaccurate.`;
+}
+
+/**
  * Read the entire hook stdin payload.
  * @param {NodeJS.ReadableStream} [stream]
  * @returns {Promise<string>}
@@ -203,6 +223,14 @@ export async function run({
     // fail-open: signal unreadable → allow + warn (never hard-stop on our bug).
     warn(`usage-guard hook: usage signal unavailable (${origin}); allowing (fail-open)`);
     return EXIT_ALLOW;
+  }
+
+  // Degradation visibility: a non-endpoint source means the live OAuth signal
+  // is unavailable (especially `fail-open`, where the guard is effectively OFF).
+  // We still ALLOW, but surface the degradation so it never goes unnoticed.
+  const source = typeof usage.source === "string" ? usage.source : null;
+  if (source !== null && source !== "endpoint" && source !== "cache") {
+    warn(degradedSourceWarning(source, origin));
   }
 
   const { allow, reason } = decide(usage, threshold, now);

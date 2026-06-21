@@ -156,6 +156,10 @@ test("hook: no cache + no credentials → exit 0 (fail-open) with an 'unavailabl
   assert.match(stderr, /unavailable/, "warns that the signal is unavailable");
   assert.match(stderr, /failing open/, "warns it is failing open (never hard-stops)");
   assert.doesNotMatch(stderr, /Usage Limit reached/, "fail-open must never emit a deny");
+  // Issue #129: the endpoint→JSONL→fail-open path must surface a DEGRADED warning
+  // so an effectively-OFF guard never goes unnoticed.
+  assert.match(stderr, /DEGRADED/, "hook surfaces the fail-open degradation");
+  assert.match(stderr, /source=fail-open/, "names the degraded source");
 });
 
 // ── Case 5: hook + USAGE_GUARD_THRESHOLD env threads into the deny message ───
@@ -204,4 +208,29 @@ test("usage-check CLI: no cache / creds / projects → exit 0, JSON ok=true, sou
   const json = JSON.parse(stdout.trim());
   assert.equal(json.ok, true, "fail-open is an 'ok' signal");
   assert.equal(json.source, "fail-open", "both endpoint and JSONL unavailable → fail-open");
+  // Issue #129: the new resume_buffer_seconds field is present on every result.
+  assert.equal(json.resume_buffer_seconds, 300, "default resume buffer is reported");
+});
+
+// ── Case 8: usage-check CLI + over cache + RESUME_BUFFER env → buffered wait ──
+test("usage-check CLI: over cache served verbatim (cache already carries wait_seconds)", async () => {
+  // The cache path returns the stored result as-is (it is not re-evaluated), so
+  // a seeded over result round-trips its wait_seconds + resume_buffer_seconds.
+  const resetsAt = resetInOneHour();
+  await seedCache({
+    five_hour: { utilization: 99, resets_at: resetsAt },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    wait_seconds: 3900, // 1h edge + 5min buffer
+    resets_at: resetsAt,
+    resume_buffer_seconds: 300,
+    source: "endpoint",
+  });
+  const { code, stdout } = await spawnScript(CHECK);
+  assert.equal(code, 0);
+  const json = JSON.parse(stdout.trim());
+  assert.equal(json.source, "cache");
+  assert.equal(json.ok, false);
+  assert.equal(json.resume_buffer_seconds, 300, "buffer field round-trips through the cache");
+  assert.equal(json.wait_seconds, 3900, "buffered wait round-trips through the cache");
 });

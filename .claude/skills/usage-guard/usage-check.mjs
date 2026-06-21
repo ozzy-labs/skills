@@ -15,12 +15,16 @@
 // functional path literal here is written in the rewritable skills-dir form.
 //
 // Output (stdout, single JSON line):
-//   { five_hour, seven_day, ok, wait_seconds, resets_at, source }
+//   { five_hour, seven_day, ok, wait_seconds, resets_at, resume_buffer_seconds, source }
 //   - five_hour / seven_day: { utilization (0-100), resets_at (ISO|null) }
 //   - ok:           both windows' utilization < threshold (default 95)
 //   - wait_seconds: seconds until the LATEST resets_at among exceeded windows
-//                   (0 when ok). Derived from `resets_at` minus now.
-//   - resets_at:    that same latest exceeded resets_at (null when ok)
+//                   PLUS the post-reset resume buffer (0 when ok). Derived from
+//                   `resets_at` minus now, plus resume_buffer_seconds.
+//   - resets_at:    that same latest exceeded resets_at, UNCHANGED by the buffer
+//                   (the window edge; the planned resume = resets_at + buffer)
+//   - resume_buffer_seconds: the post-reset safety margin folded into
+//                   wait_seconds (default 300; 0 restores the legacy behaviour)
 //   - source:       "endpoint" | "jsonl" | "fail-open" | "cache"
 //
 // Fail-open: if the endpoint fails AND the JSONL fallback fails, emit
@@ -38,6 +42,11 @@ const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA = "oauth-2025-04-20";
 const CLAUDE_CODE_VERSION = "2.0.0";
 const DEFAULT_THRESHOLD = 95;
+// Post-reset resume buffer (seconds). Server-side `utilization` can lag the
+// window reset and ScheduleWakeup fires late, so resuming a few minutes AFTER
+// resets_at avoids re-entering a still-throttled window and re-bouncing. 0
+// restores the legacy "resume exactly at resets_at" behaviour.
+const DEFAULT_RESUME_BUFFER_SECONDS = 300;
 const DEFAULT_CACHE_TTL_MS = 45_000; // 30–60s window so the #123 hook can share it.
 const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
 const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -61,6 +70,25 @@ export function resolveThreshold(env = process.env) {
   if (raw === undefined || raw === null || String(raw).trim() === "") return DEFAULT_THRESHOLD;
   const n = Number(raw);
   return Number.isFinite(n) ? n : DEFAULT_THRESHOLD;
+}
+
+/**
+ * Resolve the post-reset resume buffer in seconds (env override → default).
+ *
+ * `USAGE_GUARD_RESUME_BUFFER_SECONDS` overrides the default (300). A value of 0
+ * restores the legacy "resume exactly at resets_at" behaviour. Negative or
+ * non-finite values clamp to the default.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number}
+ */
+export function resolveResumeBuffer(env = process.env) {
+  const raw = env?.USAGE_GUARD_RESUME_BUFFER_SECONDS;
+  if (raw === undefined || raw === null || String(raw).trim() === "")
+    return DEFAULT_RESUME_BUFFER_SECONDS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_RESUME_BUFFER_SECONDS;
+  return n;
 }
 
 /**
@@ -132,13 +160,26 @@ export function normalizeWindows(payload) {
  * the threshold (the soonest the work could safely resume against all
  * exceeded windows).
  *
+ * The optional post-reset `resumeBuffer` (seconds) is added to `wait_seconds`
+ * ONLY when not ok, so the work resumes a margin AFTER the window edge (server
+ * `utilization` can lag the reset). `resets_at` stays the raw window edge — the
+ * planned resume time is `resets_at + resumeBuffer`, kept distinguishable.
+ *
  * @param {{ five_hour: {utilization:number,resets_at:string|null}, seven_day: {utilization:number,resets_at:string|null} }} windows
  * @param {object} [opts]
  * @param {number} [opts.threshold]
+ * @param {number} [opts.resumeBuffer] post-reset buffer in seconds (default 300)
  * @param {() => number} [opts.now]
- * @returns {{ five_hour: object, seven_day: object, ok: boolean, wait_seconds: number, resets_at: string|null }}
+ * @returns {{ five_hour: object, seven_day: object, ok: boolean, wait_seconds: number, resets_at: string|null, resume_buffer_seconds: number }}
  */
-export function evaluate(windows, { threshold = DEFAULT_THRESHOLD, now = Date.now } = {}) {
+export function evaluate(
+  windows,
+  {
+    threshold = DEFAULT_THRESHOLD,
+    resumeBuffer = DEFAULT_RESUME_BUFFER_SECONDS,
+    now = Date.now,
+  } = {},
+) {
   const exceeded = [windows.five_hour, windows.seven_day].filter((w) => w.utilization >= threshold);
   const ok = exceeded.length === 0;
   let resetsAt = null;
@@ -156,7 +197,8 @@ export function evaluate(windows, { threshold = DEFAULT_THRESHOLD, now = Date.no
       }
     }
     if (latestMs !== null) {
-      waitSeconds = Math.max(0, Math.ceil((latestMs - now()) / 1000));
+      // wait = time to the window edge + the post-reset safety buffer.
+      waitSeconds = Math.max(0, Math.ceil((latestMs - now()) / 1000)) + Math.max(0, resumeBuffer);
     }
   }
   return {
@@ -165,6 +207,7 @@ export function evaluate(windows, { threshold = DEFAULT_THRESHOLD, now = Date.no
     ok,
     wait_seconds: waitSeconds,
     resets_at: resetsAt,
+    resume_buffer_seconds: Math.max(0, resumeBuffer),
   };
 }
 
@@ -364,12 +407,13 @@ export async function getUsage({
   warn = (msg) => process.stderr.write(`${msg}\n`),
 } = {}) {
   const threshold = resolveThreshold(env);
+  const resumeBuffer = resolveResumeBuffer(env);
 
   // 1. Fresh cache → return as-is (no endpoint re-fetch within TTL).
   const cached = await readCache({ readFileImpl, cachePath, ttlMs: cacheTtlMs, now });
   if (cached) return { ...cached, source: "cache" };
 
-  const evalOpts = { threshold, now };
+  const evalOpts = { threshold, resumeBuffer, now };
 
   // 2. Endpoint.
   try {
@@ -397,6 +441,7 @@ export async function getUsage({
         ok: true,
         wait_seconds: 0,
         resets_at: null,
+        resume_buffer_seconds: resumeBuffer,
         source: "fail-open",
       };
     }
@@ -422,6 +467,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         ok: true,
         wait_seconds: 0,
         resets_at: null,
+        resume_buffer_seconds: resolveResumeBuffer(),
         source: "fail-open",
       })}\n`,
     );

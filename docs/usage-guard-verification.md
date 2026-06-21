@@ -33,10 +33,31 @@ Cases exercised:
 | 1 | hook + over-threshold cache (5h 99%) | exit 2, stderr `Usage Limit reached` + `resets at HH:MM` + `[origin: main session]` |
 | 2 | hook + over-threshold + `agent_id` payload | exit 2, stderr `[origin: subagent abc123]` |
 | 3 | hook + ok cache | exit 0, no deny output |
-| 4 | hook + empty home (no cache/creds) | exit 0 (fail-open), stderr warns `unavailable` / `failing open` |
+| 4 | hook + empty home (no cache/creds) | exit 0 (fail-open), stderr warns `unavailable` / `failing open` + `DEGRADED` `source=fail-open` |
 | 5 | hook + `USAGE_GUARD_THRESHOLD=10` over an `ok:false` cache | exit 2, deny names `≥ 10%` |
 | 6 | usage-check CLI + over cache | exit 0, stdout JSON `source:"cache"`, `ok:false` |
-| 7 | usage-check CLI + empty home | exit 0, stdout JSON `ok:true`, `source:"fail-open"` |
+| 7 | usage-check CLI + empty home | exit 0, stdout JSON `ok:true`, `source:"fail-open"`, `resume_buffer_seconds:300` |
+| 8 | usage-check CLI + over cache (buffered) | exit 0, JSON `source:"cache"`, `wait_seconds`/`resume_buffer_seconds` round-trip |
+
+### Post-reset resume buffer & fail-open visibility (issue #129)
+
+In-process unit coverage adds:
+
+- **Resume buffer** (`tests/usage-check.test.mjs`): `evaluate()` folds a
+  post-reset buffer into `wait_seconds` only when over threshold; `resets_at`
+  stays the raw window edge; `resume_buffer_seconds` is reported on every
+  result. Default is 300s; `USAGE_GUARD_RESUME_BUFFER_SECONDS` overrides it (0 =
+  legacy resume-at-edge; negative/non-numeric → default). `getUsage` threads the
+  env value through both the endpoint and fail-open results.
+- **Fail-open degradation** (`tests/usage-guard-hook.test.mjs`): a non-endpoint
+  `source` (`fail-open` / `jsonl`) still ALLOWs but emits a `DEGRADED` warning
+  (the `fail-open` wording flags that the guard is **not actually monitoring**);
+  `endpoint` / `cache` stay silent. The deny "~N min" hint is derived from the
+  buffered `wait_seconds`.
+
+See the skill's `SKILL.md` §環境要件 for why the endpoint path can be blocked
+(api.anthropic.com egress + `~/.claude/.credentials.json` read) and how to
+restore it so `source` is `endpoint` rather than a degraded fallback.
 
 ## B. `/usage-guard` standalone pause→resume (manual)
 

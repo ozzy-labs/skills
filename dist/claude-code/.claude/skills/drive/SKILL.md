@@ -61,8 +61,9 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 1. `usage-guard` エンジン（`~/.claude/skills/usage-guard/SKILL.md`、user-scope では `~/.claude/skills/usage-guard/SKILL.md`）を Read し、その「軽量 wait-loop」を実行する（= 同階層の `usage-check.mjs` を Bash 実行して JSON を得る）。
 2. `ok: true`（両枠とも閾値未満）→ **通常進行**。次のフェーズ／wave／worker dispatch へそのまま進む。
-3. `ok: false`（いずれかの枠が閾値超過）→ usage-guard の wait-loop に委譲する:
-   - `ScheduleWakeup(min(wait_seconds, 3600))` で heartbeat を仕込み、**待機する**（待機中は再入せず予算を消費しない）。`wait_seconds` が 3600 を超える場合は複数回に分けて再チェックする。
+3. `ok: false`（いずれかの枠が閾値超過）→ usage-guard の wait-loop に委譲する。`wait_seconds` にはポストリセットのバッファ（`resume_buffer_seconds`、既定 +300 秒）が折り込まれており、待機は `resets_at + buffer` まで延びる（リセット丁度の再突入による再ハネを回避）:
+   - in-session・待機 ≤1h → `ScheduleWakeup(min(wait_seconds, 3600))` で heartbeat を仕込み、**待機する**（待機中は再入せず予算を消費しない）。`wait_seconds` が 3600 を超える場合は複数回に分けて再チェックする。
+   - 非 /loop オーケストレーション（Agent tool / Workflow drive）・待機 >1h・再起動耐性が必要 → `CronCreate`（`recurring: false`, durable）を **`resets_at + resume_buffer_seconds`** にセットし、発火時に継続コマンドを再投入する（壁時計一発・再起動耐性。one-shot は発火後 auto-delete）。詳細は usage-guard SKILL.md §軽量 wait-loop「再開トリガの選択」。
    - 起床したら継続コマンド **`/drive --usage-guard <元の引数>`** を自己再入する。drive の冪等 resume が既存 PR / ブランチ / 完了済み worker を検出して**続きから再開**する（待機を挟んでも重複副作用を生まない）。
    - `usage-check.mjs` が `ok: true` を返すまで 3〜4 を繰り返す。
 
@@ -73,9 +74,11 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 - orchestration の停止は **wave 境界 / worker dispatch 境界の粒度**。一度起動した worker の**走行中（mid-unit）の超過**はこのフラグでは止められない。長い unit 内の ceiling は #123 の **PreToolUse hook**（全 tool 呼び出し前に効き、subagent 内にも届く）が担う（推奨併用）。
 - worker（subagent）に渡す prompt 自体は無改変でよい。worker は単一モードを実行するため、**親が `--usage-guard` で worker dispatch 前に checkpoint を挟む**ことで wave 粒度の予算対応になる。
 
-#### fail-open
+#### fail-open（劣化可視化）
 
 usage-check のシグナル取得が全滅（endpoint → JSONL フォールバックともに失敗）した場合、usage-guard は `ok: true`（fail-open）を返す。drive はそのまま通常進行する — **ガードが自バグで drive を hard-stop させない**。
+
+ただし fail-open は**ガードが事実上 OFF**の状態。checkpoint で得た JSON の `source` が `endpoint` / `cache` 以外（特に `fail-open`）のとき、drive caller は**劣化を明示報告に残す**（例: 「⚠️ usage-guard 劣化: source=fail-open、実際には監視していません」）。endpoint 経路が使えていない原因（api.anthropic.com egress / `~/.claude/.credentials.json` 読み取りの権限）と復旧方法は usage-guard SKILL.md §環境要件 を参照。走行中 worker の PreToolUse hook も同様に劣化警告を stderr に出す。
 
 ### オーケストレーション実行機構の選択
 

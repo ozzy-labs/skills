@@ -18,6 +18,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   decide,
+  degradedSourceWarning,
   formatResetTime,
   parsePayload,
   resolveUsage,
@@ -159,6 +160,93 @@ test("(4b) resolveUsage returns null when both cache and getUsage throw", async 
     },
   });
   assert.equal(usage, null, "both sources failing → null → caller fails open");
+});
+
+// --- fail-open degradation visibility (issue #129) ---------------------------
+
+test("(5) fail-open source → allow but emit a DEGRADED warning", async () => {
+  const warnings = [];
+  const denies = [];
+  const failOpen = {
+    five_hour: { utilization: 0, resets_at: null },
+    seven_day: { utilization: 0, resets_at: null },
+    ok: true,
+    wait_seconds: 0,
+    resets_at: null,
+    source: "fail-open",
+  };
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => failOpen,
+    env: {},
+    now,
+    warn: (m) => warnings.push(m),
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 0, "fail-open is ok → still ALLOW");
+  assert.equal(denies.length, 0, "never deny on fail-open");
+  assert.equal(warnings.length, 1, "exactly one degradation warning");
+  assert.match(warnings[0], /DEGRADED/);
+  assert.match(warnings[0], /source=fail-open/);
+  assert.match(warnings[0], /NOT actually monitoring/);
+});
+
+test("(5b) jsonl fallback source → allow but warn it is degraded (coarse)", async () => {
+  const warnings = [];
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => ({ ...okUsage, source: "jsonl" }),
+    env: {},
+    now,
+    warn: (m) => warnings.push(m),
+  });
+  assert.equal(code, 0);
+  assert.equal(warnings.length, 1, "jsonl is a degraded source → warn");
+  assert.match(warnings[0], /degraded/);
+  assert.match(warnings[0], /source=jsonl/);
+});
+
+test("(5c) endpoint and cache sources do NOT trigger a degradation warning", async () => {
+  for (const source of ["endpoint", "cache"]) {
+    const warnings = [];
+    await run({
+      readStdinImpl: async () => "",
+      resolveUsageImpl: async () => ({ ...okUsage, source }),
+      env: {},
+      now,
+      warn: (m) => warnings.push(m),
+    });
+    assert.equal(warnings.length, 0, `${source} is a healthy source → no warning`);
+  }
+});
+
+test("(5d) degradedSourceWarning: fail-open vs other, with origin", () => {
+  const fo = degradedSourceWarning("fail-open", "subagent w-1");
+  assert.match(fo, /source=fail-open/);
+  assert.match(fo, /subagent w-1/);
+  assert.match(fo, /NOT actually monitoring/);
+  const jl = degradedSourceWarning("jsonl", "main session");
+  assert.match(jl, /source=jsonl/);
+  assert.match(jl, /main session/);
+});
+
+// --- deny hint reflects the buffered wait_seconds (issue #129) ----------------
+
+test("(5e) deny hint computes minutes from the buffered wait_seconds (no resets_at)", () => {
+  // No parseable resets_at → decide() falls back to the wait_seconds hint.
+  // wait_seconds already includes the resume buffer, so the "~N min" hint does too.
+  const usage = {
+    five_hour: { utilization: 99, resets_at: null },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    wait_seconds: 3600 + 300, // edge (1h) + 5min buffer
+    resets_at: null,
+    source: "endpoint",
+  };
+  const { allow, reason } = decide(usage, 95, now);
+  assert.equal(allow, false);
+  // ceil(3900 / 60) = 65 min — proves the buffer is reflected in the hint.
+  assert.match(reason, /~65 min/);
 });
 
 // --- subagent agent_id parsing (logging) -------------------------------------

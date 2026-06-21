@@ -67,17 +67,24 @@ async function writeCache(result) {
 }
 
 async function seedOver(seconds) {
+  // `seconds` is the time to the window edge; the live evaluate() folds a
+  // post-reset buffer (default 300) into wait_seconds, so mirror that here so
+  // the seeded cache looks like a real over-threshold result (#129).
+  const resumeBuffer = 300;
   const resetsAt = new Date(Date.now() + seconds * 1000).toISOString();
   await writeCache({
     five_hour: { utilization: 99, resets_at: resetsAt },
     seven_day: { utilization: 10, resets_at: null },
     ok: false,
-    wait_seconds: seconds,
+    wait_seconds: seconds + resumeBuffer,
     resets_at: resetsAt,
+    resume_buffer_seconds: resumeBuffer,
     source: "endpoint",
   });
   console.log(`seeded OVER cache → ${CACHE_PATH}`);
-  console.log(`  5h 99% (resets in ${seconds}s @ ${resetsAt}), 7d 10%, ok:false`);
+  console.log(
+    `  5h 99% (resets in ${seconds}s @ ${resetsAt}), 7d 10%, ok:false, resume_buffer ${resumeBuffer}s`,
+  );
 }
 
 async function seedOk() {
@@ -87,6 +94,7 @@ async function seedOk() {
     ok: true,
     wait_seconds: 0,
     resets_at: null,
+    resume_buffer_seconds: 300,
     source: "endpoint",
   });
   console.log(`seeded OK cache → ${CACHE_PATH} (5h 40%, 7d 50%, ok:true)`);
