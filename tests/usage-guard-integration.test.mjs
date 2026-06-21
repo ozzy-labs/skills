@@ -210,6 +210,8 @@ test("usage-check CLI: no cache / creds / projects → exit 0, JSON ok=true, sou
   assert.equal(json.source, "fail-open", "both endpoint and JSONL unavailable → fail-open");
   // Issue #129: the new resume_buffer_seconds field is present on every result.
   assert.equal(json.resume_buffer_seconds, 300, "default resume buffer is reported");
+  // Issue #133: suspected_reflection_lag is present on every result (false here).
+  assert.equal(json.suspected_reflection_lag, false, "fail-open carries the lag flag (false)");
 });
 
 // ── Case 8: usage-check CLI + over cache + RESUME_BUFFER env → buffered wait ──

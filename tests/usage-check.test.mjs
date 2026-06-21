@@ -22,6 +22,8 @@ import {
   getUsage,
   normalizeWindows,
   readAccessToken,
+  resolveLagEpsilon,
+  resolveLagRecheck,
   resolveResumeBuffer,
   resolveThreshold,
 } from "../src/skills/usage-guard/usage-check.mjs";
@@ -415,6 +417,152 @@ test("aggregateJsonlUsage windows tokens by 5h / 7d age", async () => {
   // 7d window: (2000 + 2000) = 4000 / 10000 = 40% (10d-old row excluded)
   assert.equal(Math.round(windows.seven_day.utilization), 40);
   assert.ok(windows.five_hour.resets_at, "5h resets_at derived from oldest counted message");
+});
+
+// --- reflection-lag detection (issue #133) -----------------------------------
+//
+// After a window resets, the endpoint can briefly echo the PREVIOUS window's
+// residue (e.g. 5h utilization 100% only ~5 min into a fresh window). That
+// "reset happened but util still 100%" contradiction is a suspected reflection
+// lag → short recheck instead of a ~full-window wait.
+
+const FIVE_HOUR_S = 18000;
+
+// resets_at JUST past the boundary: elapsed = 18000 - (resets_at - now) small.
+// elapsed ≈ 326s (5.4 min) like the issue example → resets_at ≈ now + 17674s.
+const lagWindows = (util = 100) =>
+  normalizeWindows({
+    five_hour: {
+      utilization: util,
+      resets_at: new Date(FIXED_NOW + (FIVE_HOUR_S - 326) * 1000).toISOString(),
+    },
+    seven_day: { utilization: 10, resets_at: null },
+  });
+
+test("(#133) boundary-just-passed + util 100 → suspected lag, wait==recheck, resets_at unchanged", () => {
+  const edge = new Date(FIXED_NOW + (FIVE_HOUR_S - 326) * 1000).toISOString();
+  const res = evaluate(lagWindows(100), { now });
+  assert.equal(res.ok, false, "100% ≥ 95 → not ok");
+  assert.equal(res.suspected_reflection_lag, true, "barely past boundary + over → lag suspected");
+  assert.equal(
+    res.wait_seconds,
+    180,
+    "lag → short recheck interval (default 180s), not full window",
+  );
+  assert.equal(res.resets_at, edge, "resets_at stays the raw window edge (info preserved)");
+});
+
+test("(#133) well past boundary + util 100 → NO lag, legacy full-window + buffer", () => {
+  // resets_at far in the future → elapsed since boundary is large (not near 0).
+  const farEdge = new Date(FIXED_NOW + 4 * 60 * 60 * 1000).toISOString(); // +4h
+  const res = evaluate(
+    normalizeWindows({
+      five_hour: { utilization: 100, resets_at: farEdge },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    { now },
+  );
+  assert.equal(res.suspected_reflection_lag, false, "elapsed >> epsilon → no lag");
+  const expected = Math.ceil((Date.parse(farEdge) - FIXED_NOW) / 1000) + 300;
+  assert.equal(res.wait_seconds, expected, "legacy full window + 300s buffer");
+  assert.equal(res.resets_at, farEdge);
+});
+
+test("(#133) ok:true (under threshold) → never flags lag even just past boundary", () => {
+  const res = evaluate(lagWindows(40), { now });
+  assert.equal(res.ok, true, "40% < 95 → ok");
+  assert.equal(res.suspected_reflection_lag, false, "ok → no lag judgement");
+  assert.equal(res.wait_seconds, 0);
+});
+
+test("(#133) env overrides for epsilon and recheck take effect", () => {
+  assert.equal(resolveLagEpsilon({ USAGE_GUARD_LAG_EPSILON_SECONDS: "60" }), 60);
+  assert.equal(resolveLagEpsilon({}), 900, "unset → default 900");
+  assert.equal(
+    resolveLagEpsilon({ USAGE_GUARD_LAG_EPSILON_SECONDS: "-5" }),
+    900,
+    "negative → default",
+  );
+  assert.equal(resolveLagRecheck({ USAGE_GUARD_LAG_RECHECK_SECONDS: "30" }), 30);
+  assert.equal(resolveLagRecheck({}), 180, "unset → default 180");
+  assert.equal(
+    resolveLagRecheck({ USAGE_GUARD_LAG_RECHECK_SECONDS: "0" }),
+    180,
+    "0 → default (no busy loop)",
+  );
+
+  // elapsed ≈ 326s. With epsilon=60 (< 326) it should NOT flag a lag.
+  const tightEpsilon = evaluate(lagWindows(100), { now, lagEpsilon: 60 });
+  assert.equal(tightEpsilon.suspected_reflection_lag, false, "epsilon 60 < elapsed 326 → no lag");
+  assert.ok(tightEpsilon.wait_seconds > 180, "falls back to full-window wait");
+
+  // With a larger epsilon and a custom recheck the wait equals that recheck.
+  const customRecheck = evaluate(lagWindows(100), { now, lagEpsilon: 900, lagRecheck: 45 });
+  assert.equal(customRecheck.suspected_reflection_lag, true);
+  assert.equal(customRecheck.wait_seconds, 45, "custom recheck interval used");
+});
+
+test("(#133) getUsage threads lag env into the endpoint result + does NOT cache a lagged read", async () => {
+  let wrote = false;
+  const result = await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: {
+        utilization: 100,
+        resets_at: new Date(FIXED_NOW + (FIVE_HOUR_S - 326) * 1000).toISOString(),
+      },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    readFileImpl: credsReader(),
+    writeFileImpl: async () => {
+      wrote = true;
+    },
+    mkdirImpl: async () => {},
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(result.source, "endpoint");
+  assert.equal(result.suspected_reflection_lag, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.wait_seconds, 180, "lag → short recheck");
+  assert.equal(wrote, false, "a suspected-lag result must NOT be written to cache (#133)");
+});
+
+test("(#133) getUsage DOES cache a normal (non-lag) over-threshold result", async () => {
+  let wrote = false;
+  const result = await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: {
+        utilization: 99,
+        resets_at: new Date(FIXED_NOW + 4 * 60 * 60 * 1000).toISOString(),
+      },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    readFileImpl: credsReader(),
+    writeFileImpl: async () => {
+      wrote = true;
+    },
+    mkdirImpl: async () => {},
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(result.suspected_reflection_lag, false);
+  assert.equal(wrote, true, "non-lag results still cache normally");
+});
+
+test("(#133) endpoint OK (ok:true) result carries suspected_reflection_lag:false", async () => {
+  const result = await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: { utilization: 40, resets_at: "2026-06-15T04:00:00.000Z" },
+      seven_day: { utilization: 60, resets_at: "2026-06-20T00:00:00.000Z" },
+    }),
+    readFileImpl: credsReader(),
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(result.suspected_reflection_lag, false);
 });
 
 // --- structural assert on the BUILT SKILL.md ---------------------------------
