@@ -22,6 +22,7 @@ import {
   getUsage,
   normalizeWindows,
   readAccessToken,
+  resolveResumeBuffer,
   resolveThreshold,
 } from "../src/skills/usage-guard/usage-check.mjs";
 
@@ -179,7 +180,8 @@ test("(5) wait_seconds derives from the LATEST resets_at among exceeded windows"
   );
   assert.equal(res.ok, false);
   assert.equal(res.resets_at, sevenDayReset, "picks the later (7d) reset");
-  const expected = Math.ceil((Date.parse(sevenDayReset) - FIXED_NOW) / 1000);
+  // wait_seconds = time-to-edge + default resume buffer (300).
+  const expected = Math.ceil((Date.parse(sevenDayReset) - FIXED_NOW) / 1000) + 300;
   assert.equal(res.wait_seconds, expected);
 });
 
@@ -193,6 +195,111 @@ test("(5b) only the exceeded window counts toward the wait", () => {
     { now },
   );
   assert.equal(res.resets_at, "2026-06-15T05:00:00.000Z");
+});
+
+// --- post-reset resume buffer (issue #129) -----------------------------------
+
+const exceededWindows = () =>
+  normalizeWindows({
+    five_hour: { utilization: 99, resets_at: "2026-06-15T02:00:00.000Z" }, // +2h
+    seven_day: { utilization: 10, resets_at: null },
+  });
+const TWO_HOURS_S = Math.ceil((Date.parse("2026-06-15T02:00:00.000Z") - FIXED_NOW) / 1000);
+
+test("buffer: default 300 is folded into wait_seconds; resets_at unchanged", () => {
+  const res = evaluate(exceededWindows(), { now });
+  assert.equal(res.ok, false);
+  assert.equal(res.resume_buffer_seconds, 300, "default buffer = 300");
+  assert.equal(res.wait_seconds, TWO_HOURS_S + 300, "wait = edge + buffer");
+  assert.equal(res.resets_at, "2026-06-15T02:00:00.000Z", "resets_at stays the raw window edge");
+});
+
+test("buffer: explicit resumeBuffer overrides the default", () => {
+  const res = evaluate(exceededWindows(), { now, resumeBuffer: 600 });
+  assert.equal(res.resume_buffer_seconds, 600);
+  assert.equal(res.wait_seconds, TWO_HOURS_S + 600);
+  assert.equal(res.resets_at, "2026-06-15T02:00:00.000Z", "resets_at still the window edge");
+});
+
+test("buffer: resumeBuffer=0 restores legacy resume-at-edge behaviour", () => {
+  const res = evaluate(exceededWindows(), { now, resumeBuffer: 0 });
+  assert.equal(res.resume_buffer_seconds, 0);
+  assert.equal(res.wait_seconds, TWO_HOURS_S, "no buffer added");
+});
+
+test("buffer: NOT applied when ok (wait_seconds stays 0)", () => {
+  const res = evaluate(
+    normalizeWindows({
+      five_hour: { utilization: 10, resets_at: "2026-06-15T02:00:00.000Z" },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    { now, resumeBuffer: 300 },
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.wait_seconds, 0, "ok → no wait, no buffer");
+  assert.equal(res.resume_buffer_seconds, 300, "field still reported");
+});
+
+test("resolveResumeBuffer: env override / 0 / invalid → default", () => {
+  assert.equal(resolveResumeBuffer({ USAGE_GUARD_RESUME_BUFFER_SECONDS: "600" }), 600);
+  assert.equal(resolveResumeBuffer({ USAGE_GUARD_RESUME_BUFFER_SECONDS: "0" }), 0);
+  assert.equal(resolveResumeBuffer({}), 300, "unset → default 300");
+  assert.equal(
+    resolveResumeBuffer({ USAGE_GUARD_RESUME_BUFFER_SECONDS: "" }),
+    300,
+    "blank → default",
+  );
+  assert.equal(
+    resolveResumeBuffer({ USAGE_GUARD_RESUME_BUFFER_SECONDS: "-5" }),
+    300,
+    "negative → default",
+  );
+  assert.equal(
+    resolveResumeBuffer({ USAGE_GUARD_RESUME_BUFFER_SECONDS: "abc" }),
+    300,
+    "non-numeric → default",
+  );
+});
+
+test("getUsage threads USAGE_GUARD_RESUME_BUFFER_SECONDS into the endpoint result", async () => {
+  const result = await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: { utilization: 99, resets_at: "2026-06-15T02:00:00.000Z" },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    readFileImpl: credsReader(),
+    env: { USAGE_GUARD_RESUME_BUFFER_SECONDS: "600" },
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(result.source, "endpoint");
+  assert.equal(result.ok, false);
+  assert.equal(result.resume_buffer_seconds, 600);
+  assert.equal(result.wait_seconds, TWO_HOURS_S + 600, "endpoint path applies the env buffer");
+});
+
+test("getUsage reports resume_buffer_seconds on the fail-open result", async () => {
+  const result = await getUsage({
+    fetchImpl: async () => {
+      throw new Error("network down");
+    },
+    readFileImpl: async (path) => {
+      if (path.endsWith(".credentials.json")) {
+        return JSON.stringify({ claudeAiOauth: { accessToken: "t", expiresAt: FIXED_NOW + 1000 } });
+      }
+      throw new Error("ENOENT");
+    },
+    readdirImpl: async () => {
+      throw new Error("no projects dir");
+    },
+    env: { USAGE_GUARD_RESUME_BUFFER_SECONDS: "120" },
+    now,
+    cachePath: "/nonexistent/cache.json",
+    warn: () => {},
+  });
+  assert.equal(result.source, "fail-open");
+  assert.equal(result.resume_buffer_seconds, 120, "fail-open carries the resolved buffer");
 });
 
 // --- (6) cache TTL within window → no re-fetch -------------------------------
