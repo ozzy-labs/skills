@@ -228,9 +228,10 @@ export async function resolveUsage({ readCacheImpl = readCache, getUsageImpl = g
 
 /**
  * Resolve the consecutive-deny debounce count (env override → default).
- * `USAGE_GUARD_DEBOUNCE_COUNT` overrides the default (2). A value < 1 means
- * "deny immediately" (legacy single-reading behaviour). Non-finite/blank →
- * default.
+ * `USAGE_GUARD_DEBOUNCE_COUNT` overrides the default (2). Set it to `1` to deny
+ * on the first over reading (legacy single-reading behaviour). Values < 1,
+ * non-finite, or blank fall back to the default (a 0/negative count would never
+ * deny). Fractional values are floored.
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {number}
  */
