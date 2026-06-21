@@ -131,6 +131,68 @@ test("(3b) cold cache → falls through to getUsage (still cache-first internall
   assert.equal(usage.source, "endpoint");
 });
 
+// --- (#135) hook path self-sustains the cache: cold → fetch once → hot --------
+//
+// Before #135, getUsage (invoked by resolveUsage on a cold cache) never wrote
+// the cache because writeFileImpl defaulted to undefined, so every subsequent
+// tool call re-fetched the endpoint. This drives the REAL getUsage (no fs
+// injection beyond a tmp cachePath + a fetch spy) twice through resolveUsage and
+// asserts the endpoint is fetched only ONCE — the second call is served from the
+// cache the first call wrote.
+
+test("(#135) hook: cold getUsage writes cache → second resolve hits cache (fetch once)", async () => {
+  const { getUsage, readCache } = await import("../src/skills/usage-guard/usage-check.mjs");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const tmp = await mkdtemp(join(tmpdir(), "ug-hook-cache-"));
+  const cachePath = join(tmp, "usage-guard", "cache.json");
+  try {
+    let fetchCalls = 0;
+    const fetchImpl = async () => {
+      fetchCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          five_hour: { utilization: 40, resets_at: "2026-06-15T04:00:00.000Z" },
+          seven_day: { utilization: 60, resets_at: "2026-06-20T00:00:00.000Z" },
+        }),
+      };
+    };
+    const credsReader = async (path) => {
+      if (path.endsWith(".credentials.json")) {
+        return JSON.stringify({
+          claudeAiOauth: { accessToken: "tok", expiresAt: FIXED_NOW + 3_600_000 },
+        });
+      }
+      throw new Error(`unexpected read ${path}`);
+    };
+    // getUsage with NO writeFileImpl/mkdirImpl injected — relies on the #135
+    // real-fs defaults to write the cache it just fetched.
+    const getUsageImpl = () =>
+      getUsage({
+        fetchImpl,
+        readFileImpl: credsReader,
+        now,
+        cachePath,
+        credentialsPath: "/fake/.credentials.json",
+      });
+    const readCacheImpl = () => readCache({ cachePath, now });
+
+    // 1st resolve: cold cache → getUsage → endpoint fetch (#1) → cache written.
+    const first = await resolveUsage({ readCacheImpl, getUsageImpl });
+    assert.equal(first.source, "endpoint", "cold cache → endpoint on first call");
+    assert.equal(fetchCalls, 1, "exactly one endpoint fetch so far");
+
+    // 2nd resolve: cache is now warm → served from cache, NO new fetch.
+    const second = await resolveUsage({ readCacheImpl, getUsageImpl });
+    assert.equal(second.source, "cache", "second call served from the self-written cache");
+    assert.equal(fetchCalls, 1, "no re-fetch within TTL — hook path is self-sustaining (#135)");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 // --- (4) usage unavailable → allow (fail-open) + warn ------------------------
 
 test("(4) usage unavailable (null) → allow (exit 0) + stderr warn", async () => {

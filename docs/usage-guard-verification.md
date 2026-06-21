@@ -85,6 +85,29 @@ In-process unit coverage (`tests/usage-check.test.mjs`) asserts:
 - `getUsage` threads the lag env through the endpoint result AND does **not**
   cache a lagged read, while a normal over-threshold result still caches.
 
+### Self-sustaining cache via the hook path (issue #135)
+
+`getUsage` now defaults `writeFileImpl`/`mkdirImpl` to the real `node:fs/promises`
+implementations (symmetric with `readFileImpl`). Before #135 these defaulted to
+`undefined`, so `writeCache()` early-returned (a silent no-op) for any caller
+that did not inject fs — notably the PreToolUse hook, which calls `getUsage()`
+with no deps. The cache was therefore never written through the hook, and every
+tool call paid a cold endpoint fetch (~0.44s) instead of converging to one fetch
+per TTL.
+
+In-process unit coverage asserts:
+
+- **`tests/usage-check.test.mjs`**: `getUsage` with NO fs injection writes the
+  cache file on endpoint success (real-fs defaults create the nested cache dir);
+  a regression guard that the defaults are wired (not `undefined`); the
+  `suspected_reflection_lag:true` cache bypass (#133) and the `fail-open` no-cache
+  behaviour are both preserved when driven through the DEFAULT fs path.
+- **`tests/usage-guard-hook.test.mjs`**: driving the REAL `getUsage` (no fs
+  injection beyond a tmp `cachePath` + a fetch spy) through `resolveUsage` twice
+  — the first call (cold cache) fetches the endpoint once and writes the cache;
+  the second call is served from that self-written cache with NO second fetch,
+  proving the hook path is self-sustaining (TTL-bounded single fetch).
+
 The CLI integration test (`tests/usage-guard-integration.test.mjs`, fail-open
 case) additionally asserts the `suspected_reflection_lag` field is present
 (false) on the real spawned process output.

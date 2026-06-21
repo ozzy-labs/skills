@@ -8,13 +8,17 @@
 // checkpoint only pauses at resumable-unit boundaries, while a long unit can
 // blow past the threshold mid-flight. The hook stops that.
 //
-// Signal source: it READS the cache that usage-check.mjs (#121) already writes
-// (`~/.claude/usage-guard/cache.json`, 30–60s TTL) — it never hits the OAuth
-// endpoint itself, so enabling the hook does NOT spam the endpoint on every
-// tool call. We import readCache + getUsage from the sibling usage-check.mjs so
-// the cache path / TTL / decision logic live in exactly one place (M2: no
-// `~/.claude/skills/...` path literal here either; the cache path is the
-// HOME-anchored one usage-check.mjs owns).
+// Signal source: it FIRST reads the cache that usage-check.mjs (#121) writes
+// (`~/.claude/usage-guard/cache.json`, 30–60s TTL). On a hot cache it never
+// touches the OAuth endpoint, so enabling the hook does NOT spam the endpoint on
+// every tool call. On a COLD/stale cache it falls through to getUsage (which is
+// itself cache-first and re-fetches at most once per TTL) AND writes the result
+// back to the cache (self-sustaining), so a long run with the hook alone — even
+// without usage-check.mjs having run first — converges to a single fetch per TTL
+// instead of re-fetching on every tool call (#135). We import readCache +
+// getUsage from the sibling usage-check.mjs so the cache path / TTL / decision
+// logic live in exactly one place (M2: no `~/.claude/skills/...` path literal here
+// either; the cache path is the HOME-anchored one usage-check.mjs owns).
 //
 // Decision (PreToolUse contract):
 //   - over threshold → DENY. Emit a JSON decision AND exit 2 so the tool call

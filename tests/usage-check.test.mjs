@@ -565,6 +565,135 @@ test("(#133) endpoint OK (ok:true) result carries suspected_reflection_lag:false
   assert.equal(result.suspected_reflection_lag, false);
 });
 
+// --- self-sustaining cache: writeFileImpl/mkdirImpl default to real fs (#135) -
+//
+// Root cause of #135: getUsage defaulted writeFileImpl/mkdirImpl to `undefined`,
+// so writeCache early-returned (no-op) for any caller that did not inject fs
+// (the PreToolUse hook calls getUsage with no deps). The endpoint was then
+// re-fetched on EVERY tool call because the cache was never written. The fix
+// defaults writeFileImpl=writeFile / mkdirImpl=mkdir so every caller self-
+// sustains the cache. These tests pin that down.
+
+test("(#135) getUsage with NO fs injection still ATTEMPTS the cache write on endpoint success", async () => {
+  // No writeFileImpl/mkdirImpl injected → must fall back to the real-fs defaults
+  // and actually call writeCache. To prove the DEFAULT we point the cache at a
+  // tmp file and assert the file (and its nested dir) is created.
+  const { mkdtemp, readFile: rf, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const tmp = await mkdtemp(join(tmpdir(), "ug-cache-"));
+  const cachePath = join(tmp, "nested", "cache.json");
+  try {
+    const result = await getUsage({
+      fetchImpl: fetchOk({
+        five_hour: { utilization: 40, resets_at: "2026-06-15T04:00:00.000Z" },
+        seven_day: { utilization: 60, resets_at: "2026-06-20T00:00:00.000Z" },
+      }),
+      readFileImpl: credsReader(),
+      now,
+      cachePath, // real default writeFile/mkdir must create this
+      credentialsPath: "/fake/.credentials.json",
+      // writeFileImpl / mkdirImpl intentionally OMITTED → exercise defaults.
+    });
+    assert.equal(result.source, "endpoint");
+    const onDisk = JSON.parse(await rf(cachePath, "utf8"));
+    assert.equal(onDisk.result.five_hour.utilization, 40, "cache written by default fs");
+    assert.equal(typeof onDisk.cached_at, "number", "cache wraps result with cached_at");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("(#135) default writeFileImpl/mkdirImpl are wired (regression: not undefined)", async () => {
+  // Omit fs deps entirely and assert writeCache is reached by observing the
+  // mkdir + write through the real fs against a tmp dir (omitting deps must NOT
+  // throw and must auto-create the nested cache dir).
+  const { mkdtemp, rm, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const tmp = await mkdtemp(join(tmpdir(), "ug-cache2-"));
+  const cachePath = join(tmp, "a", "b", "cache.json");
+  try {
+    await getUsage({
+      fetchImpl: fetchOk({
+        five_hour: { utilization: 12, resets_at: null },
+        seven_day: { utilization: 34, resets_at: null },
+      }),
+      readFileImpl: credsReader(),
+      now,
+      cachePath,
+      credentialsPath: "/fake/.credentials.json",
+    });
+    const s = await stat(cachePath);
+    assert.ok(s.isFile(), "nested cache dir auto-created by default mkdir");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("(#135) suspected-lag result is NOT cached even with default fs (cache bypass kept)", async () => {
+  // Reuses the #133 invariant but through the DEFAULT fs path (no writeFileImpl
+  // injected) to prove the self-sustaining default does not break the bypass.
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const tmp = await mkdtemp(join(tmpdir(), "ug-cache-lag-"));
+  const cachePath = join(tmp, "cache.json");
+  try {
+    const result = await getUsage({
+      fetchImpl: fetchOk({
+        five_hour: {
+          utilization: 100,
+          resets_at: new Date(FIXED_NOW + (FIVE_HOUR_S - 326) * 1000).toISOString(),
+        },
+        seven_day: { utilization: 10, resets_at: null },
+      }),
+      readFileImpl: credsReader(),
+      now,
+      cachePath,
+      credentialsPath: "/fake/.credentials.json",
+      // defaults for writeFileImpl/mkdirImpl
+    });
+    assert.equal(result.suspected_reflection_lag, true);
+    assert.equal(existsSync(cachePath), false, "a suspected-lag read must NOT touch the cache");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("(#135) fail-open result is NOT cached even with default fs", async () => {
+  // fail-open never goes through maybeCache/writeCache; confirm no cache file is
+  // produced via the default fs path either.
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const tmp = await mkdtemp(join(tmpdir(), "ug-cache-fo-"));
+  const cachePath = join(tmp, "cache.json");
+  try {
+    const result = await getUsage({
+      fetchImpl: async () => {
+        throw new Error("network down");
+      },
+      readFileImpl: async (path) => {
+        if (path.endsWith(".credentials.json")) {
+          return JSON.stringify({
+            claudeAiOauth: { accessToken: "t", expiresAt: FIXED_NOW + 1000 },
+          });
+        }
+        throw new Error("ENOENT");
+      },
+      readdirImpl: async () => {
+        throw new Error("no projects dir");
+      },
+      now,
+      cachePath,
+      warn: () => {},
+    });
+    assert.equal(result.source, "fail-open");
+    assert.equal(existsSync(cachePath), false, "fail-open must not be cached");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 // --- structural assert on the BUILT SKILL.md ---------------------------------
 
 test("built claude-code usage-guard SKILL.md is user-invocable + has standalone-form section", async () => {
