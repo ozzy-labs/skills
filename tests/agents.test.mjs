@@ -90,6 +90,40 @@ test("Claude Code adapter throws when agent is missing required field", async ()
   );
 });
 
+test("dogfood mirrors each agent into .claude/agents/<name>.md (issue #137)", async () => {
+  // The build pipeline (writeClaudeAgentsDogfood) mirrors src/agents/<name>.md
+  // into the in-repo `.claude/agents/<name>.md` dogfood so cloud / project-scope
+  // sessions can resolve agents (e.g. code-reviewer for `/review --deep`). The
+  // dogfood is a committed build artifact and must equal the canonical src
+  // verbatim (relative refs preserved — same as the `.claude/skills/` dogfood,
+  // unlike `dist/claude-code/` which applies the user-scope rewrite).
+  const agents = await loadAgents();
+  for (const agent of agents) {
+    const dogfood = join(ROOT, ".claude", "agents", `${agent.name}.md`);
+    assert.ok(
+      existsSync(dogfood),
+      `expected dogfood .claude/agents/${agent.name}.md (run \`pnpm build\`)`,
+    );
+    const content = await readFile(dogfood, "utf8");
+    assert.equal(
+      content,
+      agent.raw,
+      `dogfood .claude/agents/${agent.name}.md must match src/agents/${agent.name}.md verbatim`,
+    );
+  }
+});
+
+test("dogfood mirrors the code-reviewer agent specifically (issue #137)", async () => {
+  const src = join(AGENTS_DIR, "code-reviewer.md");
+  assert.ok(existsSync(src), "src/agents/code-reviewer.md must exist");
+  const dogfood = join(ROOT, ".claude", "agents", "code-reviewer.md");
+  assert.ok(
+    existsSync(dogfood),
+    "expected dogfood .claude/agents/code-reviewer.md (run `pnpm build`)",
+  );
+  assert.equal(await readFile(dogfood, "utf8"), await readFile(src, "utf8"));
+});
+
 test("code-reviewer agent declares read-only tool allowlist (ADR-0025)", async () => {
   const agents = await loadAgents();
   const reviewer = agents.find((a) => a.name === "code-reviewer");

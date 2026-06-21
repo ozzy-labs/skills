@@ -8,9 +8,13 @@
 //      `package.json#files`):
 //        - .agents/skills/{name}/SKILL.md        (Codex CLI / Gemini CLI dogfood)
 //        - .claude/skills/{name}/SKILL.md        (Claude Code dogfood)
+//        - .claude/agents/{name}.md              (Claude Code dogfood, agents)
 //      Plus any non-SKILL.* files under each skill dir (e.g. perspectives/).
 //      These are kept because skills repo dogfoods its own skill bundle via
-//      slash commands, but they are not shipped to npm consumers.
+//      slash commands, but they are not shipped to npm consumers. Agents are
+//      Claude Code only, so they mirror only into `.claude/agents/` (never the
+//      codex/gemini `.agents/` dogfood) and reuse the ClaudeCodeAdapter's
+//      `.claude/agents/<name>.md` output path verbatim (no second transform).
 //
 //   2. Adapter outputs under dist/{adapter-id}/, produced by AdapterBase
 //      subclasses. These are the canonical npm payload for consumers — each
@@ -48,6 +52,11 @@ const DIST = join(ROOT, "dist");
 // slash commands (e.g. `/drive`, `/lint`). They are NOT shipped to npm —
 // `package.json#files` only includes `dist/`, `bin/`, `schemas/`, etc.
 const CLAUDE_DOGFOOD_TARGET = join(ROOT, ".claude", "skills");
+// Claude Code agents dogfood target. Agents are Claude Code only (ADR-0026),
+// so unlike skills they have a single dogfood destination (`.claude/agents/`,
+// never the codex/gemini `.agents/` tree). Mirrored from the ClaudeCodeAdapter
+// output so this matches `dist/claude-code/.claude/agents/` verbatim (issue #137).
+const CLAUDE_AGENTS_DOGFOOD_TARGET = join(ROOT, ".claude", "agents");
 // Each dogfood target mirrors the canonical skills for the adapter(s) that
 // read from it: `.agents/skills/` feeds Codex CLI + Gemini CLI, `.claude/skills/`
 // feeds Claude Code. A skill restricted via frontmatter `adapters` is mirrored
@@ -189,7 +198,7 @@ async function loadAgents() {
   return agents;
 }
 
-async function writeDogfoodTargets(skills) {
+async function writeDogfoodTargets(skills, agents) {
   // Write in-repo dogfood mirrors at `.agents/skills/` and `.claude/skills/`.
   // These are excluded from the npm payload by `package.json#files` but kept
   // in the repo so skills repo can use its own slash commands.
@@ -220,6 +229,32 @@ async function writeDogfoodTargets(skills) {
         await writeFile(dest, extra.content);
       }
     }
+  }
+  await writeClaudeAgentsDogfood(agents);
+}
+
+async function writeClaudeAgentsDogfood(agents) {
+  // Mirror Claude Code agents into the in-repo `.claude/agents/` dogfood.
+  // Agents are Claude Code only (ADR-0026), so they go solely into the
+  // `.claude/` tree (never the codex/gemini `.agents/` dogfood). The output
+  // is produced by the ClaudeCodeAdapter and filtered to `.claude/agents/`,
+  // so the dogfood mirror shares the exact same conversion path (and verbatim
+  // content) as the `dist/claude-code/.claude/agents/` npm payload — no second
+  // implementation. The destination root (`.claude/agents/`) is fully removed
+  // first so stale agents (renamed/deleted in src/agents/) do not linger.
+  if (existsSync(CLAUDE_AGENTS_DOGFOOD_TARGET)) {
+    await rm(CLAUDE_AGENTS_DOGFOOD_TARGET, { recursive: true, force: true });
+  }
+  if ((agents ?? []).length === 0) return;
+  const outputs = (await new ClaudeCodeAdapter().generate([], { agents })).filter((out) =>
+    out.relativePath.startsWith(".claude/agents/"),
+  );
+  for (const out of outputs) {
+    // out.relativePath is `.claude/agents/<name>.md`; strip the `.claude/`
+    // prefix since CLAUDE_AGENTS_DOGFOOD_TARGET already points at `.claude/agents`.
+    const file = join(ROOT, out.relativePath);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, out.content);
   }
 }
 
@@ -312,7 +347,7 @@ async function main() {
   const skills = await loadSkills();
   const agents = await loadAgents();
   await cleanupRemovedLegacyTargets();
-  await writeDogfoodTargets(skills);
+  await writeDogfoodTargets(skills, agents);
   const publicSkills = skills.filter((s) => !INTERNAL_SKILLS.has(s.name));
   await writeAdapterOutputs(publicSkills, agents);
   await writeProjectScopeOutput(publicSkills, agents);
@@ -323,6 +358,9 @@ async function main() {
   console.log("In-repo dogfood (excluded from npm payload):");
   for (const target of DOGFOOD_TARGETS) {
     console.log(`  ${target.dir.replace(ROOT, "").replace(/^\//, "")}`);
+  }
+  if (agents.length > 0) {
+    console.log(`  ${CLAUDE_AGENTS_DOGFOOD_TARGET.replace(ROOT, "").replace(/^\//, "")}`);
   }
   console.log(`Adapters (npm payload, ${publicSkills.length} public skill(s)):`);
   for (const adapter of ADAPTERS) {
