@@ -220,7 +220,7 @@ The npm payload is declared in `package.json#files` and verified by `tests/npm-p
 - `schemas/` — sync-target schemas
 - `README.md`, `LICENSE`, `action.yaml`
 
-In-repo dogfood mirrors (`.agents/skills/`, `.claude/skills/`) and source layout (`src/`, `scripts/`, `tests/`) are intentionally excluded.
+In-repo dogfood mirrors (`.agents/skills/`, `.claude/skills/`, `.claude/agents/`) and source layout (`src/`, `scripts/`, `tests/`) are intentionally excluded.
 
 ### Trusted Publishers setup
 
