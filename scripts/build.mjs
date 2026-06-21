@@ -250,8 +250,8 @@ async function writeClaudeAgentsDogfood(agents) {
     out.relativePath.startsWith(".claude/agents/"),
   );
   for (const out of outputs) {
-    // out.relativePath is `.claude/agents/<name>.md`; strip the `.claude/`
-    // prefix since CLAUDE_AGENTS_DOGFOOD_TARGET already points at `.claude/agents`.
+    // out.relativePath is repo-root-relative (`.claude/agents/<name>.md`), so
+    // join it onto ROOT directly — this lands under CLAUDE_AGENTS_DOGFOOD_TARGET.
     const file = join(ROOT, out.relativePath);
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, out.content);
