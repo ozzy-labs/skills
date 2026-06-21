@@ -46,7 +46,7 @@
 // This is a plain .mjs (NOT a Workflow script): Date.now() / real fetch / real
 // fs are fine. Pure/injectable functions are exported for tests.
 
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -493,8 +493,8 @@ export async function getUsage({
   fetchImpl = fetch,
   readFileImpl = readFile,
   readdirImpl = readdir,
-  writeFileImpl,
-  mkdirImpl,
+  writeFileImpl = writeFile,
+  mkdirImpl = mkdir,
   env = process.env,
   now = Date.now,
   credentialsPath = CREDENTIALS_PATH,
@@ -558,8 +558,10 @@ export async function getUsage({
 // CLI entry: print the usage JSON to stdout. Exit 0 always (fail-open ethos);
 // the JSON's `ok` field is the signal, not the exit code.
 async function main() {
-  const { mkdir, writeFile } = await import("node:fs/promises");
-  const result = await getUsage({ writeFileImpl: writeFile, mkdirImpl: mkdir });
+  // getUsage now defaults writeFileImpl/mkdirImpl to the real fs (symmetric with
+  // readFileImpl), so the CLI no longer needs to inject them explicitly — every
+  // caller that omits fs (including the PreToolUse hook) self-sustains the cache.
+  const result = await getUsage();
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
