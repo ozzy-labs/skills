@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import {
   decide,
   degradedSourceWarning,
+  evaluateHookDecision,
   formatResetTime,
   parsePayload,
   resolveUsage,
@@ -28,6 +29,15 @@ import {
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXED_NOW = Date.parse("2026-06-15T00:00:00.000Z");
 const now = () => FIXED_NOW;
+
+// Default hermetic deps for run(): kill-switch off, and debounce/spike state
+// that does NOT short-circuit a deny (counter already at debounceCount-1 = 1, so
+// a single over reading denies — preserving the legacy "over → deny" assertions
+// while debounce is exercised separately below). State writes are swallowed.
+const denyReadyState = async () => ({ consecutive_over: 1 });
+const noState = async () => ({});
+const swallowState = async () => {};
+const killOff = () => false;
 
 // A usage result with both windows comfortably under threshold.
 const okUsage = {
@@ -57,6 +67,9 @@ test("(1) under threshold → allow (exit 0), no deny output", async () => {
   const code = await run({
     readStdinImpl: async () => "",
     resolveUsageImpl: async () => okUsage,
+    killSwitchImpl: killOff,
+    readStateImpl: noState,
+    writeStateImpl: swallowState,
     env: {},
     now,
     warn: (m) => warnings.push(m),
@@ -74,6 +87,9 @@ test("(2) over threshold → deny (exit 2) with reset time in the message", asyn
   const code = await run({
     readStdinImpl: async () => "",
     resolveUsageImpl: async () => overUsage,
+    killSwitchImpl: killOff,
+    readStateImpl: denyReadyState,
+    writeStateImpl: swallowState,
     env: {},
     now,
     deny: (m) => denies.push(m),
@@ -100,6 +116,208 @@ test("(2c) decide() allows fail-open usage (ok !== false)", () => {
     source: "fail-open",
   };
   assert.equal(decide(failOpen, 95, now).allow, true);
+});
+
+// --- (#139 (d)) decide() allows a suspected reflection lag --------------------
+
+test("(2d) decide() allows a suspected reflection lag (over but just past reset)", () => {
+  const lagged = {
+    five_hour: { utilization: 100, resets_at: "2026-06-15T00:05:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    suspected_reflection_lag: true,
+    resets_at: "2026-06-15T00:05:00.000Z",
+    source: "endpoint",
+  };
+  assert.equal(
+    decide(lagged, 95, now).allow,
+    true,
+    "lag → ALLOW (boundary checkpoint catches a real overage)",
+  );
+});
+
+// --- (#139 (a)) file kill-switch → hook is an instant no-op ------------------
+
+test("(#139 a) kill-switch present → ALLOW (exit 0) even when over threshold", async () => {
+  const warnings = [];
+  const denies = [];
+  let stateRead = false;
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => {
+      throw new Error("kill-switch must short-circuit before usage is resolved");
+    },
+    killSwitchImpl: () => true, // DISABLE file present
+    readStateImpl: async () => {
+      stateRead = true;
+      return {};
+    },
+    writeStateImpl: swallowState,
+    env: {},
+    now,
+    warn: (m) => warnings.push(m),
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 0, "kill-switch → no-op ALLOW");
+  assert.equal(denies.length, 0, "never deny when disabled");
+  assert.equal(stateRead, false, "kill-switch short-circuits before any I/O");
+  assert.equal(warnings.length, 1, "one warning explaining the no-op");
+  assert.match(warnings[0], /kill-switch/);
+});
+
+test("(#139 a) kill-switch check throwing → fail-open, hook continues normally", async () => {
+  // A broken existsSync must not hard-stop; the hook proceeds as if not disabled.
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => okUsage,
+    killSwitchImpl: () => {
+      throw new Error("fs error");
+    },
+    readStateImpl: noState,
+    writeStateImpl: swallowState,
+    env: {},
+    now,
+  });
+  assert.equal(code, 0, "kill-switch check error → treated as not disabled → normal ALLOW");
+});
+
+// --- (#139 d) hook layer allows a lag and surfaces it ------------------------
+
+test("(#139 d) over + suspected_reflection_lag → ALLOW + degraded lag warning", async () => {
+  const warnings = [];
+  const denies = [];
+  const lagged = {
+    five_hour: { utilization: 100, resets_at: "2026-06-15T00:05:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    suspected_reflection_lag: true,
+    source: "endpoint",
+  };
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => lagged,
+    killSwitchImpl: killOff,
+    readStateImpl: denyReadyState, // even with a high counter, a lag must ALLOW
+    writeStateImpl: swallowState,
+    env: {},
+    now,
+    warn: (m) => warnings.push(m),
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 0, "lag → ALLOW regardless of debounce counter");
+  assert.equal(denies.length, 0);
+  assert.ok(
+    warnings.some((w) => /reflection lag/.test(w)),
+    "the lag-allow is surfaced as a degradation warning",
+  );
+});
+
+// --- (#139 b) debounce: lone over ALLOWs, consecutive over DENYs -------------
+
+test("(#139 b) evaluateHookDecision: first over ALLOWs (debounce), reaching count DENYs", () => {
+  const over = {
+    five_hour: { utilization: 99, resets_at: "2026-06-15T04:00:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    suspected_reflection_lag: false,
+    resets_at: "2026-06-15T04:00:00.000Z",
+    source: "endpoint",
+  };
+  // First over reading: counter 0 → 1, below the default debounce count (2) → ALLOW.
+  const first = evaluateHookDecision(over, {}, { now });
+  assert.equal(first.allow, true, "lone over reading does not deny (debounce)");
+  assert.equal(first.degraded, "debounce");
+  assert.equal(first.nextState.consecutive_over, 1);
+  // Second consecutive over reading: counter 1 → 2 = debounce count → DENY.
+  const second = evaluateHookDecision(over, first.nextState, { now });
+  assert.equal(second.allow, false, "second consecutive over reading denies");
+  assert.equal(second.nextState.consecutive_over, 2);
+  assert.match(second.reason, /Usage Limit reached/);
+});
+
+test("(#139 b) a sub-threshold reading between overs resets the debounce counter", () => {
+  const over = {
+    five_hour: { utilization: 99, resets_at: "2026-06-15T04:00:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    suspected_reflection_lag: false,
+    source: "endpoint",
+  };
+  const first = evaluateHookDecision(over, {}, { now });
+  assert.equal(first.nextState.consecutive_over, 1);
+  // An ok reading clears the counter.
+  const cleared = evaluateHookDecision({ ...okUsage }, first.nextState, { now });
+  assert.equal(cleared.allow, true);
+  assert.equal(cleared.nextState.consecutive_over, 0);
+});
+
+test("(#139 b) run(): lone over ALLOWs and writes consecutive_over=1", async () => {
+  const denies = [];
+  let written = null;
+  const over = {
+    five_hour: { utilization: 99, resets_at: "2026-06-15T04:00:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    suspected_reflection_lag: false,
+    resets_at: "2026-06-15T04:00:00.000Z",
+    source: "endpoint",
+  };
+  const code = await run({
+    readStdinImpl: async () => "",
+    resolveUsageImpl: async () => over,
+    killSwitchImpl: killOff,
+    readStateImpl: noState, // counter starts at 0
+    writeStateImpl: async (s) => {
+      written = s;
+    },
+    env: {},
+    now,
+    deny: (m) => denies.push(m),
+  });
+  assert.equal(code, 0, "first over reading ALLOWs (debounce)");
+  assert.equal(denies.length, 0);
+  assert.equal(written.consecutive_over, 1, "counter advanced for the next call");
+});
+
+// --- (#139 c) spike rejection ------------------------------------------------
+
+test("(#139 c) implausible spike from a recent sub-threshold baseline → ALLOW", () => {
+  const over = {
+    five_hour: { utilization: 100, resets_at: "2026-06-15T04:00:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    suspected_reflection_lag: false,
+    resets_at: "2026-06-15T04:00:00.000Z",
+    source: "endpoint",
+  };
+  // Last good reading was 30% just 10s ago — a jump to 100% is impossible.
+  const prev = {
+    consecutive_over: 0,
+    last_good: { five_hour: 30, seven_day: 10, at: FIXED_NOW - 10_000 },
+  };
+  const res = evaluateHookDecision(over, prev, { now });
+  assert.equal(res.allow, true, "spike from a recent low baseline is suspect → ALLOW");
+  assert.equal(res.degraded, "spike");
+  assert.equal(res.nextState.consecutive_over, 0, "a spike does not advance the debounce counter");
+});
+
+test("(#139 c) a sustained climb (stale baseline) is NOT treated as a spike", () => {
+  const over = {
+    five_hour: { utilization: 99, resets_at: "2026-06-15T04:00:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: false,
+    suspected_reflection_lag: false,
+    resets_at: "2026-06-15T04:00:00.000Z",
+    source: "endpoint",
+  };
+  // Baseline is old (10 min ago) → outside the spike window → debounce path.
+  const prev = {
+    consecutive_over: 1,
+    last_good: { five_hour: 30, seven_day: 10, at: FIXED_NOW - 600_000 },
+  };
+  const res = evaluateHookDecision(over, prev, { now });
+  assert.equal(res.allow, false, "stale baseline → not a spike → debounce count reached → DENY");
+  assert.equal(res.degraded, null);
 });
 
 // --- (3) fresh cache within TTL → no endpoint re-fetch -----------------------
@@ -201,6 +419,9 @@ test("(4) usage unavailable (null) → allow (exit 0) + stderr warn", async () =
   const code = await run({
     readStdinImpl: async () => "",
     resolveUsageImpl: async () => null, // signal could not be read
+    killSwitchImpl: killOff,
+    readStateImpl: noState,
+    writeStateImpl: swallowState,
     env: {},
     now,
     warn: (m) => warnings.push(m),
@@ -240,6 +461,9 @@ test("(5) fail-open source → allow but emit a DEGRADED warning", async () => {
   const code = await run({
     readStdinImpl: async () => "",
     resolveUsageImpl: async () => failOpen,
+    killSwitchImpl: killOff,
+    readStateImpl: noState,
+    writeStateImpl: swallowState,
     env: {},
     now,
     warn: (m) => warnings.push(m),
@@ -258,6 +482,9 @@ test("(5b) jsonl fallback source → allow but warn it is degraded (coarse)", as
   const code = await run({
     readStdinImpl: async () => "",
     resolveUsageImpl: async () => ({ ...okUsage, source: "jsonl" }),
+    killSwitchImpl: killOff,
+    readStateImpl: noState,
+    writeStateImpl: swallowState,
     env: {},
     now,
     warn: (m) => warnings.push(m),
@@ -274,6 +501,9 @@ test("(5c) endpoint and cache sources do NOT trigger a degradation warning", asy
     await run({
       readStdinImpl: async () => "",
       resolveUsageImpl: async () => ({ ...okUsage, source }),
+      killSwitchImpl: killOff,
+      readStateImpl: noState,
+      writeStateImpl: swallowState,
       env: {},
       now,
       warn: (m) => warnings.push(m),
@@ -325,6 +555,9 @@ test("run() tags the deny message with the subagent origin", async () => {
   await run({
     readStdinImpl: async () => '{"agent_id":"worker-7"}',
     resolveUsageImpl: async () => overUsage,
+    killSwitchImpl: killOff,
+    readStateImpl: denyReadyState,
+    writeStateImpl: swallowState,
     env: {},
     now,
     deny: (m) => denies.push(m),
@@ -356,6 +589,9 @@ test("threshold env override (80) denies at 85% utilization", async () => {
   const code = await run({
     readStdinImpl: async () => "",
     resolveUsageImpl: async () => at85,
+    killSwitchImpl: killOff,
+    readStateImpl: denyReadyState,
+    writeStateImpl: swallowState,
     env: { USAGE_GUARD_THRESHOLD: "80" },
     now,
     deny: (m) => denies.push(m),
