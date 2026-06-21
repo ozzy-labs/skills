@@ -82,15 +82,25 @@ Steps:
 5. Shell: `node scripts/usage-guard-smoke.mjs clear` — **always** clean up the
    seeded cache.
 
-## C. `/drive --usage-guard` budget-aware loop (manual)
+## C. `/drive` budget-aware loop (manual)
+
+> usage-guard is **on by default** in `drive` (Claude Code only; opt out with
+> `--no-usage-guard`). The legacy `--usage-guard` flag is accepted as a
+> deprecated no-op alias. See the `drive` row in the repo `README.md` and
+> `src/skills/drive/SKILL.md` (§オプション).
 
 1. Shell: `node scripts/usage-guard-smoke.mjs seed-over 75`.
-2. Claude: `/drive --usage-guard "<a trivial idempotent task>"` — at the first
-   resumable-unit boundary the loop Reads the usage-guard engine, sees over
-   threshold, waits for the window to reset, then re-enters
-   `/drive --usage-guard <args>` and continues.
+2. Claude: `/drive "<a trivial idempotent task>"` — usage-guard runs by default,
+   so at the first resumable-unit boundary the loop Reads the usage-guard
+   engine, sees over threshold, waits for the window to reset, then re-enters
+   `/drive <args>` and continues.
 3. Confirm the run paused then resumed (engine log / wave boundary).
 4. Shell: `node scripts/usage-guard-smoke.mjs clear`.
+
+To verify the opt-out path, repeat step 2 with `/drive --no-usage-guard
+"<task>"` and confirm the loop runs straight through without a pause. To verify
+graceful degrade, run with the `usage-guard` skill absent and confirm `drive`
+logs a one-line warning and proceeds (fail-open) instead of erroring.
 
 Inspect the live signal at any point with
 `node scripts/usage-guard-smoke.mjs status`.
@@ -105,7 +115,7 @@ CI. It depends on two things a hermetic, deterministic test can't provide:
   clock, which defeats the point of verifying the real pause.
 - **The agent runtime** — `ScheduleWakeup` is an agent-harness primitive, and
   resuming the continuation command (`/usage-guard "<cmd>"` /
-  `/drive --usage-guard <args>`) is driven by the Claude Code harness, not by a
+  `/drive <args>`) is driven by the Claude Code harness, not by a
   plain Node process.
 
 CI therefore verifies the deterministic budget signal and the hook decision

@@ -159,12 +159,13 @@ Prereqs (shell):
 4. The watcher prints  PASS (resumed after Ns)  once the marker appears.
 5. Shell:  node scripts/usage-guard-smoke.mjs clear     (ALWAYS clean up)
 
-── C. /drive --usage-guard budget-aware loop ───────────────────────────────
+── C. /drive budget-aware loop (usage-guard default-on) ─────────────────────
 1. Shell:  node scripts/usage-guard-smoke.mjs seed-over 75
-2. Claude: /drive --usage-guard "<a trivial idempotent task>"
-     → at the first resumable-unit boundary the loop Reads the usage-guard
-       engine, sees OVER, waits for the window, then re-enters
-       /drive --usage-guard <args> and continues.
+2. Claude: /drive "<a trivial idempotent task>"
+     → usage-guard runs by default (opt out with --no-usage-guard). At the
+       first resumable-unit boundary the loop Reads the usage-guard engine,
+       sees OVER, waits for the window, then re-enters /drive <args> and
+       continues.
 3. Confirm the drive run paused then resumed (engine log / wave boundary).
 4. Shell:  node scripts/usage-guard-smoke.mjs clear     (ALWAYS clean up)
 

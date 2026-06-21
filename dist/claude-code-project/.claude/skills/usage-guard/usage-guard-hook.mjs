@@ -3,10 +3,10 @@
 //
 // Wired into ~/.claude/settings.local.json as a PreToolUse hook, this fires on
 // EVERY tool call (including ones originating inside subagents, which carry an
-// `agent_id` in the hook payload). It is the in-flight ceiling that the
-// `/drive --usage-guard` flag (#122) cannot provide: the flag only pauses at
-// resumable-unit boundaries, while a long unit can blow past the threshold
-// mid-flight. The hook stops that.
+// `agent_id` in the hook payload). It is the in-flight ceiling that drive's
+// usage-guard checkpoint (#122; default-on as of #130) cannot provide: the
+// checkpoint only pauses at resumable-unit boundaries, while a long unit can
+// blow past the threshold mid-flight. The hook stops that.
 //
 // Signal source: it READS the cache that usage-check.mjs (#121) already writes
 // (`~/.claude/usage-guard/cache.json`, 30–60s TTL) — it never hits the OAuth

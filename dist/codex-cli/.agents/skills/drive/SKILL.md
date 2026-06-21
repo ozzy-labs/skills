@@ -40,10 +40,13 @@ Issue または指示を受け取り、実装 → ship → セルフレビュー
 
   オーケストレーションモードでは `--review=quick` を強制し、`final-deep` / `deep` 指定時は警告を出して `quick` にフォールバックする。
 
-- `--usage-guard`: Claude Code の Usage Limit 超過手前で作業を pause し、枠回復後に自動再開する（opt-in）。**Claude Code 環境のみ**（`review --deep` と同じ扱い。OAuth 使用率エンドポイント + `ScheduleWakeup` 依存のため他アダプタでは無効）。pause/resume の配線はホスト依存なので `SKILL.claude-code.md` の「usage-guard 配線（`--usage-guard`）」で吸収する。未指定時は drive 本体の挙動を一切変えない。
+- usage-guard: Claude Code の Usage Limit 超過手前で作業を pause し、枠回復後に自動再開する。**既定で有効（opt-out）**。無効化するには `--no-usage-guard` を付ける。**Claude Code 環境のみ**で実効する（`review --deep` と同じ扱い。OAuth 使用率エンドポイント + `ScheduleWakeup` 依存のため他アダプタでは no-op）。既定 ON だが実効は claude-code adapter のみで、他アダプタ（codex/gemini/copilot）では従来どおり何もしない。pause/resume の配線はホスト依存なので `SKILL.claude-code.md` の「usage-guard 配線（既定 ON・`--no-usage-guard` で無効化）」で吸収する。
+  - `--no-usage-guard`: usage-guard を無効化し、checkpoint を一切挟まない素の drive を実行する。
+  - `--usage-guard`: 後方互換のための **deprecated no-op エイリアス**（既定で有効になったため明示は不要）。受理するが挙動は既定 ON と同一。
   - 停止は **resumable unit の入口**でのみ行う（単一モード: Phase 1 開始前 / review loop 各反復前、オーケストレーション: 各 wave 開始前 / worker dispatch 前）。mid-implement（PR 作成前）では止めない。
   - orchestration の停止粒度は **wave 境界**。一度起動した走行中 worker の mid-unit 超過はこのフラグでは止められず、PreToolUse hook（#123）が ceiling を担う。
-  - 超過時は枠リセットまで待機してから継続コマンド `/drive --usage-guard <元の引数>` を自己再入する（drive 冪等 resume で続行）。
+  - 超過時は枠リセットまで待機してから継続コマンド `/drive <元の引数>` を自己再入する（drive 冪等 resume で続行）。`--no-usage-guard` がユーザー指定されていた場合のみ継続コマンドにも引き継ぐ（`--usage-guard` を強制付与しない）。
+  - usage-guard skill / `usage-check.mjs` が未インストールの環境でもエラーで drive を止めない。skill 不在を検出したら 1 行警告を出し、そのまま通常進行する（fail-open 扱い）。
 
 ### モード分岐
 

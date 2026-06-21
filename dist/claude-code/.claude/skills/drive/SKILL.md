@@ -1,6 +1,6 @@
 ---
 description: Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。
-argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N] [--review=quick|final-deep|deep] [--usage-guard]
+argument-hint: <#N | #N,#N | #N-N | instruction> [--merge] [--concurrency N] [--review=quick|final-deep|deep] [--no-usage-guard]
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent, Workflow
 ---
@@ -15,7 +15,7 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 ### 入力解析
 
-`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`, `--review=<mode>`, `--usage-guard`）を特定する。
+`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`, `--review=<mode>`, `--no-usage-guard`）を特定する。
 
 - target が 1 件かつ依存記法（`->`）なし → 単一モード
 - target が 2 件以上、または依存記法あり → オーケストレーションモード
@@ -26,25 +26,30 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 - 単一モード: `quick` / `final-deep` / `deep` をすべて受け付ける
 - オーケストレーションモード: `--review=quick` を強制し、`final-deep` / `deep` 指定時は警告を表示して `quick` にフォールバックする（コスト管理）
 
-`--usage-guard` の取り扱い:
+usage-guard の取り扱い:
 
-- **opt-in フラグ。未指定時は drive 本体の挙動を一切変えない**（checkpoint を挟まない素の drive）。
-- 指定時のみ、後述「usage-guard 配線（`--usage-guard`）」の checkpoint で usage-guard エンジンを呼び、Usage Limit 超過時は枠回復まで待機してから自己再入する。
-- 解析時に**元の引数列を保存**する（継続コマンド `/drive --usage-guard <元の引数>` の組み立てに使う）。`--usage-guard` 自体も保存対象に含める（resume 後も guard を効かせ続けるため）。
+- **既定で有効（opt-out）**。明示的に `--no-usage-guard` を付けたときのみ checkpoint を挟まない素の drive を実行する。
+- `--no-usage-guard` 未指定なら、後述「usage-guard 配線（既定 ON・`--no-usage-guard` で無効化）」の checkpoint で usage-guard エンジンを呼び、Usage Limit 超過時は枠回復まで待機してから自己再入する。
+- `--usage-guard` は後方互換の **deprecated no-op エイリアス**として受理する（既定 ON のため明示は不要・挙動は既定と同一）。継続コマンドには強制付与しない。
+- 解析時に**元の引数列を保存**する（継続コマンド `/drive <元の引数>` の組み立てに使う）。`--no-usage-guard` がユーザー指定されていた場合のみ保存対象に含めて継続コマンドにも引き継ぐ。`--usage-guard` は no-op エイリアスなので保存・付与しない。
 
 ### 自律実行
 
 計画承認を含め、マージ処理（またはマージ確認）まで AskUserQuestion を使用しない（完全自律実行）。
 
-### usage-guard 配線（`--usage-guard`）
+### usage-guard 配線（既定 ON・`--no-usage-guard` で無効化）
 
-`--usage-guard` 指定時のみ有効。Claude Code の Usage Limit（5 時間 = Current / 週次 = Weekly）が 100% に達する前に作業を一時停止し、枠が回復したら自動再開する。**フラグ未指定なら本節の処理は一切実行せず、drive 本体の挙動を変えない**（pause/resume は Claude 固有なので配線を本 overlay に閉じる。前例: `review --deep`）。
+**既定で有効**。Claude Code の Usage Limit（5 時間 = Current / 週次 = Weekly）が 100% に達する前に作業を一時停止し、枠が回復したら自動再開する。**`--no-usage-guard` 指定時のみ本節の処理を一切実行せず、drive 本体の挙動を変えない**（pause/resume は Claude 固有なので配線を本 overlay に閉じる。前例: `review --deep`）。`--usage-guard` は deprecated no-op エイリアスとして受理するが、既定で有効なため挙動は変わらない。
 
-> **Claude 専用**: usage-guard エンジンは OAuth 使用率エンドポイントと `ScheduleWakeup` に依存するため Claude Code でのみ動作する（`adapters: claude-code` で gate された `usage-guard` skill = #121）。
+> **Claude 専用**: usage-guard エンジンは OAuth 使用率エンドポイントと `ScheduleWakeup` に依存するため Claude Code でのみ動作する（`adapters: claude-code` で gate された `usage-guard` skill = #121）。base SKILL.md は既定 ON だが、他アダプタ（codex/gemini/copilot）のビルド出力には本 overlay が含まれないため実効は no-op。
+
+#### graceful degrade（skill 不在）
+
+既定 ON のため、usage-guard skill / `usage-check.mjs` が**存在しない環境**（例: `~/.claude/skills/usage-guard/` 未配置）でも drive を**エラーで止めない**。各 checkpoint の冒頭で `usage-guard` skill（`~/.claude/skills/usage-guard/SKILL.md`、user-scope では `~/.claude/skills/usage-guard/SKILL.md`）の存在を確認し、**不在を検出したら 1 行警告**（例: 「⚠️ usage-guard 劣化: skill 未インストール、監視せず通常進行します」）**を出してそのまま通常進行する**（fail-open 扱い・以降の checkpoint も skip）。これはデフォルト ON の必須要件であり、guard が自不在で drive を hard-stop させない。
 
 #### checkpoint の発火点
 
-`--usage-guard` 指定時、以下の **resumable unit の入口**でのみ usage-guard を呼ぶ:
+`--no-usage-guard` 未指定（= 既定 ON）のとき、以下の **resumable unit の入口**でのみ usage-guard を呼ぶ:
 
 | モード | checkpoint |
 |---|---|
@@ -63,16 +68,16 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 2. `ok: true`（両枠とも閾値未満）→ **通常進行**。次のフェーズ／wave／worker dispatch へそのまま進む。
 3. `ok: false`（いずれかの枠が閾値超過）→ usage-guard の wait-loop に委譲する。`wait_seconds` にはポストリセットのバッファ（`resume_buffer_seconds`、既定 +300 秒）が折り込まれており、待機は `resets_at + buffer` まで延びる（リセット丁度の再突入による再ハネを回避）:
    - in-session・待機 ≤1h → `ScheduleWakeup(min(wait_seconds, 3600))` で heartbeat を仕込み、**待機する**（待機中は再入せず予算を消費しない）。`wait_seconds` が 3600 を超える場合は複数回に分けて再チェックする。
-   - 非 /loop オーケストレーション（Agent tool / Workflow drive）・待機 >1h・再起動耐性が必要 → `CronCreate`（`recurring: false`, durable）を **`resets_at + resume_buffer_seconds`** にセットし、発火時に継続コマンドを再投入する（壁時計一発・再起動耐性。one-shot は発火後 auto-delete）。詳細は usage-guard SKILL.md §軽量 wait-loop「再開トリガの選択」。
-   - 起床したら継続コマンド **`/drive --usage-guard <元の引数>`** を自己再入する。drive の冪等 resume が既存 PR / ブランチ / 完了済み worker を検出して**続きから再開**する（待機を挟んでも重複副作用を生まない）。
+   - 非 /loop オーケストレーション（Agent tool / Workflow drive）・待機 >1h・再起動耐性が必要 → `CronCreate`（`recurring: false`, durable）を **`resets_at + resume_buffer_seconds`** にセットし、発火時に継続コマンドを再投入する（壁時計一発・再起動耐性。one-shot は発火後 auto-delete）。既定 ON によりこの経路（>1h・非 /loop）を踏みやすいため、該当時は `ScheduleWakeup` ではなく **`CronCreate`(one-shot, durable)** を優先する。詳細は usage-guard SKILL.md §軽量 wait-loop「再開トリガの選択」。
+   - 起床したら継続コマンド **`/drive <元の引数>`** を自己再入する（既定 ON のため `--usage-guard` を強制付与しない。`--no-usage-guard` がユーザー指定されていた場合のみ引き継ぐ ── ただし `--no-usage-guard` 時はそもそも本節を実行しないため、実際の継続コマンドは元の引数をそのまま渡せばよい）。drive の冪等 resume が既存 PR / ブランチ / 完了済み worker を検出して**続きから再開**する（待機を挟んでも重複副作用を生まない）。
    - `usage-check.mjs` が `ok: true` を返すまで 3〜4 を繰り返す。
 
-> 継続コマンドには `--usage-guard` を含めた**元の引数列**を渡す（resume 後も guard を効かせ続けるため）。
+> 継続コマンドには**元の引数列**をそのまま渡す（既定 ON のため `--usage-guard` の付与は不要。resume 後も guard は既定で効き続ける）。
 
 #### 粒度と二重化
 
 - orchestration の停止は **wave 境界 / worker dispatch 境界の粒度**。一度起動した worker の**走行中（mid-unit）の超過**はこのフラグでは止められない。長い unit 内の ceiling は #123 の **PreToolUse hook**（全 tool 呼び出し前に効き、subagent 内にも届く）が担う（推奨併用）。
-- worker（subagent）に渡す prompt 自体は無改変でよい。worker は単一モードを実行するため、**親が `--usage-guard` で worker dispatch 前に checkpoint を挟む**ことで wave 粒度の予算対応になる。
+- worker（subagent）に渡す prompt 自体は無改変でよい。worker は単一モードを実行するため、**親が（既定 ON で）worker dispatch 前に checkpoint を挟む**ことで wave 粒度の予算対応になる。
 
 #### fail-open（劣化可視化）
 
@@ -147,7 +152,7 @@ Workflow 方式固有の注意:
 - 途中失敗からの再開は `Workflow({scriptPath, resumeFromRunId})`。完了済み worker はキャッシュから復元される
 - **Phase Final-1 / Final-2 / Final-3 は workflow 終了後に会話側で実行する**。worker の worktree は変更を含むためランタイムの自動削除対象にならず、cleanup 手順（後述の Phase Final-2 節）が引き続き必要。worktree path 規約（`.claude/worktrees/agent-<id>/`）も同一
 - `--merge` 未指定時の一括マージ確認（「完了後」節の AskUserQuestion）は workflow の return 後に行う
-- **`--usage-guard` 指定時の wave checkpoint は会話側で挟む**。workflow スクリプトは決定論実行で SKILL.md の Read も `ScheduleWakeup` も呼べないため、wave 単位で workflow を起動し、各 wave の起動**前**に会話側で「usage-guard 配線」節の checkpoint を実行する（`ok` なら次 wave の workflow を起動、超過なら待機 → `/drive --usage-guard <元の引数>` で再入し、`resumeFromRunId` で完了済み worker をキャッシュ復元して続行）
+- **wave checkpoint は会話側で挟む**（既定 ON。`--no-usage-guard` 指定時は省略）。workflow スクリプトは決定論実行で SKILL.md の Read も `ScheduleWakeup` も呼べないため、wave 単位で workflow を起動し、各 wave の起動**前**に会話側で「usage-guard 配線」節の checkpoint を実行する（`ok` なら次 wave の workflow を起動、超過なら待機 → `/drive <元の引数>` で再入し、`resumeFromRunId` で完了済み worker をキャッシュ復元して続行）
 
 ### subagent dispatch（オーケストレーションモード・Agent tool 方式 fallback）
 
