@@ -9,7 +9,11 @@
 // covered; the dogfood mirrors use the same isAdapterAllowed predicate).
 
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { ClaudeCodeAdapter } from "../scripts/adapters/claude-code.mjs";
 import { CodexCliAdapter } from "../scripts/adapters/codex-cli.mjs";
 import { CopilotAdapter } from "../scripts/adapters/copilot.mjs";
@@ -19,6 +23,37 @@ import {
   isAdapterAllowed,
   parseAdapters,
 } from "../scripts/lib/adapter-gating.mjs";
+import { assertRequiredFields, parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const SRC = join(ROOT, "src", "skills");
+
+// Load a real source skill the way the build does: canonical SKILL.md plus the
+// optional Claude Code companion (carries the Claude-only usage-guard wiring).
+async function loadRealSkill(name) {
+  const file = join(SRC, name, "SKILL.md");
+  const raw = await readFile(file, "utf8");
+  const { frontmatter } = parseSkillDocument(raw, `src/skills/${name}/SKILL.md`);
+  assertRequiredFields(frontmatter, ["name", "description"], `src/skills/${name}/SKILL.md`);
+  let claudeCodeCompanion = null;
+  const companionFile = join(SRC, name, "SKILL.claude-code.md");
+  if (existsSync(companionFile)) {
+    const craw = await readFile(companionFile, "utf8");
+    const { frontmatter: cfm, body } = parseSkillDocument(
+      craw,
+      `src/skills/${name}/SKILL.claude-code.md`,
+    );
+    claudeCodeCompanion = { frontmatter: cfm, body, raw: craw };
+  }
+  return {
+    name: frontmatter.name,
+    description: frontmatter.description,
+    frontmatter,
+    body: "",
+    raw,
+    claudeCodeCompanion,
+  };
+}
 
 // Build a skill object the way build-pipeline tests do: frontmatter carries
 // the `adapters` string and `skill.adapters` is left undefined so the adapters
@@ -169,4 +204,62 @@ test("dogfood predicate keeps a claude-code-gated skill out of .agents/skills/",
   const claudeTargetAllows = ["claude-code"].some((id) => isAdapterAllowed(guard, id));
   assert.equal(agentsTargetAllows, false, "gated skill excluded from .agents/skills/ dogfood");
   assert.equal(claudeTargetAllows, true, "gated skill kept in .claude/skills/ dogfood");
+});
+
+// --- #130: default-on usage-guard wiring stays Claude-Code-only -------------
+// The drive skill itself is NOT adapter-gated (it ships everywhere), but the
+// usage-guard pause/resume *wiring* (ScheduleWakeup / CronCreate / checkpoint
+// procedure) lives only in the Claude Code companion. Flipping usage-guard to
+// default-on must not leak that wiring into the codex/gemini/copilot build
+// outputs, which emit the neutral SKILL.md.
+
+test("default-on usage-guard wiring is confined to the claude-code overlay", async () => {
+  const drive = await loadRealSkill("drive");
+
+  // Claude Code adapter emits the companion verbatim → wiring present.
+  const claudeOut = await new ClaudeCodeAdapter().generate([drive]);
+  const claudeDrive = claudeOut.find((o) => o.relativePath === ".claude/skills/drive/SKILL.md");
+  assert.ok(claudeDrive, "claude-code adapter emits .claude/skills/drive/SKILL.md");
+  assert.ok(
+    claudeDrive.content.includes("ScheduleWakeup") && claudeDrive.content.includes("CronCreate"),
+    "claude-code output carries the usage-guard pause/resume wiring",
+  );
+
+  // Non-Claude adapters emit the neutral SKILL.md. The neutral doc *names* the
+  // mechanism (documented as Claude-Code-only — it can mention ScheduleWakeup /
+  // usage-check.mjs), but it must NOT carry the executable wiring procedure
+  // (the checkpoint procedure, the CronCreate one-shot resume trigger, the
+  // graceful-degrade section). Those live only in the Claude Code companion.
+  const codex = await new CodexCliAdapter().generate([drive]);
+  const codexDrive = codex.find((o) => o.relativePath === ".agents/skills/drive/SKILL.md");
+  assert.ok(codexDrive, "codex adapter emits .agents/skills/drive/SKILL.md");
+  for (const sym of ["CronCreate", "checkpoint での手順", "graceful degrade（skill 不在）"]) {
+    assert.ok(
+      !codexDrive.content.includes(sym),
+      `codex build output must not leak usage-guard wiring procedure: ${sym}`,
+    );
+  }
+  // sanity: the neutral doc is what codex/gemini/copilot all read, and it must
+  // still mark usage-guard as Claude-Code-only (no silent default-on elsewhere)
+  assert.ok(
+    codexDrive.content.includes("Claude Code 環境のみ") ||
+      codexDrive.content.includes("Claude Code only"),
+    "neutral drive doc must mark usage-guard as Claude Code only",
+  );
+
+  // gemini + copilot read the same neutral .agents/skills/drive/SKILL.md as
+  // codex (only the AGENTS.md snippet differs per adapter); assert the snippet
+  // path carries no wiring procedure either.
+  const gemini = await new GeminiCliAdapter().generate([drive]);
+  const geminiSnippet = gemini.find((o) => o.relativePath === "AGENTS.md.snippet");
+  if (geminiSnippet) {
+    assert.ok(!geminiSnippet.content.includes("CronCreate"));
+  }
+  const copilot = await new CopilotAdapter().generate([drive]);
+  const copilotSnippet = copilot.find((o) =>
+    o.relativePath.endsWith(".github/copilot-instructions.md.snippet"),
+  );
+  if (copilotSnippet) {
+    assert.ok(!copilotSnippet.content.includes("CronCreate"));
+  }
 });

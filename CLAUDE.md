@@ -18,7 +18,7 @@
 - `/pr` — 変更を push し、PR を作成・更新
 - `/review` — コード変更や PR を 11 観点（正確性 / セキュリティ / 規約 / アーキテクチャ / 互換性 / 保守性 / テスト / パフォーマンス / 可観測性 / ユーザビリティ / ドキュメント整合性）でレビューし、JSON 構造化出力を併載。`--axes=<list>` で観点指定、`--deep` で観点別 subagent 並列起動
 - `/ship` — lint・コミット・PR 作成を一括実行
-- `/drive` — implement + ship + review loop（Issue から merge-ready な PR まで自律駆動）。`--review=quick|final-deep|deep` で review モード切替（既定 quick）。`--usage-guard`（**Claude Code only**・opt-in）で予算対応: resumable unit の入口（Phase 1 開始前 / review loop 各反復前 / 各 wave 開始前 / worker dispatch 前）で `usage-guard` エンジンを Read し、Usage Limit 超過なら枠回復まで待機 → `/drive --usage-guard <元の引数>` で冪等 resume。orchestration は wave 境界粒度、走行中 worker は PreToolUse hook が ceiling
+- `/drive` — implement + ship + review loop（Issue から merge-ready な PR まで自律駆動）。`--review=quick|final-deep|deep` で review モード切替（既定 quick）。usage-guard（**Claude Code only**・**既定 ON**、`--no-usage-guard` で無効化、`--usage-guard` は deprecated no-op エイリアス）で予算対応: resumable unit の入口（Phase 1 開始前 / review loop 各反復前 / 各 wave 開始前 / worker dispatch 前）で `usage-guard` エンジンを Read し、Usage Limit 超過なら枠回復まで待機 → `/drive <元の引数>` で冪等 resume。skill 不在なら 1 行警告 + 通常進行（fail-open）。orchestration は wave 境界粒度、走行中 worker は PreToolUse hook が ceiling
 - `/health` — リポジトリ状態と skill catalog 整合性を 16 領域確認し、推奨アクションを inline 表示（`--deep` で `要確認` 項目を追加調査）
 - `/topics` — research-driven な GitHub topics 設定（ozzy-labs scope）。候補を公式制約検証 → 人気度測定（session キャッシュ）→ broad+narrow / 単数複数比較 → ozzy-labs 慣行ハードコードで選定し、`--apply` で `gh repo edit --add-topic` を実行、`--dry-run` で分析のみ
 - `/lessons-triage` — セッション教訓 queue（`~/.agents/lessons/queue.jsonl`）を消化し、User Skills 改善の教訓を承認制で ozzy-labs/skills へ issue 起票（HITL、起票のみ）
