@@ -36,7 +36,7 @@ Cases exercised:
 | 4 | hook + empty home (no cache/creds) | exit 0 (fail-open), stderr warns `unavailable` / `failing open` + `DEGRADED` `source=fail-open` |
 | 5 | hook + `USAGE_GUARD_THRESHOLD=10` over an `ok:false` cache | exit 2, deny names `≥ 10%` |
 | 6 | usage-check CLI + over cache | exit 0, stdout JSON `source:"cache"`, `ok:false` |
-| 7 | usage-check CLI + empty home | exit 0, stdout JSON `ok:true`, `source:"fail-open"`, `resume_buffer_seconds:300` |
+| 7 | usage-check CLI + empty home | exit 0, stdout JSON `ok:true`, `source:"fail-open"`, `resume_buffer_seconds:300`, `suspected_reflection_lag:false` |
 | 8 | usage-check CLI + over cache (buffered) | exit 0, JSON `source:"cache"`, `wait_seconds`/`resume_buffer_seconds` round-trip |
 
 ### Post-reset resume buffer & fail-open visibility (issue #129)
@@ -54,6 +54,40 @@ In-process unit coverage adds:
   (the `fail-open` wording flags that the guard is **not actually monitoring**);
   `endpoint` / `cache` stay silent. The deny "~N min" hint is derived from the
   buffered `wait_seconds`.
+
+### Reflection-lag detection & cache bypass (issue #133)
+
+After a window resets, the endpoint can briefly echo the PREVIOUS window's
+residue: the reset already happened (`resets_at` points at the *next* boundary)
+yet `utilization` still reads ~100%. Treating that at face value would propose a
+~full-window (~5h) wait for an already-recovered budget — a false negative the
+`resume_buffer` (#129, a "reset hasn't arrived yet" mitigation) does not cover.
+
+`evaluate()` now computes, per exceeded window, how long it has been since that
+window's boundary (`elapsed = period - (resets_at - now)`; period 18000s for 5h,
+604800s for 7d). If an exceeded window is barely past its boundary
+(`elapsed < USAGE_GUARD_LAG_EPSILON_SECONDS`, default 900) it is flagged
+`suspected_reflection_lag: true`, and `wait_seconds` collapses to a short recheck
+interval (`USAGE_GUARD_LAG_RECHECK_SECONDS`, default 180) instead of a full
+window + buffer. `resets_at` is left at the raw window edge (information
+preserved). A suspected-lag result is **not written to the cache**, so the next
+check hits the live endpoint and can pick up the real post-lag value immediately.
+
+In-process unit coverage (`tests/usage-check.test.mjs`) asserts:
+
+- boundary-just-passed + util 100% → `suspected_reflection_lag:true`,
+  `wait_seconds == recheck (180)`, `ok:false`, `resets_at` unchanged;
+- well past the boundary + util 100% → `suspected_reflection_lag:false`, legacy
+  `wait_seconds == full window + buffer`;
+- `ok:true` (under threshold) → never flags a lag;
+- `USAGE_GUARD_LAG_EPSILON_SECONDS` / `USAGE_GUARD_LAG_RECHECK_SECONDS` overrides
+  take effect (a tight epsilon disables the flag; a custom recheck sets the wait);
+- `getUsage` threads the lag env through the endpoint result AND does **not**
+  cache a lagged read, while a normal over-threshold result still caches.
+
+The CLI integration test (`tests/usage-guard-integration.test.mjs`, fail-open
+case) additionally asserts the `suspected_reflection_lag` field is present
+(false) on the real spawned process output.
 
 See the skill's `SKILL.md` §環境要件 for why the endpoint path can be blocked
 (api.anthropic.com egress + `~/.claude/.credentials.json` read) and how to

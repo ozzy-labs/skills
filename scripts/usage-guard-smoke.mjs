@@ -79,6 +79,7 @@ async function seedOver(seconds) {
     wait_seconds: seconds + resumeBuffer,
     resets_at: resetsAt,
     resume_buffer_seconds: resumeBuffer,
+    suspected_reflection_lag: false,
     source: "endpoint",
   });
   console.log(`seeded OVER cache → ${CACHE_PATH}`);
@@ -95,6 +96,7 @@ async function seedOk() {
     wait_seconds: 0,
     resets_at: null,
     resume_buffer_seconds: 300,
+    suspected_reflection_lag: false,
     source: "endpoint",
   });
   console.log(`seeded OK cache → ${CACHE_PATH} (5h 40%, 7d 50%, ok:true)`);

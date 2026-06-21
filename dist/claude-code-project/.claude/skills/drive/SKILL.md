@@ -69,6 +69,7 @@ usage-guard の取り扱い:
 3. `ok: false`（いずれかの枠が閾値超過）→ usage-guard の wait-loop に委譲する。`wait_seconds` にはポストリセットのバッファ（`resume_buffer_seconds`、既定 +300 秒）が折り込まれており、待機は `resets_at + buffer` まで延びる（リセット丁度の再突入による再ハネを回避）:
    - in-session・待機 ≤1h → `ScheduleWakeup(min(wait_seconds, 3600))` で heartbeat を仕込み、**待機する**（待機中は再入せず予算を消費しない）。`wait_seconds` が 3600 を超える場合は複数回に分けて再チェックする。
    - 非 /loop オーケストレーション（Agent tool / Workflow drive）・待機 >1h・再起動耐性が必要 → `CronCreate`（`recurring: false`, durable）を **`resets_at + resume_buffer_seconds`** にセットし、発火時に継続コマンドを再投入する（壁時計一発・再起動耐性。one-shot は発火後 auto-delete）。既定 ON によりこの経路（>1h・非 /loop）を踏みやすいため、該当時は `ScheduleWakeup` ではなく **`CronCreate`(one-shot, durable)** を優先する。詳細は usage-guard SKILL.md §軽量 wait-loop「再開トリガの選択」。
+   - **反映ラグ疑い時（`suspected_reflection_lag: true`）は境界に長時間 CronCreate を張らず、短間隔（`wait_seconds` ≈ 180 秒）で `ScheduleWakeup` 再チェック**する（境界直後の前枠残像による偽 100% を回復確認後に拾い、~5h 放置の偽陰性を回避。usage-guard SKILL.md §振る舞い: 反映ラグ検知 を参照）。
    - 起床したら継続コマンド **`/drive <元の引数>`** を自己再入する（既定 ON のため `--usage-guard` を強制付与しない。`--no-usage-guard` がユーザー指定されていた場合のみ引き継ぐ ── ただし `--no-usage-guard` 時はそもそも本節を実行しないため、実際の継続コマンドは元の引数をそのまま渡せばよい）。drive の冪等 resume が既存 PR / ブランチ / 完了済み worker を検出して**続きから再開**する（待機を挟んでも重複副作用を生まない）。
    - `usage-check.mjs` が `ok: true` を返すまで 3〜4 を繰り返す。
 

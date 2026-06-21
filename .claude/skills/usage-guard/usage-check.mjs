@@ -15,16 +15,28 @@
 // functional path literal here is written in the rewritable skills-dir form.
 //
 // Output (stdout, single JSON line):
-//   { five_hour, seven_day, ok, wait_seconds, resets_at, resume_buffer_seconds, source }
+//   { five_hour, seven_day, ok, wait_seconds, resets_at, resume_buffer_seconds,
+//     suspected_reflection_lag, source }
 //   - five_hour / seven_day: { utilization (0-100), resets_at (ISO|null) }
 //   - ok:           both windows' utilization < threshold (default 95)
 //   - wait_seconds: seconds until the LATEST resets_at among exceeded windows
 //                   PLUS the post-reset resume buffer (0 when ok). Derived from
-//                   `resets_at` minus now, plus resume_buffer_seconds.
+//                   `resets_at` minus now, plus resume_buffer_seconds. When a
+//                   reflection lag is suspected (see below) this collapses to a
+//                   short recheck interval instead of a full window.
 //   - resets_at:    that same latest exceeded resets_at, UNCHANGED by the buffer
 //                   (the window edge; the planned resume = resets_at + buffer)
 //   - resume_buffer_seconds: the post-reset safety margin folded into
 //                   wait_seconds (default 300; 0 restores the legacy behaviour)
+//   - suspected_reflection_lag: true when an exceeded window is also barely past
+//                   its boundary (elapsed = period - (resets_at - now) < epsilon).
+//                   This is the "reset happened but the server-side utilization
+//                   still shows the previous window's residue" contradiction
+//                   (#133). When set, wait_seconds collapses to a SHORT recheck
+//                   interval so the caller re-fetches the real post-lag value
+//                   soon instead of idling a full window; resets_at stays the
+//                   raw window edge. Such results are NOT cached (so the next
+//                   check hits the live endpoint, not the stale lagged value).
 //   - source:       "endpoint" | "jsonl" | "fail-open" | "cache"
 //
 // Fail-open: if the endpoint fails AND the JSONL fallback fails, emit
@@ -50,6 +62,20 @@ const DEFAULT_RESUME_BUFFER_SECONDS = 300;
 const DEFAULT_CACHE_TTL_MS = 45_000; // 30–60s window so the #123 hook can share it.
 const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
 const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000;
+// Reflection-lag detection (#133). After a window resets, the server-side
+// `utilization` can briefly still report the PREVIOUS window's residue (e.g.
+// 100% at 5 minutes into a fresh 5h window). An exceeded window whose elapsed
+// time since its boundary is below this epsilon is treated as "suspected
+// reflection lag" rather than a genuine throttle.
+const DEFAULT_LAG_EPSILON_SECONDS = 900; // 15 min boundary-proximity window.
+// When a lag is suspected we wait only this short interval before re-checking
+// (instead of a full window + buffer) so the real post-lag value is picked up
+// quickly. resets_at is left at the raw window edge (information preserved).
+const DEFAULT_LAG_RECHECK_SECONDS = 180; // 3 min recheck cadence.
+// Per-window period lengths in SECONDS, used to compute elapsed-since-boundary
+// for the lag check: elapsed = period - (resets_at - now).
+const FIVE_HOUR_PERIOD_S = FIVE_HOUR_MS / 1000; // 18000
+const SEVEN_DAY_PERIOD_S = SEVEN_DAY_MS / 1000; // 604800
 
 // HOME-anchored paths, built with path.join so no rewritable skills-dir literal
 // ever appears in source (M2).
@@ -88,6 +114,47 @@ export function resolveResumeBuffer(env = process.env) {
     return DEFAULT_RESUME_BUFFER_SECONDS;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return DEFAULT_RESUME_BUFFER_SECONDS;
+  return n;
+}
+
+/**
+ * Resolve the reflection-lag epsilon in seconds (env override → default).
+ *
+ * `USAGE_GUARD_LAG_EPSILON_SECONDS` overrides the default (900). An exceeded
+ * window whose elapsed time since its boundary is below this value is treated
+ * as suspected reflection lag (#133). Negative/non-finite/blank → default.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number}
+ */
+export function resolveLagEpsilon(env = process.env) {
+  const raw = env?.USAGE_GUARD_LAG_EPSILON_SECONDS;
+  if (raw === undefined || raw === null || String(raw).trim() === "")
+    return DEFAULT_LAG_EPSILON_SECONDS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_LAG_EPSILON_SECONDS;
+  return n;
+}
+
+/**
+ * Resolve the reflection-lag recheck interval in seconds (env override →
+ * default).
+ *
+ * `USAGE_GUARD_LAG_RECHECK_SECONDS` overrides the default (180). When a lag is
+ * suspected, `wait_seconds` collapses to this short cadence so the caller
+ * re-fetches the real value soon (#133). Negative/non-finite/blank → default.
+ * A value of 0 is rejected (collapses to default) because a zero recheck would
+ * busy-loop.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number}
+ */
+export function resolveLagRecheck(env = process.env) {
+  const raw = env?.USAGE_GUARD_LAG_RECHECK_SECONDS;
+  if (raw === undefined || raw === null || String(raw).trim() === "")
+    return DEFAULT_LAG_RECHECK_SECONDS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_LAG_RECHECK_SECONDS;
   return n;
 }
 
@@ -165,29 +232,50 @@ export function normalizeWindows(payload) {
  * `utilization` can lag the reset). `resets_at` stays the raw window edge — the
  * planned resume time is `resets_at + resumeBuffer`, kept distinguishable.
  *
+ * Reflection-lag (#133): for each exceeded window we also compute how long it
+ * has been since that window's boundary
+ * (`elapsed = period - (resets_at - now)`). If ANY exceeded window is barely
+ * past its boundary (`elapsed < lagEpsilon`) the over-threshold reading is most
+ * likely the previous window's residue still echoing through the endpoint, not
+ * a genuine throttle. In that case `suspected_reflection_lag` is set and
+ * `wait_seconds` collapses to the short `lagRecheck` interval (instead of a
+ * full window + buffer) so the caller re-fetches the real value soon. `resets_at`
+ * is preserved as the raw window edge in both cases.
+ *
  * @param {{ five_hour: {utilization:number,resets_at:string|null}, seven_day: {utilization:number,resets_at:string|null} }} windows
  * @param {object} [opts]
  * @param {number} [opts.threshold]
  * @param {number} [opts.resumeBuffer] post-reset buffer in seconds (default 300)
+ * @param {number} [opts.lagEpsilon] boundary-proximity window in seconds (default 900)
+ * @param {number} [opts.lagRecheck] short recheck interval when lag suspected (default 180)
  * @param {() => number} [opts.now]
- * @returns {{ five_hour: object, seven_day: object, ok: boolean, wait_seconds: number, resets_at: string|null, resume_buffer_seconds: number }}
+ * @returns {{ five_hour: object, seven_day: object, ok: boolean, wait_seconds: number, resets_at: string|null, resume_buffer_seconds: number, suspected_reflection_lag: boolean }}
  */
 export function evaluate(
   windows,
   {
     threshold = DEFAULT_THRESHOLD,
     resumeBuffer = DEFAULT_RESUME_BUFFER_SECONDS,
+    lagEpsilon = DEFAULT_LAG_EPSILON_SECONDS,
+    lagRecheck = DEFAULT_LAG_RECHECK_SECONDS,
     now = Date.now,
   } = {},
 ) {
-  const exceeded = [windows.five_hour, windows.seven_day].filter((w) => w.utilization >= threshold);
+  // Pair each window with its period (seconds) so we can compute elapsed since
+  // the window boundary for the reflection-lag check.
+  const exceeded = [
+    { w: windows.five_hour, periodS: FIVE_HOUR_PERIOD_S },
+    { w: windows.seven_day, periodS: SEVEN_DAY_PERIOD_S },
+  ].filter(({ w }) => w.utilization >= threshold);
   const ok = exceeded.length === 0;
   let resetsAt = null;
   let waitSeconds = 0;
+  let suspectedReflectionLag = false;
+  const nowMs = now();
   if (!ok) {
     // Latest resets_at among exceeded windows (max epoch); ignore unparseable.
     let latestMs = null;
-    for (const w of exceeded) {
+    for (const { w, periodS } of exceeded) {
       if (!w.resets_at) continue;
       const ms = Date.parse(w.resets_at);
       if (Number.isNaN(ms)) continue;
@@ -195,10 +283,18 @@ export function evaluate(
         latestMs = ms;
         resetsAt = w.resets_at;
       }
+      // elapsed since this window's boundary = period - (resets_at - now).
+      // Small elapsed + over-threshold = the reset just happened but the
+      // endpoint is still echoing the prior window's residue → lag suspected.
+      const elapsedS = periodS - (ms - nowMs) / 1000;
+      if (elapsedS >= 0 && elapsedS < lagEpsilon) suspectedReflectionLag = true;
     }
-    if (latestMs !== null) {
+    if (suspectedReflectionLag) {
+      // Don't idle a full window on a likely-stale 100%; re-check soon.
+      waitSeconds = Math.max(1, Math.ceil(lagRecheck));
+    } else if (latestMs !== null) {
       // wait = time to the window edge + the post-reset safety buffer.
-      waitSeconds = Math.max(0, Math.ceil((latestMs - now()) / 1000)) + Math.max(0, resumeBuffer);
+      waitSeconds = Math.max(0, Math.ceil((latestMs - nowMs) / 1000)) + Math.max(0, resumeBuffer);
     }
   }
   return {
@@ -208,6 +304,7 @@ export function evaluate(
     wait_seconds: waitSeconds,
     resets_at: resetsAt,
     resume_buffer_seconds: Math.max(0, resumeBuffer),
+    suspected_reflection_lag: suspectedReflectionLag,
   };
 }
 
@@ -390,7 +487,7 @@ export async function writeCache(
  * cache, and clock. `warn` defaults to stderr.
  *
  * @param {object} [deps]
- * @returns {Promise<{ five_hour: object, seven_day: object, ok: boolean, wait_seconds: number, resets_at: string|null, source: string }>}
+ * @returns {Promise<{ five_hour: object, seven_day: object, ok: boolean, wait_seconds: number, resets_at: string|null, resume_buffer_seconds: number, suspected_reflection_lag: boolean, source: string }>}
  */
 export async function getUsage({
   fetchImpl = fetch,
@@ -408,28 +505,37 @@ export async function getUsage({
 } = {}) {
   const threshold = resolveThreshold(env);
   const resumeBuffer = resolveResumeBuffer(env);
+  const lagEpsilon = resolveLagEpsilon(env);
+  const lagRecheck = resolveLagRecheck(env);
 
   // 1. Fresh cache → return as-is (no endpoint re-fetch within TTL).
   const cached = await readCache({ readFileImpl, cachePath, ttlMs: cacheTtlMs, now });
   if (cached) return { ...cached, source: "cache" };
 
-  const evalOpts = { threshold, resumeBuffer, now };
+  const evalOpts = { threshold, resumeBuffer, lagEpsilon, lagRecheck, now };
+
+  // Cache-bypass (#133): a suspected reflection lag is a transient, likely-stale
+  // 100% reading. Persisting it would pin the false signal for the cache TTL and
+  // re-serve it on the next check, defeating the short recheck. So when the
+  // result flags a lag we skip the cache write — the next check hits the live
+  // endpoint and can observe the post-lag value immediately.
+  const maybeCache = async (result) => {
+    if (result.suspected_reflection_lag) return result; // do NOT cache a lagged read
+    await writeCache(result, { writeFileImpl, mkdirImpl, cachePath, now });
+    return result;
+  };
 
   // 2. Endpoint.
   try {
     const token = await readAccessToken({ readFileImpl, credentialsPath, now });
     if (!token) throw new Error("no usable OAuth access token");
     const windows = await fetchEndpointUsage(token, { fetchImpl });
-    const result = { ...evaluate(windows, evalOpts), source: "endpoint" };
-    await writeCache(result, { writeFileImpl, mkdirImpl, cachePath, now });
-    return result;
+    return await maybeCache({ ...evaluate(windows, evalOpts), source: "endpoint" });
   } catch (endpointErr) {
     // 3. JSONL fallback.
     try {
       const windows = await aggregateJsonlUsage({ readdirImpl, readFileImpl, projectsDir, now });
-      const result = { ...evaluate(windows, evalOpts), source: "jsonl" };
-      await writeCache(result, { writeFileImpl, mkdirImpl, cachePath, now });
-      return result;
+      return await maybeCache({ ...evaluate(windows, evalOpts), source: "jsonl" });
     } catch (jsonlErr) {
       // 4. Both failed → fail-open + warn (guard never hard-stops on its bug).
       warn(
@@ -442,6 +548,7 @@ export async function getUsage({
         wait_seconds: 0,
         resets_at: null,
         resume_buffer_seconds: resumeBuffer,
+        suspected_reflection_lag: false,
         source: "fail-open",
       };
     }
@@ -468,6 +575,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         wait_seconds: 0,
         resets_at: null,
         resume_buffer_seconds: resolveResumeBuffer(),
+        suspected_reflection_lag: false,
         source: "fail-open",
       })}\n`,
     );

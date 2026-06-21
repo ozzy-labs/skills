@@ -50,6 +50,7 @@ node ~/.claude/skills/usage-guard/usage-check.mjs
 - endpoint 失敗時は `~/.claude/projects/*/*.jsonl` の per-message `usage` + timestamp から 5h / 7d window を推定する JSONL フォールバック
 - endpoint と JSONL の**両方が失敗したら fail-open**（`ok: true`）+ stderr に警告（ガードが自バグで hard-stop しない）
 - 超過時の `wait_seconds` には**ポストリセットのバッファ**（既定 +300 秒）を加算する。サーバ側 `utilization` 反映の遅延・ScheduleWakeup の発火ブレを吸収し、リセット丁度に絞られた枠へ再突入して再ハネするのを防ぐ（後述「閾値」「振る舞い: 再開バッファ」）
+- **反映ラグ検知**（`suspected_reflection_lag`）: リセット直後はサーバ側 `utilization` が**前枠の残像**を返すことがある（リセット済みなのに 5h util 100% 等）。超過枠が**境界直後**（枠開始からの経過 `elapsed = period - (resets_at - now)` が epsilon=900 秒未満）なら矛盾とみなし、`wait_seconds` を full-window ではなく**短い再チェック間隔**（既定 180 秒）に切り替える。この結果は cache に書かない（後述「振る舞い: 反映ラグ検知」）
 
 ### 出力 JSON
 
@@ -61,14 +62,16 @@ node ~/.claude/skills/usage-guard/usage-check.mjs
   "wait_seconds": 0,
   "resets_at": null,
   "resume_buffer_seconds": 300,
+  "suspected_reflection_lag": false,
   "source": "endpoint"
 }
 ```
 
 - `ok`: **両枠の `utilization` が閾値未満**なら `true`
-- `wait_seconds`: 超過枠の `resets_at` の**最遅**（最も遅くリセットする枠）までの秒数 **+ `resume_buffer_seconds`**。`ok` のときは `0`
-- `resets_at`: その最遅の超過枠の `resets_at`（**枠端のまま不変**。バッファは加算しない）。`ok` のときは `null`。再開予定 = `resets_at + resume_buffer_seconds` として区別できる
+- `wait_seconds`: 超過枠の `resets_at` の**最遅**（最も遅くリセットする枠）までの秒数 **+ `resume_buffer_seconds`**。`ok` のときは `0`。**`suspected_reflection_lag` が `true` のときは**短い再チェック間隔（`USAGE_GUARD_LAG_RECHECK_SECONDS`、既定 180 秒）に縮退する
+- `resets_at`: その最遅の超過枠の `resets_at`（**枠端のまま不変**。バッファ加算も lag 縮退もしない）。`ok` のときは `null`。再開予定 = `resets_at + resume_buffer_seconds` として区別できる
 - `resume_buffer_seconds`: `wait_seconds` に折り込まれたポストリセットのバッファ秒数（既定 300、0 で従来挙動）
+- `suspected_reflection_lag`: 反映ラグ（境界直後なのに超過）の疑いなら `true`。`true` のとき `wait_seconds` は短い再チェック間隔になり、この結果は **cache に書かれない**（次チェックが endpoint 実値を即取得できる）。`ok` のときは常に `false`。endpoint / jsonl 両経路でセットされる
 - `source`: `endpoint` / `jsonl` / `cache` / `fail-open`
 
 ### 振る舞い: 再開バッファ
@@ -79,11 +82,27 @@ node ~/.claude/skills/usage-guard/usage-check.mjs
 - `ok`（未超過）時はバッファを加算しない（`wait_seconds: 0`）
 - PreToolUse hook の deny ヒント（「あと N 分」）も `wait_seconds` 由来なのでバッファ込みで提示され整合する
 
+### 振る舞い: 反映ラグ検知（境界直後の偽陰性回避）
+
+リセット直後はサーバ側 `utilization` が**前枠の残像**を引きずることがある（例: 5h 枠が 21:00 にリセット済みなのに 21:05 の endpoint が util 100% を返し、`resets_at` は既に次境界 02:00 を指す矛盾状態）。この状態をそのまま扱うと「回復済みの枠を ~5h 無駄に放置」する偽陰性になる。`resume_buffer`（#129）は「reset 未到来」前提の対策でこのケースには効かない。
+
+判定原理: 超過枠ごとに **枠開始からの経過** `elapsed = period - (resets_at - now)`（`five_hour` の period = 18000 秒、`seven_day` = 604800 秒）を算出する。`elapsed` が epsilon（`USAGE_GUARD_LAG_EPSILON_SECONDS`、既定 900 秒）未満かつ超過なら**矛盾** → 反映ラグの疑いとして `suspected_reflection_lag = true` をセットする。
+
+- lag 疑い時は `wait_seconds` を full-window+buffer ではなく**短い再チェック間隔**（`USAGE_GUARD_LAG_RECHECK_SECONDS`、既定 180 秒）にする。caller は長時間 CronCreate を境界に張らず、この短間隔で再 fetch すればラグ解消後の実値を拾える
+- `resets_at` は**枠端のまま不変**（情報を捨てない）
+- lag 疑いの結果は **cache に書かない**（前枠の偽 100% が TTL 間 cache に固定されて再チェックを潰すのを防ぐ。次チェックは endpoint 実値を即取得する）
+- `ok`（閾値未満）のときは lag 判定せず常に `suspected_reflection_lag: false`
+
 ### 閾値
 
 既定 95%。環境変数 `USAGE_GUARD_THRESHOLD` で上書き可能（例 `USAGE_GUARD_THRESHOLD=80`）。
 
 ポストリセットの再開バッファは既定 300 秒。環境変数 `USAGE_GUARD_RESUME_BUFFER_SECONDS` で上書き可能（例 `USAGE_GUARD_RESUME_BUFFER_SECONDS=600`）。`0` で従来挙動（`resets_at` 丁度に再開）に戻せる。負値・非数値は既定 300 にフォールバックする。
+
+反映ラグ検知の閾値も env で上書きできる:
+
+- `USAGE_GUARD_LAG_EPSILON_SECONDS`（既定 900）: 境界直後とみなす経過秒数。これより `elapsed` が小さい超過枠を lag 疑いとする。負値・非数値・空は既定 900 にフォールバック
+- `USAGE_GUARD_LAG_RECHECK_SECONDS`（既定 180）: lag 疑い時の短い再チェック間隔。`0` 以下・非数値・空は既定 180 にフォールバック（busy-loop 防止）
 
 ## 軽量 wait-loop（共通ロジック）
 
@@ -93,9 +112,10 @@ node ~/.claude/skills/usage-guard/usage-check.mjs
 2. **劣化チェック**: `source !== "endpoint"`（`cache` は endpoint 由来なので除外）なら劣化警告を出す。特に `source === "fail-open"` のときは「⚠️ usage-guard 劣化: source=fail-open、実際には監視していません」を**呼び出し側・ユーザーに明示**し、drive caller はレポートに残す（allow / 進行は維持。§環境要件 を案内）
 3. `ok` なら**通常進行**（継続コマンドを実行 / caller は次の checkpoint へ）
 4. `ok` が `false` なら再開トリガを選び（下記「再開トリガの選択」）、**待機する**
-   - `wait_seconds` には `resume_buffer_seconds`（既定 300）が折り込まれているので、待機は `resets_at + buffer` まで延びる
+   - **反映ラグ疑い時（`suspected_reflection_lag: true`）は短間隔で再チェック**する。`wait_seconds` は既に短い再チェック間隔（既定 180 秒）に縮退しているので、境界に長時間 CronCreate one-shot を張らず、`ScheduleWakeup(wait_seconds)` 等でこの短間隔だけ待って再び `usage-check.mjs` を叩く。ラグが解消すれば次チェックで実値（多くは `ok: true`）を拾い継続できる（前枠残像のまま ~5h 放置する偽陰性を回避）
+   - 通常の超過時は `wait_seconds` に `resume_buffer_seconds`（既定 300）が折り込まれているので、待機は `resets_at + buffer` まで延びる
    - **待機中は再入しない**（予算を一切消費しない）
-5. 起床したら再び `usage-check.mjs` を実行し、`ok` になるまで 2〜5 を繰り返す
+5. 起床したら再び `usage-check.mjs` を実行し、`ok` になるまで 2〜5 を繰り返す（lag 疑いの結果は cache に書かれないので、再チェックは endpoint 実値を即取得する）
 6. `ok` になったら継続コマンドへ進む
 
 > `wait_seconds` は `resets_at`（+ buffer）から算出するため秒精度ではない。ScheduleWakeup の発火も下限 + オーバーヘッドで多少遅れる（実機で 60s 要求に対し ~110s）。reset 待ちには十分な精度。
