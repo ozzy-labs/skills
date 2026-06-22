@@ -101,6 +101,7 @@ node ~/.claude/skills/usage-guard/usage-check.mjs
 
 - `headroom` は**閾値比較にのみ**作用する。`wait_seconds` / `resets_at` / 反映ラグの算出は**不変**で、headroom の大小でスケールしない（トリップした枠の待機は枠端 + buffer のみ。複数の headroom 値が同じ枠を超えさせるなら待機は同一）
 - 既定 `headroom=0` は従来挙動（現在値で gate）。**後方互換**。単一モードの Phase1 / review-loop checkpoint は headroom=0 のまま
+- **shared cache をまたがない**: `headroom > 0`（dispatch checkpoint）は `~/.claude/usage-guard/cache.json`（headroom=0 で算出され #123 hook と共有）を **read も write もしない**。さもないと headroom=0 の `ok:true` を見込み超過に誤って返したり（gate を無効化）、headroom 超過の `ok:false` を hook 経路に汚染したりする。`headroom > 0` の結果は常に `source` が `cache` 以外になる
 - 負値・非数値は 0 にクランプ（誤設定でガードを現在値より緩めない）
 - 解決順は **CLI `--headroom <pct>` > env `USAGE_GUARD_DISPATCH_HEADROOM` > 既定 0**
 

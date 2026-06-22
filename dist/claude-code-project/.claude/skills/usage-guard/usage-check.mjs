@@ -45,6 +45,10 @@
 //                   raw window edge. Such results are NOT cached (so the next
 //                   check hits the live endpoint, not the stale lagged value).
 //   - source:       "endpoint" | "jsonl" | "fail-open" | "cache"
+//                   A non-zero headroom NEVER reports "cache": it bypasses the
+//                   shared (headroom-0) cache for both read and write so a
+//                   projected gate is never served — nor poisons — a headroom-0
+//                   reading (#141 follow-up).
 //
 // Fail-open: if the endpoint fails AND the JSONL fallback fails, emit
 // { ok: true, ... source: "fail-open" } and a warning on stderr so the guard
@@ -591,9 +595,27 @@ export async function getUsage({
   const lagRecheck = resolveLagRecheck(env);
   const dispatchHeadroom = headroom === undefined ? resolveDispatchHeadroom(env) : headroom;
 
-  // 1. Fresh cache → return as-is (no endpoint re-fetch within TTL).
-  const cached = await readCache({ readFileImpl, cachePath, ttlMs: cacheTtlMs, now });
-  if (cached) return { ...cached, source: "cache" };
+  // Headroom + shared cache (#141 follow-up): the cache at CACHE_PATH is shared
+  // with the #123 PreToolUse hook and every headroom-0 caller, and it stores a
+  // result whose `ok` was computed WITHOUT headroom. A dispatch checkpoint
+  // passing a non-zero headroom must therefore NOT:
+  //   (a) be served that cached headroom-0 result — it would report ok:true on a
+  //       projected over-threshold and silently defeat the gate (observed:
+  //       `--headroom 90` returned source:cache ok:true right after a headroom-0
+  //       check), nor
+  //   (b) write its headroom-tripped result back — it would poison the shared
+  //       headroom-0 path (the hook) with a false over-threshold reading.
+  // So a non-zero headroom bypasses BOTH the cache read and write; only the
+  // headroom-0 path shares the cache. (Negative headroom clamps to 0 in
+  // evaluate(), so treat <= 0 as the shared-cache path.)
+  const useSharedCache = dispatchHeadroom <= 0;
+
+  // 1. Fresh cache → return as-is (no endpoint re-fetch within TTL). Only the
+  //    headroom-0 path reads the shared cache (see above).
+  if (useSharedCache) {
+    const cached = await readCache({ readFileImpl, cachePath, ttlMs: cacheTtlMs, now });
+    if (cached) return { ...cached, source: "cache" };
+  }
 
   const evalOpts = {
     threshold,
@@ -610,6 +632,7 @@ export async function getUsage({
   // result flags a lag we skip the cache write — the next check hits the live
   // endpoint and can observe the post-lag value immediately.
   const maybeCache = async (result) => {
+    if (!useSharedCache) return result; // headroom>0: never read NOR write the shared cache
     if (result.suspected_reflection_lag) return result; // do NOT cache a lagged read
     // (#139 (e)) Over-threshold reads get a SHORTENED TTL so a transient spike /
     // residual lag just outside the epsilon is re-verified soon (the next check
