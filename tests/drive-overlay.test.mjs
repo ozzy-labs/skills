@@ -96,6 +96,32 @@ test("drive companion places checkpoints at the four resumable-unit boundaries",
   assert.ok(raw.includes("worker dispatch"), "checkpoint before worker dispatch");
 });
 
+test("drive companion gates wave/worker dispatch with headroom-aware projection (#141)", async () => {
+  const companion = await loadCompanion("drive", "claude-code", ["description"]);
+  const raw = companion.raw;
+  // dispatch checkpoints pass --headroom derived from --concurrency
+  assert.ok(raw.includes("--headroom"), "dispatch checkpoint passes --headroom to usage-check");
+  assert.ok(
+    raw.includes("--concurrency") && raw.includes("reserve"),
+    "headroom (reserve) must be derived from the concurrency (--concurrency)",
+  );
+  // worked example so the prose is actionable (concurrency=3 → reserve=12)
+  assert.ok(
+    raw.includes("in-wave overshoot") || raw.includes("overshoot"),
+    "must name the in-wave overshoot failure mode the headroom gate addresses",
+  );
+  // single-mode checkpoints stay headroom=0 (legacy gate on current util)
+  assert.ok(
+    raw.includes("単一モードの Phase1 / review-loop checkpoint は headroom を渡さない"),
+    "single-mode checkpoints must NOT pass headroom (legacy gate on current util)",
+  );
+  // two-layer defense: boundary pause + #123 mid-unit hook elevated to default
+  assert.ok(
+    raw.includes("二層防御") && raw.includes("#123"),
+    "must document the two-layer defense (boundary pause + #123 mid-unit hook)",
+  );
+});
+
 test("drive companion documents graceful degrade when the usage-guard skill is absent", async () => {
   const companion = await loadCompanion("drive", "claude-code", ["description"]);
   const raw = companion.raw;

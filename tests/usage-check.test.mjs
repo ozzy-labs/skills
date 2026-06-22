@@ -21,8 +21,10 @@ import {
   evaluate,
   getUsage,
   normalizeWindows,
+  parseHeadroomArg,
   readAccessToken,
   readCache,
+  resolveDispatchHeadroom,
   resolveLagEpsilon,
   resolveLagRecheck,
   resolveResumeBuffer,
@@ -281,6 +283,139 @@ test("getUsage threads USAGE_GUARD_RESUME_BUFFER_SECONDS into the endpoint resul
   assert.equal(result.ok, false);
   assert.equal(result.resume_buffer_seconds, 600);
   assert.equal(result.wait_seconds, TWO_HOURS_S + 600, "endpoint path applies the env buffer");
+});
+
+// --- dispatch headroom (#141) ------------------------------------------------
+
+// The real road observation: a wave starts at five_hour=86% with threshold 95.
+// A 3-worker heavy wave burns ~+12% mid-flight (86 → 98). The boundary
+// checkpoint must gate on the PROJECTED value, not the current 86%.
+const headroomWindows = (fiveHour = 86) =>
+  normalizeWindows({
+    five_hour: { utilization: fiveHour, resets_at: "2026-06-15T02:00:00.000Z" }, // +2h
+    seven_day: { utilization: 10, resets_at: null },
+  });
+
+test("(#141) headroom default 0 is backward compatible (legacy gate on current util)", () => {
+  // headroom unset → identical to before: 86 < 95 → ok.
+  const ok = evaluate(headroomWindows(86), { now });
+  assert.equal(ok.ok, true, "86 < 95 with no headroom → ok (legacy)");
+  // 95.1 still trips with default headroom 0.
+  const trip = evaluate(headroomWindows(95.1), { now });
+  assert.equal(trip.ok, false, "95.1 >= 95 with no headroom → not ok (legacy)");
+});
+
+test("(#141) headroom gates dispatch on the PROJECTED post-wave value", () => {
+  // 86 + 12 = 98 >= 95 → hold the dispatch.
+  const tripped = evaluate(headroomWindows(86), { now, headroom: 12 });
+  assert.equal(tripped.ok, false, "projected 98 >= 95 → not ok");
+  // 86 + 5 = 91 < 95 → safe to dispatch.
+  const safe = evaluate(headroomWindows(86), { now, headroom: 5 });
+  assert.equal(safe.ok, true, "projected 91 < 95 → ok");
+  // Boundary: 86 + 9 = 95 >= 95 → trips (>= is inclusive).
+  const boundary = evaluate(headroomWindows(86), { now, headroom: 9 });
+  assert.equal(boundary.ok, false, "projected 95 >= 95 → not ok (boundary)");
+});
+
+test("(#141) wait_seconds / resets_at are independent of the headroom magnitude", () => {
+  // Both headroom values trip the SAME (5h) window; the wait is time-to-edge +
+  // buffer regardless of how large the headroom is.
+  const small = evaluate(headroomWindows(90), { now, headroom: 5 }); // 95 >= 95
+  const large = evaluate(headroomWindows(86), { now, headroom: 12 }); // 98 >= 95
+  assert.equal(small.ok, false);
+  assert.equal(large.ok, false);
+  assert.equal(small.resets_at, "2026-06-15T02:00:00.000Z");
+  assert.equal(large.resets_at, "2026-06-15T02:00:00.000Z");
+  assert.equal(
+    small.wait_seconds,
+    TWO_HOURS_S + 300,
+    "wait = edge + buffer, not scaled by headroom",
+  );
+  assert.equal(large.wait_seconds, TWO_HOURS_S + 300, "same wait despite larger headroom");
+});
+
+test("(#141) headroom trips per-window (the window with the higher projected value)", () => {
+  const res = evaluate(
+    normalizeWindows({
+      five_hour: { utilization: 50, resets_at: "2026-06-15T05:00:00.000Z" }, // 50+12=62 < 95
+      seven_day: { utilization: 88, resets_at: "2026-06-18T00:00:00.000Z" }, // 88+12=100 >= 95
+    }),
+    { now, headroom: 12 },
+  );
+  assert.equal(res.ok, false, "7d projected 100 >= 95 → not ok");
+  assert.equal(
+    res.resets_at,
+    "2026-06-18T00:00:00.000Z",
+    "wait derives from the tripped (7d) window",
+  );
+});
+
+test("(#141) negative headroom clamps to 0 (never relaxes the gate)", () => {
+  const res = evaluate(headroomWindows(94.9), { now, headroom: -50 });
+  assert.equal(res.ok, true, "94.9 < 95 — negative headroom must not flip to ok:false nor weaken");
+  const trip = evaluate(headroomWindows(96), { now, headroom: -50 });
+  assert.equal(trip.ok, false, "96 >= 95 still trips; negative headroom clamped to 0");
+});
+
+test("(#141) resolveDispatchHeadroom: env override / blank / negative / invalid → default 0", () => {
+  assert.equal(resolveDispatchHeadroom({ USAGE_GUARD_DISPATCH_HEADROOM: "12" }), 12);
+  assert.equal(resolveDispatchHeadroom({}), 0, "unset → default 0");
+  assert.equal(resolveDispatchHeadroom({ USAGE_GUARD_DISPATCH_HEADROOM: "" }), 0, "blank → 0");
+  assert.equal(resolveDispatchHeadroom({ USAGE_GUARD_DISPATCH_HEADROOM: "-5" }), 0, "negative → 0");
+  assert.equal(
+    resolveDispatchHeadroom({ USAGE_GUARD_DISPATCH_HEADROOM: "abc" }),
+    0,
+    "non-numeric → 0",
+  );
+});
+
+test("(#141) parseHeadroomArg: CLI flag forms, absence, and clamping", () => {
+  assert.equal(parseHeadroomArg(["--headroom", "12"]), 12, "--headroom <v>");
+  assert.equal(parseHeadroomArg(["--headroom=8"]), 8, "--headroom=<v>");
+  assert.equal(parseHeadroomArg([]), undefined, "absent → undefined (env fallback)");
+  assert.equal(parseHeadroomArg(["--other", "x"]), undefined, "unrelated flags → undefined");
+  assert.equal(parseHeadroomArg(["--headroom", "abc"]), undefined, "non-numeric → undefined");
+  assert.equal(parseHeadroomArg(["--headroom", "-3"]), 0, "negative → clamp 0");
+});
+
+test("(#141) getUsage: CLI headroom param wins over env; undefined falls back to env", async () => {
+  const windows = {
+    five_hour: { utilization: 86, resets_at: "2026-06-15T02:00:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+  };
+  // Explicit param (CLI) = 12 → projected 98 trips, overriding env's 0.
+  const viaParam = await getUsage({
+    fetchImpl: fetchOk(windows),
+    readFileImpl: credsReader(),
+    env: { USAGE_GUARD_DISPATCH_HEADROOM: "0" },
+    headroom: 12,
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(viaParam.ok, false, "param headroom 12 overrides env 0 → projected 98 trips");
+
+  // No param → env default applies (12 → trips).
+  const viaEnv = await getUsage({
+    fetchImpl: fetchOk(windows),
+    readFileImpl: credsReader(),
+    env: { USAGE_GUARD_DISPATCH_HEADROOM: "12" },
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(viaEnv.ok, false, "env headroom 12 applies when no param → projected 98 trips");
+
+  // No param, no env → legacy (86 < 95 → ok).
+  const legacy = await getUsage({
+    fetchImpl: fetchOk(windows),
+    readFileImpl: credsReader(),
+    env: {},
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(legacy.ok, true, "no headroom → 86 < 95 → ok (backward compatible)");
 });
 
 test("getUsage reports resume_buffer_seconds on the fail-open result", async () => {
