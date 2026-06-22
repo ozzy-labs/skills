@@ -418,6 +418,99 @@ test("(#141) getUsage: CLI headroom param wins over env; undefined falls back to
   assert.equal(legacy.ok, true, "no headroom → 86 < 95 → ok (backward compatible)");
 });
 
+test("(#141) headroom>0 does NOT read the shared headroom-0 cache (re-evaluates)", async () => {
+  // A fresh cached headroom-0 result says ok:true. A dispatch checkpoint passing
+  // a large headroom must NOT be served that cached ok:true — it would defeat the
+  // projected gate. It re-evaluates the live windows instead and trips.
+  let fetchCalls = 0;
+  const cached = {
+    five_hour: { utilization: 86, resets_at: "2026-06-15T02:00:00.000Z" },
+    seven_day: { utilization: 10, resets_at: null },
+    ok: true,
+    wait_seconds: 0,
+    resets_at: null,
+  };
+  const readFileImpl = async (path) => {
+    if (path.endsWith("cache.json")) {
+      return JSON.stringify({ cached_at: FIXED_NOW - 10_000, result: cached }); // fresh (10s < 45s TTL)
+    }
+    if (path.endsWith(".credentials.json")) {
+      return JSON.stringify({ claudeAiOauth: { accessToken: "t", expiresAt: FIXED_NOW + 1000 } });
+    }
+    throw new Error(`unexpected ${path}`);
+  };
+  const result = await getUsage({
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          five_hour: { utilization: 86, resets_at: "2026-06-15T02:00:00.000Z" },
+          seven_day: { utilization: 10, resets_at: null },
+        }),
+      };
+    },
+    readFileImpl,
+    headroom: 12, // projected 86 + 12 = 98 >= 95 → must trip
+    now,
+    cachePath: "/fake/cache.json",
+  });
+  assert.notEqual(result.source, "cache", "headroom>0 must bypass the shared cache read");
+  assert.equal(fetchCalls, 1, "headroom>0 re-evaluates against the live endpoint");
+  assert.equal(result.ok, false, "projected 98 >= 95 trips despite a fresh ok:true cache");
+});
+
+test("(#141) headroom>0 result is NOT written back to the shared cache", async () => {
+  // The headroom-tripped (ok:false) result must not poison the shared cache that
+  // the #123 hook / headroom-0 callers read.
+  const writes = [];
+  const result = await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: { utilization: 86, resets_at: "2026-06-15T02:00:00.000Z" },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    readFileImpl: credsReader(),
+    writeFileImpl: async (p, c) => writes.push([p, c]),
+    mkdirImpl: async () => {},
+    headroom: 12,
+    now,
+    cachePath: "/fake/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(result.ok, false, "projected 98 trips");
+  assert.equal(writes.length, 0, "headroom>0 must not write the shared cache");
+});
+
+test("(#141) headroom-0 path still shares the cache (regression guard)", async () => {
+  // The shared-cache behaviour for the default/hook path (headroom 0) is intact.
+  let fetchCalls = 0;
+  const cached = {
+    five_hour: { utilization: 50, resets_at: null },
+    seven_day: { utilization: 50, resets_at: null },
+    ok: true,
+    wait_seconds: 0,
+    resets_at: null,
+  };
+  const readFileImpl = async (path) => {
+    if (path.endsWith("cache.json")) {
+      return JSON.stringify({ cached_at: FIXED_NOW - 10_000, result: cached });
+    }
+    throw new Error(`unexpected ${path}`);
+  };
+  const result = await getUsage({
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+    readFileImpl,
+    now,
+    cachePath: "/fake/cache.json",
+  });
+  assert.equal(result.source, "cache", "headroom 0 still reads the shared cache");
+  assert.equal(fetchCalls, 0, "headroom 0 still avoids the endpoint within TTL");
+});
+
 test("getUsage reports resume_buffer_seconds on the fail-open result", async () => {
   const result = await getUsage({
     fetchImpl: async () => {
