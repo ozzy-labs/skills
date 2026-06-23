@@ -172,6 +172,44 @@ test("(4b) threshold env override changes the boundary", () => {
   assert.equal(at85.ok, false, "85 >= 80 → not ok at threshold 80");
 });
 
+// --- percentages are taken verbatim (no 0–1 fraction scaling) ----------------
+//
+// Regression: the OAuth endpoint reports utilization as a 0–100 percentage. An
+// earlier `util <= 1 → util * 100` heuristic inflated a genuine 1% reading to
+// 100% (and 0.5% to 50%), which hard-stopped the guard whenever a window sat at
+// exactly 1% even though the session was nowhere near its cap.
+
+test("normalizeWindows keeps a 1% reading as 1 (not 100)", () => {
+  const w = normalizeWindows({
+    five_hour: { utilization: 11, resets_at: "2026-06-23T12:10:00.000Z" },
+    seven_day: { utilization: 1, resets_at: "2026-06-30T07:00:00.000Z" },
+  });
+  assert.equal(w.five_hour.utilization, 11);
+  assert.equal(w.seven_day.utilization, 1, "1% must stay 1%, not inflate to 100%");
+});
+
+test("a 1% window stays well below threshold → ok (the real incident)", () => {
+  // The observed endpoint payload that previously tripped the guard: 5h=11%,
+  // 7d=1%. With verbatim percentages both windows are far below 95 → ok.
+  const result = evaluate(
+    normalizeWindows({
+      five_hour: { utilization: 11, resets_at: "2026-06-23T12:10:00.000Z" },
+      seven_day: { utilization: 1, resets_at: "2026-06-30T07:00:00.000Z" },
+    }),
+    { now },
+  );
+  assert.equal(result.ok, true, "11% / 1% are both < 95 → ok");
+  assert.equal(result.wait_seconds, 0);
+});
+
+test("a fractional percentage below 1 is not scaled up (0.5 stays 0.5)", () => {
+  const w = normalizeWindows({
+    five_hour: { utilization: 0.5, resets_at: null },
+    seven_day: { utilization: 0, resets_at: null },
+  });
+  assert.equal(w.five_hour.utilization, 0.5, "0.5% must stay 0.5%, not become 50%");
+});
+
 // --- (5) wait_seconds = latest exceeded resets_at ----------------------------
 
 test("(5) wait_seconds derives from the LATEST resets_at among exceeded windows", () => {
