@@ -118,12 +118,6 @@ test("e2e: unknown verb suggests a correction", () => {
   assert.match(result.stderr, /did you mean 'install'\?/);
 });
 
-test("e2e: not-yet-implemented verbs exit non-zero with the #151 pointer", () => {
-  const result = runCli(["fork", "drive", "my-drive"]);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /#151/);
-});
-
 test("e2e: list --json shows installed skills + the available catalog", async () => {
   const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
   try {
@@ -333,6 +327,74 @@ test("e2e: update --take-theirs overwrites a local edit; --keep-mine preserves i
     assert.equal(take.status, 0, take.stderr);
     assert.deepEqual(JSON.parse(take.stdout).updated, ["drive"]);
     assert.notEqual(readFileSync(skillMd, "utf8"), "mine\n");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: fork copies an installed skill to a user-owned name (no marker)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const r = runCli(["fork", "drive", "my-drive"], { home });
+    assert.equal(r.status, 0, `fork failed: ${r.stderr}`);
+    const forkDir = join(home, ".agents", "skills", "my-drive");
+    assert.ok(existsSync(join(forkDir, "SKILL.md")), "fork SKILL.md exists");
+    assert.ok(!existsSync(join(forkDir, ".ozzylabs-skills.json")), "fork is unmanaged (no marker)");
+    assert.match(
+      readFileSync(join(forkDir, "SKILL.md"), "utf8"),
+      /^name: my-drive$/m,
+      "name rewritten",
+    );
+    // The original stays managed.
+    assert.ok(existsSync(join(home, ".agents", "skills", "drive", ".ozzylabs-skills.json")));
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: diff shows local edits, and reports clean when unedited", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const clean = runCli(["diff", "drive"], { home });
+    assert.equal(clean.status, 0, clean.stderr);
+    assert.match(clean.stdout, /matches upstream/);
+
+    writeFileSync(join(home, ".agents", "skills", "drive", "SKILL.md"), "edited\n");
+    const dirty = runCli(["diff", "drive"], { home });
+    assert.equal(dirty.status, 0, dirty.stderr);
+    assert.match(dirty.stdout, /edited/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: update --prune removes installed skills no longer in the bundle", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    // Simulate a managed-but-removed-from-bundle skill.
+    const orphanDir = join(home, ".agents", "skills", "legacy-skill");
+    mkdirSync(orphanDir, { recursive: true });
+    writeFileSync(join(orphanDir, "SKILL.md"), "---\nname: legacy-skill\ndescription: x\n---\n");
+    writeFileSync(
+      join(orphanDir, ".ozzylabs-skills.json"),
+      JSON.stringify({
+        schema: 1,
+        source: "@ozzylabs/skills",
+        bundleVersion: "1.0.0",
+        adapters: ["codex-cli"],
+      }),
+    );
+
+    const r = runCli(["update", "--prune"], { home });
+    const out = JSON.parse(r.stdout);
+    assert.ok(out.pruned.includes("legacy-skill"), "orphan pruned");
+    assert.ok(!existsSync(orphanDir), "orphan dir removed");
+    assert.ok(existsSync(join(home, ".agents", "skills", "drive")), "catalog skill kept");
   } finally {
     await rm(home, { recursive: true, force: true });
   }
