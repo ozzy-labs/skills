@@ -1,15 +1,17 @@
 // GitHub Copilot adapter.
 //
-// GitHub Copilot reads `.github/copilot-instructions.md` from the consumer
-// repo. It does not load SKILL.md files directly, so this adapter emits a
-// single snippet that lists each canonical skill (name + description) for
-// Copilot to consume. The consumer's sync script merges the snippet into
-// the hand-edited copilot-instructions.md by replacing the marker block.
+// GitHub Copilot CLI reads Agent Skills natively from `.agents/skills/` (it also
+// reads `.github/skills/` and `.claude/skills/`, but `.agents/skills/` carries
+// the canonical, non-Claude-wrapped SKILL.md — the right source for Copilot).
+// So this adapter ships the same canonical `.agents/skills/` tree as Codex,
+// plus a `copilot-instructions.md.snippet` human-readable index that the
+// consumer's sync script merges into the hand-edited instructions file.
 //
 // Reference: https://docs.github.com/en/copilot/customizing-copilot
 
 import { AdapterBase } from "../lib/adapter-base.mjs";
 import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
+import { renderAgentsSkillsTree } from "../lib/agents-skills-tree.mjs";
 import { wrapSnippet } from "../lib/snippet.mjs";
 
 /**
@@ -39,10 +41,12 @@ export class CopilotAdapter extends AdapterBase {
    */
   async generate(skills) {
     const allowed = filterSkillsForAdapter(skills, CopilotAdapter.id);
+    const sorted = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
     return [
+      ...renderAgentsSkillsTree(sorted),
       {
         relativePath: ".github/copilot-instructions.md.snippet",
-        content: renderCopilotSnippet(allowed),
+        content: renderCopilotSnippet(sorted),
       },
     ];
   }

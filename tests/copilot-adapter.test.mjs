@@ -7,18 +7,21 @@ const skill = (name, description) => ({
   description,
   frontmatter: { name, description },
   body: "",
-  raw: "",
+  raw: `---\nname: ${name}\ndescription: ${description}\n---\n`,
+  extraFiles: [],
 });
 
-test("Copilot adapter emits a single snippet file", async () => {
+test("Copilot adapter ships the .agents/skills tree + an instructions snippet", async () => {
   const out = await new CopilotAdapter().generate([skill("foo", "Foo")]);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].relativePath, ".github/copilot-instructions.md.snippet");
+  const skillFile = out.find((o) => o.relativePath === ".agents/skills/foo/SKILL.md");
+  const snippet = out.find((o) => o.relativePath === ".github/copilot-instructions.md.snippet");
+  assert.ok(skillFile, "Copilot must ship the canonical .agents/skills/ SKILL.md");
+  assert.ok(snippet, "Copilot must ship the instructions snippet");
 });
 
 test("Copilot snippet contains markers, heading, and bullet list", async () => {
   const out = await new CopilotAdapter().generate([skill("foo", "Foo desc")]);
-  const content = out[0].content;
+  const content = out.find((o) => o.relativePath.endsWith(".snippet")).content;
   assert.match(content, /<!-- begin: @ozzylabs\/skills -->/);
   assert.match(content, /## Available Skills/);
   assert.match(content, /- `foo` — Foo desc/);
@@ -29,7 +32,8 @@ test("Copilot adapter is deterministic — sorts skills by name", async () => {
   const a = await new CopilotAdapter().generate([skill("zeta", "z"), skill("alpha", "a")]);
   const b = await new CopilotAdapter().generate([skill("alpha", "a"), skill("zeta", "z")]);
   assert.deepEqual(a, b);
-  assert.match(a[0].content, /alpha[\s\S]*zeta/);
+  const snippet = a.find((o) => o.relativePath.endsWith(".snippet")).content;
+  assert.match(snippet, /alpha[\s\S]*zeta/);
 });
 
 test("Copilot adapter has id 'copilot'", () => {
