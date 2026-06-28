@@ -22,7 +22,11 @@
 
 import { AdapterBase } from "../lib/adapter-base.mjs";
 import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
-import { assertRequiredFields, serializeFrontmatter } from "../lib/frontmatter.mjs";
+import {
+  assertRequiredFields,
+  serializeFrontmatter,
+  stripBuildControlFrontmatter,
+} from "../lib/frontmatter.mjs";
 
 /**
  * @typedef {import("../lib/types.mjs").Skill} Skill
@@ -64,7 +68,7 @@ export class ClaudeCodeAdapter extends AdapterBase {
       } else {
         outputs.push({
           relativePath: `.claude/skills/${skill.name}/SKILL.md`,
-          content: skill.raw,
+          content: stripBuildControlFrontmatter(skill.raw, canonicalLabel),
         });
       }
       for (const extra of skill.extraFiles ?? []) {

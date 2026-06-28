@@ -1065,7 +1065,9 @@ test("built claude-code usage-guard SKILL.md is user-invocable + has standalone-
   const fm = built.match(/^---\n([\s\S]*?)\n---\n/);
   assert.ok(fm, "SKILL.md must have frontmatter");
   assert.match(fm[1], /user-invocable:\s*true/, "frontmatter must declare user-invocable: true");
-  assert.match(fm[1], /adapters:\s*claude-code/, "frontmatter must be gated to claude-code");
+  // Build-control `adapters` is stripped from emitted SKILL.md — gating that the
+  // skill is claude-code-only is verified at the dist-payload level elsewhere.
+  assert.doesNotMatch(fm[1], /^adapters:/m, "build-control `adapters` must be stripped");
   assert.match(fm[1], /argument-hint:/, "frontmatter must declare argument-hint");
   // standalone form section
   assert.match(built, /単体形態/, "body must document the standalone /usage-guard form");

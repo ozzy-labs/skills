@@ -5,7 +5,7 @@
 // read natively. Each of those adapters emits the SAME tree (differing only in
 // their AGENTS.md / instructions aggregation), so the tree is rendered here once.
 
-import { assertRequiredFields } from "./frontmatter.mjs";
+import { assertRequiredFields, stripBuildControlFrontmatter } from "./frontmatter.mjs";
 
 /**
  * @typedef {import("./types.mjs").Skill} Skill
@@ -30,7 +30,10 @@ export function renderAgentsSkillsTree(skills) {
     );
     outputs.push({
       relativePath: `.agents/skills/${skill.name}/SKILL.md`,
-      content: skill.raw,
+      content: stripBuildControlFrontmatter(
+        skill.raw,
+        `.agents/skills/${skill.name}/SKILL.md`,
+      ),
     });
     for (const extra of skill.extraFiles ?? []) {
       outputs.push({
