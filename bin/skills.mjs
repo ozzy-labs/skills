@@ -16,6 +16,7 @@
 import { runAdd } from "./lib/add.mjs";
 import { didYouMean } from "./lib/detect.mjs";
 import { runList } from "./lib/list.mjs";
+import { runRemove } from "./lib/remove.mjs";
 
 const VERBS = ["add", "update", "list", "remove", "fork", "diff"];
 const VERB_ALIASES = { install: "add", uninstall: "remove" };
@@ -27,7 +28,7 @@ Verbs:
              project scope. Alias: install.
   update     Update installed skills, preserving local edits. (coming — #151)
   list       Show the catalog and what is installed.
-  remove     Uninstall skills. Alias: uninstall. (coming — #151)
+  remove     Uninstall skills (confirmation required). Alias: uninstall.
   fork       Copy a skill to a user-owned name. (coming — #151)
   diff       Show a skill's diff against upstream. (coming — #151)
 
@@ -65,6 +66,9 @@ async function main(argv) {
   }
   if (verb === "list") {
     return await runList(rest);
+  }
+  if (verb === "remove") {
+    return await runRemove(rest);
   }
   if (VERBS.includes(verb)) {
     return notYetImplemented(verb);
