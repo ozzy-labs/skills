@@ -261,12 +261,9 @@ export async function run(
   }
 }
 
-// CLI entry (only when executed directly, not when imported by tests).
+// CLI entry (only when executed directly, not when imported by tests). Always
+// exit 0 (fail-open): a rejected/failed emit must not signal failure to a caller
+// that chained `&&`.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  run(process.argv.slice(2)).then((res) => {
-    // Always exit 0 (fail-open): a rejected/failed emit must not signal failure
-    // to a caller that chained `&&`.
-    process.exit(0);
-    void res;
-  });
+  run(process.argv.slice(2)).then(() => process.exit(0));
 }
