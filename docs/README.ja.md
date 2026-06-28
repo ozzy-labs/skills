@@ -56,7 +56,7 @@ npx @ozzylabs/skills add --target=./my-repo
 
 対応 adapter: `claude-code` / `codex-cli` / `gemini-cli` / `copilot`。**対話実行では `--adapter` は `$HOME` 配下の CLI 検出から既定**、非対話（CI）では必須。installed skill は **editable** で、CLI は per-item 来歴マーカー（`.ozzylabs-skills.json`）で管理対象を追跡（共有 `.agents/skills/<name>` base は参照カウント）。`update` は content hash で**ローカル編集を検出し clobber しない**（`--take-theirs` / `--keep-mine` で解決）。
 
-旧 `sync-project` / `migrate` subcommand は撤去済み（project scope は `add --target`、3-way `update --merge` は [#151](https://github.com/ozzy-labs/skills/issues/151) で追跡）。
+旧 `sync-project` / `migrate` subcommand は撤去済み（project scope は `add --target`）。編集済み skill には `update --merge` で 3-way マージ（base=install 時スナップショット / mine=編集 / theirs=現上流。conflict は `<<<<<<<` マーカーで残す）。
 
 ## Consumer セットアップ
 
