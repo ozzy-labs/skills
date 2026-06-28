@@ -54,24 +54,39 @@ npx @ozzylabs/skills add --target=./my-repo
 
 Supported adapters: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`. On an **interactive** run `--adapter` defaults to the CLIs detected under `$HOME`; on a **non-interactive** run (CI, pipe) `--adapter` is required. The Claude Code payload is self-contained (ships the `.claude/skills/` wrappers **and** the canonical `.agents/skills/` files they Read); Codex / Gemini / Copilot share the canonical `.agents/skills/` tree.
 
-> **Rolling out (ozzy-labs/skills#151):** the CLI is being rebuilt to the CRUD-symmetric verb set `add` / `update` / `list` / `remove` (+ `fork` / `diff`) with per-item provenance markers and editable-skill protection. `add` (and its `install` alias) is available now; `update` / `list` / `remove` / `fork` / `diff` land in follow-up PRs. The legacy `sync-project` and `migrate` subcommands have been removed — use `add --target <repo>` for project scope.
+### Verbs
+
+| Verb | What it does |
+| --- | --- |
+| `add` (alias `install`) | Add skills to a scope. Refuses to overwrite an unmarked (foreign) skill dir without `--force`. |
+| `list` | Show the catalog with installed status. `--json`, `--target`. |
+| `update [<skill>…]` | Re-materialize installed skills, **preserving local edits**: an edited skill is not clobbered — resolve with `--take-theirs` / `--keep-mine`. `--prune` removes skills no longer in the bundle. |
+| `remove` (alias `uninstall`) | Uninstall skills. Confirmation required (TTY prompt or `--yes`). `--skills` required. |
+| `fork <skill> <new-name>` | Copy an installed skill to a user-owned, unmanaged name (free to edit; never touched by update/remove). |
+| `diff <skill>` | Show a skill's local edits vs the current upstream. |
+
+### State & editable skills
+
+Installed skills are **editable** — edit them in place under their own name. The CLI tracks what it installed with **per-item provenance markers** (`.ozzylabs-skills.json` co-located in each skill dir; no central registry). The shared `.agents/skills/<name>` base is **reference-counted** across adapters (removing one adapter keeps the base while another needs it). `update` baselines each skill's content hash so it can detect — and refuse to clobber — your local edits.
+
+Project scope (`--target`) writes the committed payload (`.claude/skills/` wrappers + canonical `.agents/skills/` + `.claude/agents/`) with repo-root-relative refs preserved. The legacy `sync-project` and `migrate` subcommands have been removed — use `add --target <repo>`. (3-way `update --merge` is tracked as a follow-up in [#151](https://github.com/ozzy-labs/skills/issues/151).)
 
 ## Consumer setup
 
-Install the skills as **user skills** with a single command:
+Add the skills as **user skills** with a single command:
 
 ```bash
-npx @ozzylabs/skills install
+npx @ozzylabs/skills add
 ```
 
 This drops the canonical skills into your user-scope skill directory (e.g. `~/.claude/skills/{name}/SKILL.md` for Claude Code) so every project on the machine can use them without per-repo configuration.
 
-### Adapter opt-in
+### Adapter selection
 
-By default the installer writes the Claude Code adapter output. Pass `--adapter` a comma-separated list to install several agents at once:
+On an interactive run, `add` installs for the agent CLIs detected on your machine. Pass `--adapter` (comma-separated) to choose explicitly — required on non-interactive / CI runs:
 
 ```bash
-npx @ozzylabs/skills install --adapter=claude-code,codex-cli
+npx @ozzylabs/skills add --adapter=claude-code,codex-cli
 ```
 
 The Claude Code payload is self-contained: it ships the `.claude/skills/` wrappers **and** the canonical `.agents/skills/` files those wrappers Read, so a standalone `--adapter=claude-code` install resolves every reference without also installing `codex-cli`.
@@ -83,7 +98,7 @@ The Claude Code payload is self-contained: it ships the `.claude/skills/` wrappe
 | `gemini-cli` | `~/.agents/skills/{name}/SKILL.md` + `~/.gemini/settings.json` + `AGENTS.md.snippet` merge |
 | `copilot` | `~/.agents/skills/{name}/SKILL.md` + `copilot-instructions.md` snippet merge |
 
-Codex CLI, Gemini CLI, and Copilot CLI all read Agent Skills natively from `.agents/skills/`, so they install the same canonical tree into the shared `~/.agents/skills/` (plus their own aggregation file). See `npx @ozzylabs/skills install --help` for the full list of options and the exact target paths.
+Codex CLI, Gemini CLI, and Copilot CLI all read Agent Skills natively from `.agents/skills/`, so they install the same canonical tree into the shared `~/.agents/skills/` (plus their own aggregation file). See `npx @ozzylabs/skills add --help` for the full list of options and the exact target paths.
 
 ### Using the skills in CI
 
