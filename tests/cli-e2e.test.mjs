@@ -119,9 +119,41 @@ test("e2e: unknown verb suggests a correction", () => {
 });
 
 test("e2e: not-yet-implemented verbs exit non-zero with the #151 pointer", () => {
-  const result = runCli(["list"]);
+  const result = runCli(["update"]);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /#151/);
+});
+
+test("e2e: list --json shows installed skills + the available catalog", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const r = runCli(["list", "--json"], { home });
+    assert.equal(r.status, 0, `list failed: ${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.scope, "user");
+    const drive = out.skills.find((s) => s.skill === "drive");
+    assert.equal(drive.status, "installed");
+    assert.deepEqual(drive.adapters, ["codex-cli"]);
+    // A skill that was not installed shows up as available.
+    const review = out.skills.find((s) => s.skill === "review");
+    assert.equal(review.status, "available");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: list (human table) marks installed vs available", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const r = runCli(["list"], { home });
+    assert.equal(r.status, 0, `list failed: ${r.stderr}`);
+    assert.match(r.stdout, /●\s+drive\s+.*\[codex-cli\]/);
+    assert.match(r.stdout, /○\s+review\s+available/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("e2e: add writes provenance markers (base marker carries the adapter)", async () => {
