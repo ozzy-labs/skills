@@ -215,3 +215,70 @@ test("e2e: add refuses to overwrite an unmarked (foreign) skill dir without --fo
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("e2e: remove uninstalls a skill (base deleted, marker gone)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const base = join(home, ".agents", "skills", "drive");
+    assert.ok(existsSync(base));
+    const r = runCli(["remove", "--skills=drive", "--yes"], { home });
+    assert.equal(r.status, 0, `remove failed: ${r.stderr}`);
+    assert.ok(!existsSync(base), "base dir removed");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: remove --adapter reference-counts the shared base", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    runCli(["add", "--adapter=claude-code", "--skills=drive", "--force"], { home });
+    const base = join(home, ".agents", "skills", "drive");
+    const wrapper = join(home, ".claude", "skills", "drive");
+
+    // Remove just codex — base stays (claude still needs it), wrapper untouched.
+    runCli(["remove", "--skills=drive", "--adapter=codex-cli", "--yes"], { home });
+    assert.ok(existsSync(base), "base kept while claude-code still needs it");
+    assert.ok(existsSync(wrapper), "claude wrapper untouched");
+    const marker = JSON.parse(readFileSync(join(base, ".ozzylabs-skills.json"), "utf8"));
+    assert.deepEqual(marker.adapters, ["claude-code"]);
+
+    // Remove claude — last reference gone, base + wrapper deleted.
+    runCli(["remove", "--skills=drive", "--adapter=claude-code", "--yes"], { home });
+    assert.ok(!existsSync(base), "base removed after last adapter");
+    assert.ok(!existsSync(wrapper), "claude wrapper removed");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: remove refuses without --yes in a non-TTY session", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const r = runCli(["remove", "--skills=drive"], { home });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /--yes/);
+    assert.ok(existsSync(join(home, ".agents", "skills", "drive")), "not removed");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: remove never touches an unmarked (foreign) skill dir", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    const foreign = join(home, ".agents", "skills", "drive");
+    mkdirSync(foreign, { recursive: true });
+    writeFileSync(join(foreign, "SKILL.md"), "mine\n");
+    const r = runCli(["remove", "--skills=drive", "--yes"], { home });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /Nothing to remove/);
+    assert.ok(existsSync(join(foreign, "SKILL.md")), "foreign dir untouched");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
