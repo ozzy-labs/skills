@@ -116,10 +116,10 @@ The Claude Code payload is self-contained: it ships the `.claude/skills/` wrappe
 | --- | --- |
 | `claude-code` | `~/.claude/skills/{name}/SKILL.md` |
 | `codex-cli` | `~/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` merge |
-| `gemini-cli` | `~/.gemini/settings.json` merge + `AGENTS.md.snippet` merge |
-| `copilot` | `~/.github/copilot-instructions.md` snippet merge |
+| `gemini-cli` | `~/.agents/skills/{name}/SKILL.md` + `~/.gemini/settings.json` + `AGENTS.md.snippet` merge |
+| `copilot` | `~/.agents/skills/{name}/SKILL.md` + `copilot-instructions.md` snippet merge |
 
-See `npx @ozzylabs/skills install --help` for the full list of options and the exact target paths.
+Codex CLI, Gemini CLI, and Copilot CLI all read Agent Skills natively from `.agents/skills/`, so they install the same canonical tree into the shared `~/.agents/skills/` (plus their own aggregation file). See `npx @ozzylabs/skills install --help` for the full list of options and the exact target paths.
 
 ### Using the skills in CI
 
@@ -158,8 +158,8 @@ Consumers that previously consumed skills as **project skills** via the legacy p
 | --- | --- | --- |
 | `claude-code` | `dist/claude-code/.claude/skills/{name}/SKILL.md` | `SKILL.claude-code.md` if present, else canonical `SKILL.md` |
 | `codex-cli` | `dist/codex-cli/.agents/skills/{name}/SKILL.md` + `AGENTS.md.snippet` | canonical `SKILL.md` |
-| `gemini-cli` | `dist/gemini-cli/.gemini/settings.json` + `AGENTS.md.snippet` | canonical `SKILL.md` |
-| `copilot` | `dist/copilot/.github/copilot-instructions.md.snippet` | canonical `SKILL.md` |
+| `gemini-cli` | `dist/gemini-cli/.agents/skills/{name}/SKILL.md` + `.gemini/settings.json` + `AGENTS.md.snippet` | canonical `SKILL.md` |
+| `copilot` | `dist/copilot/.agents/skills/{name}/SKILL.md` + `copilot-instructions.md.snippet` | canonical `SKILL.md` |
 
 ### Claude Code companion file
 
@@ -188,7 +188,7 @@ adapters: claude-code               # claude-code only
 adapters: claude-code, codex-cli    # both
 ```
 
-When the field is absent, the skill is emitted by every adapter (the default). Known ids: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`; an unknown id fails the build. Gating applies uniformly to per-skill outputs, the Gemini CLI / Copilot aggregate listings, the project-scope payload (`dist/claude-code-project/`), and the in-repo dogfood mirrors (an `adapters: claude-code` skill is kept out of `.agents/skills/`).
+When the field is absent, the skill is emitted by every adapter (the default). Known ids: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`; an unknown id fails the build. Gating applies to the shipped `dist/{adapter-id}/` payloads (an `adapters: claude-code` skill is excluded from `dist/codex-cli`, `dist/gemini-cli`, `dist/copilot`) and the aggregate listings. Note: since `.agents/skills/` is the SSOT that Codex/Gemini read directly in-repo, a `claude-code`-gated skill (e.g. `usage-guard`) still physically lives there — it is an inert no-op for non-Claude tools; gating is what keeps it out of their shipped payloads.
 
 ## Local development
 

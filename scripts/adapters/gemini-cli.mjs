@@ -1,10 +1,11 @@
 // Gemini CLI adapter.
 //
-// Gemini CLI reads `.gemini/settings.json` and follows `context.fileName`
-// to the consumer's AGENTS.md, where the skill list lives. This adapter
-// emits the settings.json plus the same `AGENTS.md.snippet` body the
-// Codex CLI adapter (#11) produces — both adapters share
-// scripts/lib/agents-md-snippet.mjs so consumers stay in sync.
+// Gemini CLI reads Agent Skills natively from `.agents/skills/` (preferred over
+// `.gemini/skills/` for cross-tool interop), so this adapter ships the same
+// canonical `.agents/skills/` tree as Codex. It also emits `.gemini/settings.json`
+// (pointing `context.fileName` at AGENTS.md) and the shared `AGENTS.md.snippet`
+// human-readable index (identical to the Codex adapter's, via
+// scripts/lib/agents-md-snippet.mjs).
 //
 // Reference: https://github.com/google-gemini/gemini-cli
 
@@ -12,6 +13,7 @@ import prettier from "prettier";
 import { AdapterBase } from "../lib/adapter-base.mjs";
 import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
 import { renderAgentsMdSnippet } from "../lib/agents-md-snippet.mjs";
+import { renderAgentsSkillsTree } from "../lib/agents-skills-tree.mjs";
 
 /**
  * @typedef {import("../lib/types.mjs").Skill} Skill
@@ -50,6 +52,7 @@ export class GeminiCliAdapter extends AdapterBase {
     const allowed = filterSkillsForAdapter(skills, GeminiCliAdapter.id);
     const sorted = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
     return [
+      ...renderAgentsSkillsTree(sorted),
       {
         relativePath: ".gemini/settings.json",
         content: await stableJsonStringify(SETTINGS),

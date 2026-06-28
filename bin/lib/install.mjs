@@ -5,10 +5,10 @@
 // project-scoped). Adapter layouts mirror what the build pipeline writes
 // under `dist/{adapter-id}/`:
 //
-//   claude-code → ~/.claude/skills/{name}/SKILL.md  (+ extras)
+//   claude-code → ~/.claude/skills/{name}/SKILL.md  (+ canonical ~/.agents base)
 //   codex-cli   → ~/.agents/skills/{name}/SKILL.md  (+ extras + AGENTS.md.snippet)
-//   gemini-cli  → ~/.gemini/settings.json + ~/AGENTS.md.snippet (no per-skill files)
-//   copilot     → ~/.github/copilot-instructions.md.snippet     (no per-skill files)
+//   gemini-cli  → ~/.agents/skills/{name}/SKILL.md  (+ ~/.gemini/settings.json + snippet)
+//   copilot     → ~/.agents/skills/{name}/SKILL.md  (+ copilot-instructions snippet)
 //
 // `--dry-run` reports the plan as JSON on stdout without touching the disk.
 
@@ -74,12 +74,15 @@ const ADAPTER_LAYOUT = {
     skillsRoots: [".agents/skills"],
     distSubtree: ".",
   },
+  // Gemini CLI and Copilot CLI both read Agent Skills natively from
+  // `.agents/skills/`, so they install the same canonical tree as codex-cli
+  // (into the shared `~/.agents/skills/`), plus their own aggregation snippet.
   "gemini-cli": {
-    skillsRoots: [],
+    skillsRoots: [".agents/skills"],
     distSubtree: ".",
   },
   copilot: {
-    skillsRoots: [],
+    skillsRoots: [".agents/skills"],
     distSubtree: ".",
   },
 };
@@ -222,7 +225,7 @@ export async function planInstall({ packageRoot, home, adapter, skillsFilter }) 
   }
   if (skillsFilter && skillRoots.length === 0) {
     throw new Error(
-      `adapter '${adapter}' does not ship per-skill files; --skills is only meaningful for adapters that do (claude-code, codex-cli)`,
+      `adapter '${adapter}' does not ship per-skill files; --skills is only meaningful for adapters that do`,
     );
   }
 

@@ -22,8 +22,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
 
-// Adapters whose payloads ship per-skill SKILL.md files (vs snippet-only ones).
-const PER_SKILL_ADAPTERS = ["claude-code", "codex-cli"];
+// Adapters whose payloads ship per-skill SKILL.md files. Codex / Gemini /
+// Copilot all ship the same canonical `.agents/skills/` tree; claude-code adds
+// the `.claude/skills/` wrappers on top.
+const PER_SKILL_ADAPTERS = ["claude-code", "codex-cli", "gemini-cli", "copilot"];
 
 // `~/.agents/skills/<name>/SKILL.md` or `~/.claude/skills/<name>/SKILL.md`
 const REF_RE = /~\/(\.(?:agents|claude)\/skills\/[a-z0-9-]+\/SKILL\.md)/g;

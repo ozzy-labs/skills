@@ -10,11 +10,11 @@ const skill = (name, description) => ({
   raw: `---\nname: ${name}\ndescription: ${description}\n---\n`,
 });
 
-test("Gemini CLI adapter emits settings.json + AGENTS.md.snippet", async () => {
+test("Gemini CLI adapter ships .agents/skills tree + settings.json + AGENTS.md.snippet", async () => {
   const out = await new GeminiCliAdapter().generate([skill("foo", "Foo")]);
   assert.deepEqual(
     out.map((o) => o.relativePath),
-    [".gemini/settings.json", "AGENTS.md.snippet"],
+    [".agents/skills/foo/SKILL.md", ".gemini/settings.json", "AGENTS.md.snippet"],
   );
 });
 

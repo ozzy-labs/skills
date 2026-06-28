@@ -13,7 +13,7 @@
 import { AdapterBase } from "../lib/adapter-base.mjs";
 import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
 import { renderAgentsMdSnippet } from "../lib/agents-md-snippet.mjs";
-import { assertRequiredFields } from "../lib/frontmatter.mjs";
+import { renderAgentsSkillsTree } from "../lib/agents-skills-tree.mjs";
 
 /**
  * @typedef {import("../lib/types.mjs").Skill} Skill
@@ -32,25 +32,9 @@ export class CodexCliAdapter extends AdapterBase {
   async generate(skills, _options = {}) {
     const allowed = filterSkillsForAdapter(skills, CodexCliAdapter.id);
     const sorted = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
-    const outputs = [];
-    for (const skill of sorted) {
-      const label = `.agents/skills/${skill.name}/SKILL.md`;
-      assertRequiredFields(skill.frontmatter, ["name", "description"], label);
-      outputs.push({
-        relativePath: `.agents/skills/${skill.name}/SKILL.md`,
-        content: skill.raw,
-      });
-      for (const extra of skill.extraFiles ?? []) {
-        outputs.push({
-          relativePath: `.agents/skills/${skill.name}/${extra.relativePath}`,
-          content: extra.content,
-        });
-      }
-    }
-    outputs.push({
-      relativePath: "AGENTS.md.snippet",
-      content: renderAgentsMdSnippet(sorted),
-    });
-    return outputs;
+    return [
+      ...renderAgentsSkillsTree(sorted),
+      { relativePath: "AGENTS.md.snippet", content: renderAgentsMdSnippet(sorted) },
+    ];
   }
 }
