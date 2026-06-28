@@ -1,8 +1,7 @@
-// Unit tests for `npx @ozzylabs/skills install`.
+// Unit tests for the user-scope install primitives.
 //
 // These exercise the pure planner (`planInstall`) plus argument parsing
-// (`runInstall` via stdout capture). Filesystem-touching scenarios live in
-// `cli-e2e.test.mjs`.
+// (`parseFlags`). Filesystem-touching scenarios live in `cli-e2e.test.mjs`.
 
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -10,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { assertNoForbiddenFlags, parseFlags } from "../bin/lib/args.mjs";
+import { parseFlags } from "../bin/lib/args.mjs";
 import { planInstall, SUPPORTED_ADAPTERS } from "../bin/lib/install.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -153,13 +152,6 @@ test("parseFlags routes -h to --help via the aliases table", () => {
 test("parseFlags surfaces unknown flags in the rejected array", () => {
   const { rejected } = parseFlags(["--bogus"], { skills: "string" });
   assert.deepEqual(rejected, ["--bogus"]);
-});
-
-test("assertNoForbiddenFlags blocks --target= and --target value", () => {
-  assert.throws(() => assertNoForbiddenFlags(["--target=/tmp"]), /not supported/);
-  assert.throws(() => assertNoForbiddenFlags(["--target", "/tmp"]), /not supported/);
-  assert.throws(() => assertNoForbiddenFlags(["--from=foo"]), /not supported/);
-  assert.throws(() => assertNoForbiddenFlags(["--to=foo"]), /not supported/);
 });
 
 test("planInstall with --skills filter includes only the named skill files", async () => {

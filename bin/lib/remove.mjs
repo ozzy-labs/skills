@@ -15,6 +15,7 @@ import { parseFlags } from "./args.mjs";
 import { didYouMean } from "./detect.mjs";
 import { ADAPTER_LAYOUT, findPackageRoot, SUPPORTED_ADAPTERS } from "./install.mjs";
 import { readDirMarker, writeDirMarker } from "./marker.mjs";
+import { dropPristine } from "./pristine.mjs";
 import { confirm } from "./prompt.mjs";
 
 const SHARED_BASE_ROOT = ".agents/skills";
@@ -180,7 +181,11 @@ export async function runRemove(argv, opts = {}) {
 
   // Execute.
   for (const p of actionable) {
-    for (const d of p.deletions) await rm(d, { recursive: true, force: true });
+    for (const d of p.deletions) {
+      await rm(d, { recursive: true, force: true });
+      // Drop the merge-base snapshot for a fully removed skill dir.
+      await dropPristine(scopeRoot, d);
+    }
     if (p.baseUpdate?.action === "rewrite") {
       await writeDirMarker(p.baseUpdate.dir, {
         bundleVersion: p.baseUpdate.version,
