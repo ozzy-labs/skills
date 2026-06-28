@@ -17,6 +17,7 @@ import { runAdd } from "./lib/add.mjs";
 import { didYouMean } from "./lib/detect.mjs";
 import { runList } from "./lib/list.mjs";
 import { runRemove } from "./lib/remove.mjs";
+import { runUpdate } from "./lib/update.mjs";
 
 const VERBS = ["add", "update", "list", "remove", "fork", "diff"];
 const VERB_ALIASES = { install: "add", uninstall: "remove" };
@@ -26,7 +27,7 @@ const TOP_LEVEL_HELP = `npx @ozzylabs/skills <verb> [options]
 Verbs:
   add        Add skills to a scope. User scope by default; --target <repo> for
              project scope. Alias: install.
-  update     Update installed skills, preserving local edits. (coming — #151)
+  update     Update installed skills, preserving local edits.
   list       Show the catalog and what is installed.
   remove     Uninstall skills (confirmation required). Alias: uninstall.
   fork       Copy a skill to a user-owned name. (coming — #151)
@@ -63,6 +64,9 @@ async function main(argv) {
 
   if (verb === "add") {
     return await runAdd(rest);
+  }
+  if (verb === "update") {
+    return await runUpdate(rest);
   }
   if (verb === "list") {
     return await runList(rest);

@@ -119,7 +119,7 @@ test("e2e: unknown verb suggests a correction", () => {
 });
 
 test("e2e: not-yet-implemented verbs exit non-zero with the #151 pointer", () => {
-  const result = runCli(["update"]);
+  const result = runCli(["fork", "drive", "my-drive"]);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /#151/);
 });
@@ -278,6 +278,61 @@ test("e2e: remove never touches an unmarked (foreign) skill dir", async () => {
     assert.equal(r.status, 0);
     assert.match(r.stdout, /Nothing to remove/);
     assert.ok(existsSync(join(foreign, "SKILL.md")), "foreign dir untouched");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: update refreshes an unedited installed skill", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const r = runCli(["update", "drive"], { home });
+    assert.equal(r.status, 0, `update failed: ${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(out.updated, ["drive"]);
+    assert.deepEqual(out.modified, []);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: update does NOT clobber a locally edited skill (reports modified)", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const skillMd = join(home, ".agents", "skills", "drive", "SKILL.md");
+    writeFileSync(skillMd, "my local edit\n");
+
+    const r = runCli(["update", "drive"], { home });
+    assert.notEqual(r.status, 0, "modified skill makes update exit non-zero");
+    assert.match(r.stderr, /modified locally|--take-theirs|--keep-mine/);
+    assert.equal(readFileSync(skillMd, "utf8"), "my local edit\n", "edit preserved");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: update --take-theirs overwrites a local edit; --keep-mine preserves it", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const skillMd = join(home, ".agents", "skills", "drive", "SKILL.md");
+
+    // keep-mine: edit preserved
+    writeFileSync(skillMd, "mine\n");
+    const keep = runCli(["update", "drive", "--keep-mine"], { home });
+    assert.equal(keep.status, 0, keep.stderr);
+    assert.deepEqual(JSON.parse(keep.stdout).skipped, ["drive"]);
+    assert.equal(readFileSync(skillMd, "utf8"), "mine\n");
+
+    // take-theirs: upstream restored
+    const take = runCli(["update", "drive", "--take-theirs"], { home });
+    assert.equal(take.status, 0, take.stderr);
+    assert.deepEqual(JSON.parse(take.stdout).updated, ["drive"]);
+    assert.notEqual(readFileSync(skillMd, "utf8"), "mine\n");
   } finally {
     await rm(home, { recursive: true, force: true });
   }

@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ADAPTER_LAYOUT } from "./install.mjs";
-import { readDirMarker, withAdapterAdded, writeDirMarker } from "./marker.mjs";
+import { computeDirHash, readDirMarker, withAdapterAdded, writeDirMarker } from "./marker.mjs";
 
 // The cross-tool base root is shared by every adapter; its marker carries the
 // adapter reference count. Other roots (e.g. `.claude/skills`) are adapter-owned.
@@ -61,11 +61,15 @@ export async function findCollisions({ home, adapter, skills }) {
 export async function writeMarkers({ home, adapter, skills, bundleVersion }) {
   for (const { dir, root } of skillDirs(home, adapter, skills)) {
     if (!existsSync(dir)) continue;
+    // originalHash baselines the as-installed content so `update` can detect a
+    // user's local edits. Markers are excluded from the hash, so order vs. write
+    // does not matter.
+    const originalHash = await computeDirHash(dir);
     if (root === SHARED_BASE_ROOT) {
-      const existing = await readDirMarker(dir);
-      await writeDirMarker(dir, withAdapterAdded(existing, adapter, bundleVersion));
+      const merged = withAdapterAdded(await readDirMarker(dir), adapter, bundleVersion);
+      await writeDirMarker(dir, { ...merged, extra: { originalHash } });
     } else {
-      await writeDirMarker(dir, { bundleVersion, adapters: [adapter] });
+      await writeDirMarker(dir, { bundleVersion, adapters: [adapter], extra: { originalHash } });
     }
   }
 }

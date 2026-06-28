@@ -11,8 +11,8 @@ import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseFlags } from "./args.mjs";
+import { readInstalled } from "./installed.mjs";
 import { findPackageRoot } from "./install.mjs";
-import { readDirMarker } from "./marker.mjs";
 
 const HELP = `npx @ozzylabs/skills list [options]
 
@@ -27,39 +27,14 @@ Options:
 const SCHEMA = { target: "string", json: "boolean", help: "boolean" };
 const ALIASES = { h: "help" };
 
-// Roots scanned for installed skills, relative to the scope root. The base is
-// shared across adapters; `.claude/skills` carries claude-code-only skills.
-const SCAN_ROOTS = [".agents/skills", ".claude/skills"];
-
-async function subdirs(dir) {
-  if (!existsSync(dir)) return [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-}
-
-/**
- * Read the installed state under a scope root from provenance markers.
- * @returns {Promise<Map<string, { version: string, adapters: Set<string> }>>}
- */
-async function readInstalled(scopeRoot) {
-  const installed = new Map();
-  for (const root of SCAN_ROOTS) {
-    for (const name of await subdirs(join(scopeRoot, root))) {
-      const marker = await readDirMarker(join(scopeRoot, root, name));
-      if (!marker) continue; // unmarked dir → not ours, skip
-      const entry = installed.get(name) ?? { version: marker.bundleVersion, adapters: new Set() };
-      for (const a of marker.adapters ?? []) entry.adapters.add(a);
-      entry.version = marker.bundleVersion ?? entry.version;
-      installed.set(name, entry);
-    }
-  }
-  return installed;
-}
-
 /** The full skill catalog the package ships (claude-code dist has every public skill). */
 async function readCatalog(packageRoot) {
-  const names = await subdirs(join(packageRoot, "dist", "claude-code", ".claude", "skills"));
-  return names.sort();
+  const dir = join(packageRoot, "dist", "claude-code", ".claude", "skills");
+  if (!existsSync(dir)) return [];
+  return (await readdir(dir, { withFileTypes: true }))
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
 }
 
 /**

@@ -13,9 +13,10 @@
 // `scripts/build.mjs` excludes `*ozzylabs-skills.json` from the shipped payload
 // (`isMarkerFile` is the shared predicate) so a marker can never leak into dist.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 
 export const MARKER_NAME = ".ozzylabs-skills.json";
 export const MARKER_SCHEMA = 1;
@@ -97,6 +98,38 @@ export async function writeMarker(markerPath, fields) {
 /** Write the marker into a skill directory. */
 export function writeDirMarker(dir, fields) {
   return writeMarker(markerPathForDir(dir), fields);
+}
+
+/**
+ * Content hash of a materialized skill directory — every file under `dir`
+ * EXCEPT provenance markers, combined deterministically. Used as the
+ * `originalHash` baseline so `update` can detect a user's local edits (a hash
+ * mismatch means the skill was modified and must not be clobbered).
+ *
+ * @param {string} dir
+ * @returns {Promise<string>} `sha256:<hex>`
+ */
+export async function computeDirHash(dir) {
+  const files = [];
+  async function walk(d) {
+    for (const entry of (await readdir(d, { withFileTypes: true })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      const full = join(d, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (entry.isFile() && !isMarkerFile(entry.name)) files.push(full);
+    }
+  }
+  await walk(dir);
+  files.sort();
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(relative(dir, file).split("\\").join("/"));
+    hash.update("\0");
+    hash.update(await readFile(file));
+    hash.update("\0");
+  }
+  return `sha256:${hash.digest("hex")}`;
 }
 
 /**
