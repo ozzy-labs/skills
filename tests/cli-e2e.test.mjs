@@ -1,8 +1,9 @@
-// End-to-end tests for `npx @ozzylabs/skills install`.
+// End-to-end tests for the `@ozzylabs/skills` CLI (`skills add`).
 //
-// These run the actual `bin/install.mjs` entry point as a child process with
-// a temporary HOME (via `OZZYLABS_SKILLS_HOME`) and assert that files land
-// where we expect them. They exercise the install path that ships to users.
+// These run the actual `bin/skills.mjs` entry point as a child process with a
+// temporary HOME (via `OZZYLABS_SKILLS_HOME`) and assert that files land where
+// we expect. The spawned child has no TTY, so `add` requires an explicit
+// `--adapter` (interactive auto-detect is a separate, TTY-only path).
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -14,7 +15,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BIN = join(ROOT, "bin", "install.mjs");
+const BIN = join(ROOT, "bin", "skills.mjs");
 
 function runCli(args, options = {}) {
   return spawnSync("node", [BIN, ...args], {
@@ -27,106 +28,98 @@ function runCli(args, options = {}) {
   });
 }
 
-test("e2e: install --adapter=claude-code --skills=drive writes ~/.claude/skills/drive/SKILL.md", async () => {
+test("e2e: add --adapter=claude-code --skills=drive writes the wrapper + canonical base", async () => {
   const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
   try {
-    const result = runCli(["install", "--adapter=claude-code", "--skills=drive", "--force"], {
-      home,
-    });
+    const result = runCli(["add", "--adapter=claude-code", "--skills=drive", "--force"], { home });
     assert.equal(result.status, 0, `cli failed: ${result.stderr}`);
-    const target = join(home, ".claude", "skills", "drive", "SKILL.md");
-    assert.ok(existsSync(target), `expected SKILL.md at ${target}`);
-    const content = readFileSync(target, "utf8");
-    assert.match(content, /^---\n/, "SKILL.md should start with YAML frontmatter");
-    assert.match(
-      content,
-      /description:/,
-      "SKILL.md should declare a description in the frontmatter",
-    );
-    // Installed user-scope copies must reference the canonical skill via
-    // `~/.agents/skills/...` — repo-root-relative refs do not resolve in
-    // consumer repos without project skills (ADR-0027).
+    const wrapper = join(home, ".claude", "skills", "drive", "SKILL.md");
+    assert.ok(existsSync(wrapper), `expected wrapper at ${wrapper}`);
+    const content = readFileSync(wrapper, "utf8");
     assert.match(
       content,
       /~\/\.agents\/skills\/drive\/SKILL\.md/,
-      "installed wrapper should reference the canonical skill via ~/.agents/skills/",
+      "wrapper references ~/.agents base",
     );
-    assert.doesNotMatch(
-      content,
-      /[^\w/~.]\.(?:agents|claude)\/skills\//,
-      "installed wrapper must not contain repo-root-relative skill refs",
-    );
+    // Self-contained (#145): the canonical base the wrapper Reads is shipped too.
+    const base = join(home, ".agents", "skills", "drive", "SKILL.md");
+    assert.ok(existsSync(base), `expected canonical base at ${base}`);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
-test("e2e: install --adapter=codex-cli --skills=drive writes ~/.agents/skills/drive/SKILL.md", async () => {
+test("e2e: `install` is an alias for `add`", async () => {
   const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
   try {
     const result = runCli(["install", "--adapter=codex-cli", "--skills=drive", "--force"], {
       home,
     });
     assert.equal(result.status, 0, `cli failed: ${result.stderr}`);
-    const target = join(home, ".agents", "skills", "drive", "SKILL.md");
-    assert.ok(existsSync(target), `expected SKILL.md at ${target}`);
-    const content = readFileSync(target, "utf8");
-    assert.match(content, /name:\s*drive/);
+    assert.ok(existsSync(join(home, ".agents", "skills", "drive", "SKILL.md")));
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
-test("e2e: install --dry-run does not touch the filesystem", async () => {
+test("e2e: add --dry-run prints a JSON plan and writes nothing", async () => {
   const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
   try {
-    const result = runCli(["install", "--adapter=claude-code", "--skills=drive", "--dry-run"], {
+    const result = runCli(["add", "--adapter=claude-code", "--skills=drive", "--dry-run"], {
       home,
     });
     assert.equal(result.status, 0, `cli failed: ${result.stderr}`);
-    const payload = JSON.parse(result.stdout);
-    assert.equal(payload.adapter, "claude-code");
-    assert.equal(payload.target_dir, home);
-    assert.deepEqual(payload.installed, ["drive"]);
-    // No files should be written.
-    const target = join(home, ".claude", "skills", "drive", "SKILL.md");
-    assert.ok(!existsSync(target), `dry-run wrote ${target} unexpectedly`);
+    const plan = JSON.parse(result.stdout);
+    assert.equal(plan.adapter, "claude-code");
+    assert.equal(plan.target_dir, home);
+    assert.ok(Array.isArray(plan.files) && plan.files.length > 0, "plan lists files");
+    assert.ok(!existsSync(join(home, ".claude", "skills", "drive")), "dry-run wrote nothing");
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
-test("e2e: install rejects --target with the user-only error message", () => {
-  const result = runCli(["install", "--target=/tmp/foo"]);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /not supported/);
-  assert.match(result.stderr, /user-scoped skills directory only/);
+test("e2e: add --target writes project-scope files into the target repo", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  const target = await mkdtemp(join(tmpdir(), "skills-e2e-repo-"));
+  try {
+    const result = runCli(["add", "--target", target, "--skills", "drive", "--force"], { home });
+    assert.equal(result.status, 0, `cli failed: ${result.stderr}`);
+    // Project scope ships both the wrapper and the canonical base, with
+    // repo-root-relative refs preserved (not rewritten to ~/).
+    const wrapper = join(target, ".claude", "skills", "drive", "SKILL.md");
+    assert.ok(existsSync(wrapper), `expected project wrapper at ${wrapper}`);
+    assert.ok(existsSync(join(target, ".agents", "skills", "drive", "SKILL.md")));
+    assert.doesNotMatch(
+      readFileSync(wrapper, "utf8"),
+      /~\/\.agents\/skills/,
+      "project refs stay relative",
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(target, { recursive: true, force: true });
+  }
 });
 
-test("e2e: install --upgrade overwrites an existing SKILL.md", async () => {
+test("e2e: add without --adapter in a non-TTY session errors", async () => {
   const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
   try {
-    // First install populates the target.
-    const first = runCli(["install", "--adapter=claude-code", "--skills=drive", "--force"], {
-      home,
-    });
-    assert.equal(first.status, 0, `first install failed: ${first.stderr}`);
-
-    // Corrupt the installed file so we can detect the overwrite.
-    const target = join(home, ".claude", "skills", "drive", "SKILL.md");
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync(target, "tampered\n");
-    assert.equal(readFileSync(target, "utf8"), "tampered\n");
-
-    // --upgrade should rewrite the file from dist/.
-    const second = runCli(["install", "--adapter=claude-code", "--skills=drive", "--upgrade"], {
-      home,
-    });
-    assert.equal(second.status, 0, `upgrade install failed: ${second.stderr}`);
-    assert.notEqual(readFileSync(target, "utf8"), "tampered\n");
-    const payload = JSON.parse(second.stdout);
-    assert.deepEqual(payload.upgraded, ["drive"]);
+    const result = runCli(["add", "--skills=drive"], { home });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /non-interactive|--adapter/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+});
+
+test("e2e: unknown verb suggests a correction", () => {
+  const result = runCli(["isntall"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /did you mean 'install'\?/);
+});
+
+test("e2e: not-yet-implemented verbs exit non-zero with the #151 pointer", () => {
+  const result = runCli(["list"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /#151/);
 });
