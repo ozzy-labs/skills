@@ -134,6 +134,10 @@ async function loadExtraFiles(skillName) {
     const rel = relative(skillDir, file);
     if (rel === "SKILL.md") continue;
     if (/^SKILL\.[a-z0-9-]+\.md$/.test(rel)) continue;
+    // Provenance markers (`.ozzylabs-skills.json`, agent sidecars) are written
+    // by the CLI at install time and must never ship in the dist payload
+    // (ozzy-labs/skills#151). Keep them out of every adapter output.
+    if (/ozzylabs-skills\.json$/.test(rel)) continue;
     const content = await readFile(file, "utf8");
     extras.push({ relativePath: rel, content });
   }
