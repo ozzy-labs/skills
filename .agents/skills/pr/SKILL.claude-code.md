@@ -1,5 +1,4 @@
 ---
-description: 変更を push し、PR を作成・更新する
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---

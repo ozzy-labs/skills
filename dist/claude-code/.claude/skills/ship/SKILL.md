@@ -1,5 +1,5 @@
 ---
-description: lint・コミット・PR 作成を一括実行する
+description: lint・コミット・PR 作成を一括実行する。変更に対して lint → コミット → PR 作成を順に実行する統合パイプライン。
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---

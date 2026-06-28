@@ -22,7 +22,7 @@
 
 import { AdapterBase } from "../lib/adapter-base.mjs";
 import { filterSkillsForAdapter } from "../lib/adapter-gating.mjs";
-import { assertRequiredFields } from "../lib/frontmatter.mjs";
+import { assertRequiredFields, serializeFrontmatter } from "../lib/frontmatter.mjs";
 
 /**
  * @typedef {import("../lib/types.mjs").Skill} Skill
@@ -49,11 +49,17 @@ export class ClaudeCodeAdapter extends AdapterBase {
 
       const companion = skill.claudeCodeCompanion;
       if (companion) {
-        const label = `.agents/skills/${skill.name}/SKILL.claude-code.md`;
-        assertRequiredFields(companion.frontmatter, ["description"], label);
+        // Overlay model: the companion carries ONLY Claude-specific frontmatter
+        // (allowed-tools, disable-model-invocation, argument-hint, …) plus its
+        // body — NOT a duplicated `description`. The canonical `description` is
+        // the single source of truth and is injected here as the first key, so
+        // the two can never drift. Any stray `description` in the overlay is
+        // dropped in favour of the canonical one.
+        const { description: _ignored, ...claudeOnly } = companion.frontmatter;
+        const merged = { description: skill.description, ...claudeOnly };
         outputs.push({
           relativePath: `.claude/skills/${skill.name}/SKILL.md`,
-          content: companion.raw,
+          content: serializeFrontmatter(merged) + companion.body,
         });
       } else {
         outputs.push({

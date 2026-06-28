@@ -1,5 +1,4 @@
 ---
-description: セッション教訓 queue を消化し、skill 改善の教訓を承認制で issue 起票する
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---

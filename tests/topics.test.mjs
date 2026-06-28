@@ -45,12 +45,19 @@ test("topics SKILL.md has valid frontmatter (name + description)", async () => {
   );
 });
 
-test("topics SKILL.claude-code.md has valid frontmatter (description required)", async () => {
+test("topics SKILL.claude-code.md is a Claude-only overlay (no duplicated description)", async () => {
   const raw = await readFile(SKILL_CLAUDE_MD, "utf8");
   const { frontmatter } = parseSkillDocument(raw, ".agents/skills/topics/SKILL.claude-code.md");
+  // Overlay companions carry only Claude-only keys; `description` is injected
+  // from the canonical SKILL.md at build time, so it must NOT be duplicated here.
   assert.ok(
-    frontmatter.description && frontmatter.description.length > 0,
-    "Claude Code companion description must be non-empty",
+    !frontmatter.description,
+    "Claude Code companion must not duplicate description (canonical is the single source)",
+  );
+  assert.equal(
+    frontmatter["disable-model-invocation"],
+    "true",
+    "topics companion must carry its Claude-only frontmatter",
   );
   // Companion must not redeclare `name` (the canonical SKILL.md owns it).
   assert.equal(
