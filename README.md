@@ -10,7 +10,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-15 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, 1 Claude-Code-only skill (`usage-guard`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
+16 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, 2 Claude-Code-only skills (`usage-guard`, `skill-observability`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
 
 | Skill | Description |
 | --- | --- |
@@ -25,11 +25,27 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 | `pr` | Push changes and open or update a PR |
 | `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
 | `ship` | Lint + commit + PR creation in one go |
+| `skill-observability` | **Claude Code only.** Referenced companion that defines the skill-improvement loop's measurement layer: the event contract (`event.schema.json`, the single SSOT) and the fail-open emit substrate (`obs-emit.mjs`). Metadata-only, privacy-first (`additionalProperties:false` rejects payloads; repo ids are hashed). See "Observability" below |
 | `test` | Run build, tests, and type checks |
 | `topics` | Research-driven GitHub topics setup (ozzy-labs scope): validate official constraints (lowercase / hyphen / 50 chars / max 20), measure popularity via `gh api search/repositories` with session-scoped cache, decide broad+narrow / singular-plural pairs, and apply ozzy-labs hardcoded conventions (`claude-code` exception, `*-cli` suffix removal, `multi-agent` canonical form). `--apply` to commit, `--dry-run` for analysis only |
 | `usage-guard` | **Claude Code only.** Monitor the Usage Limit (5-hour / 7-day) via the OAuth usage endpoint and auto pause/resume work at 95% (env-overridable): exceeded → `ScheduleWakeup` until the latest exceeded window resets, then re-enter. Doubles as a pause/resume engine (callers like `drive` Read it at checkpoints) and a standalone `/usage-guard "<continuation>"` form (idempotent continuation assumed). Endpoint → JSONL fallback → fail-open. Optionally pair it with the PreToolUse ceiling hook (see below) |
 
 `usage-guard` also ships a `usage-guard-hook.mjs` extra file: an optional **PreToolUse ceiling hook** that fires on every tool call (including inside subagents) and denies once usage is over threshold — the in-flight complement to drive's default-on usage-guard, which only pauses at resumable-unit boundaries. It reads the same `~/.claude/usage-guard/cache.json` the engine writes (no extra endpoint hits) and fails open when the signal is unreadable. The repo does not ship settings/hooks, so enabling it is a manual opt-in: add a PreToolUse entry to `~/.claude/settings.local.json` whose `command` is the **absolute** path to `usage-guard-hook.mjs` (the path differs between user-scope `~/.claude/skills/usage-guard/...` and dogfood `<repo>/.claude/skills/usage-guard/...` — fill in your own). Full snippet + path-resolution note in the skill's "PreToolUse hook を有効化" section.
+
+### Observability (skill-improvement loop)
+
+`skill-observability` lays the measurement foundation for a data-driven skill-improvement loop (capture → aggregate → reflect). It ships two artifacts as a referenced companion:
+
+- **`event.schema.json`** — the single SSOT for the event contract. Both `obs-emit.mjs` and the test suite consume this exact file, so the event shape has no doc/code drift. Field names follow the OpenTelemetry GenAI semantic-convention *shape* (`skill`≈`gen_ai.agent.name`, `operation`≈`gen_ai.operation.name`) without hard-coupling to the still-experimental spec. `additionalProperties:false` is the mechanical privacy guard: any unknown field (payload, diff, token, path) fails validation and is never written.
+- **`obs-emit.mjs`** — the fail-open append+validate write substrate. It records one validated event per call to `~/.agents/observability/events.jsonl` (HOME-anchored, append-only, OTel-independent). It captures nothing on its own and never throws: a rejected or failed emit warns and exits 0 so observability can never break the skill being observed. Repo identifiers passed via `--repo` are hashed (never stored raw).
+
+```bash
+node obs-emit.mjs --skill=drive  --event=outcome --status=completed
+node obs-emit.mjs --skill=review --event=signal  --name=review.loop_iter --value=2
+node obs-emit.mjs --skill=drive  --event=heartbeat
+```
+
+Built on top of this contract (separate follow-ups, tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): an artifact-derived capture hook (deriving skill invocation + `gh`/`git` merge outcome, the primary path that avoids self-report bias), a `/skill-metrics` aggregator (counts + notable events), and a reflection channel that folds privacy-scrubbed rollups into `lessons-triage` issues (HITL, opt-in).
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 

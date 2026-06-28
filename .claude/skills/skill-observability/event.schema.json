@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ozzy-labs/skills/schemas/observability-event.schema.json",
+  "title": "Skill observability event",
+  "description": "Single SSOT for the skill observability event contract. Both obs-emit.mjs (runtime emit/validate) and the test suite consume this file, so the event shape has exactly one source of truth (no doc/code drift). Field names follow the OpenTelemetry GenAI semantic-convention SHAPE (agent.name->skill, operation.name->operation) without hard-coupling to the still-experimental spec. additionalProperties:false is the mechanical privacy guard: any unknown field (payload, diff, token, file path) fails validation and is never written.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ts", "adapter", "session_id", "skill", "event"],
+  "properties": {
+    "schema_version": {
+      "description": "Event contract version. Bump on any breaking change; consumers gate on it.",
+      "const": 1
+    },
+    "ts": {
+      "description": "Event timestamp (ISO 8601 / RFC 3339).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "adapter": {
+      "description": "Originating agent harness.",
+      "type": "string",
+      "enum": ["claude-code", "codex-cli", "gemini-cli", "copilot"]
+    },
+    "session_id": {
+      "description": "Host session identifier. Opaque id only, never a path.",
+      "type": "string",
+      "minLength": 1
+    },
+    "skill": {
+      "description": "Skill name (gen_ai.agent.name shape). 'unknown' when not derivable.",
+      "type": "string",
+      "minLength": 1
+    },
+    "event": {
+      "description": "Lifecycle event kind.",
+      "type": "string",
+      "enum": ["start", "phase", "outcome", "signal", "heartbeat"]
+    },
+    "operation": {
+      "description": "Optional operation label (gen_ai.operation.name shape), e.g. invoke_agent / plan.",
+      "type": "string"
+    },
+    "phase": {
+      "description": "Optional phase label, e.g. implement / ship / review.",
+      "type": "string"
+    },
+    "status": {
+      "description": "Outcome status. Required when event=outcome.",
+      "type": "string",
+      "enum": ["completed", "aborted", "fallback"]
+    },
+    "name": {
+      "description": "Signal name (fixed-vocabulary), e.g. review.loop_iter / review.deep_to_quick_fallback / usage_guard.fail_open / hitl.rejected / loop.hit_cap. Required when event=signal.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Optional numeric counter for a signal.",
+      "type": "number"
+    },
+    "reason": {
+      "description": "Optional short reason token (fixed-vocabulary). Must not carry free-form payload or identifying detail.",
+      "type": "string"
+    },
+    "run_id": {
+      "description": "Optional correlation id grouping events of one skill run.",
+      "type": "string"
+    },
+    "repo_hash": {
+      "description": "Optional hashed repo identifier (sha256 prefix). Never the raw repo name or path (privacy).",
+      "type": "string",
+      "pattern": "^[a-f0-9]{12}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event": { "const": "outcome" } } },
+      "then": { "required": ["status"] }
+    },
+    {
+      "if": { "properties": { "event": { "const": "signal" } } },
+      "then": { "required": ["name"] }
+    }
+  ]
+}
