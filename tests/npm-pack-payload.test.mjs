@@ -34,10 +34,10 @@ test("npm pack payload exposes the published surface", () => {
   assert.ok(pkg.files.length > 0, "pack output must include at least one file");
 });
 
-test("npm pack includes README.md, LICENSE, package.json, and bin/install.mjs", () => {
+test("npm pack includes README.md, LICENSE, package.json, and bin/skills.mjs", () => {
   const [pkg] = npmPackJson();
   const paths = pkg.files.map((f) => f.path);
-  for (const required of ["README.md", "LICENSE", "package.json", "bin/install.mjs"]) {
+  for (const required of ["README.md", "LICENSE", "package.json", "bin/skills.mjs"]) {
     assert.ok(
       paths.includes(required),
       `expected pack to include ${required}; got ${paths.join(", ")}`,

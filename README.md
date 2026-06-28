@@ -6,11 +6,11 @@ Canonical OzzyLabs agent skill bundle for Claude Code, GitHub Copilot, Gemini CL
 
 `.agents/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces per-agent outputs under `dist/{adapter-id}/` (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`). End users install these skills as **user skills** (e.g. `~/.claude/skills/`) via the CLI installer shipped in the npm package.
 
-This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT. Distribution is **user skills by default** (see handbook ADR-0027, in preparation): consumers install via `npx @ozzylabs/skills install`, and project-scope skills (`.claude/skills/` under each consumer repo) are no longer pushed automatically. The supported exception is **Claude mobile / web (cloud) sessions**, which run "repo only" and never see `~/.claude/skills/`: for repos developed that way, `npx @ozzylabs/skills sync-project --target <repo>` opts in to a relative-ref project-scope payload (`dist/claude-code-project/`) — see [Project-scope sync](#project-scope-sync-for-claude-mobile--web-cloud) below. Project-scope skills otherwise remain in use only inside the `skills` / `commons` repos themselves for dogfooding, where the build pipeline emits them from the SSOT.
+This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT. Distribution is **user skills by default** (see handbook ADR-0027, in preparation): consumers install via `npx @ozzylabs/skills install`, and project-scope skills (`.claude/skills/` under each consumer repo) are no longer pushed automatically. The supported exception is **Claude mobile / web (cloud) sessions**, which run "repo only" and never see `~/.claude/skills/`: for repos developed that way, `npx @ozzylabs/skills add --target <repo>` opts in to a relative-ref project-scope payload (`dist/claude-code-project/`) — see [the CLI section](#cli) below. Project-scope skills otherwise remain in use only inside the `skills` / `commons` repos themselves for dogfooding, where the build pipeline emits them from the SSOT.
 
 ## Skills in v0.x
 
-15 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, 1 Claude-Code-only skill (`usage-guard`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. Only the 10 original generic skills are subject to `npx @ozzylabs/skills migrate` when removing the legacy project-scoped layout (`lessons-triage` and `usage-guard` were never distributed project-scoped).
+15 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, 1 Claude-Code-only skill (`usage-guard`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
 
 | Skill | Description |
 | --- | --- |
@@ -33,64 +33,28 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 
-## CLI installer (user-scoped)
+## CLI
 
-The `@ozzylabs/skills` package ships a CLI that installs the canonical skill bundle into the user-scoped skills directory (always under `$HOME` — there is intentionally no project-scoped target):
+The `@ozzylabs/skills` package ships a CLI. Scope is chosen by `--target`: absent → **user scope** (`$HOME`), present → **project scope** (a consumer repo, committed). The verb is `add` (`install` is accepted as an alias).
 
 ```bash
-# Install every skill into ~/.claude/skills/ (Claude Code, default adapter)
-npx @ozzylabs/skills install
+# User scope — add every skill for the agent CLIs detected on this machine
+npx @ozzylabs/skills add
 
-# Install a subset into ~/.agents/skills/ (Codex CLI)
-npx @ozzylabs/skills install --adapter=codex-cli --skills=drive,review
+# User scope — pick adapters explicitly (required in non-interactive / CI runs)
+npx @ozzylabs/skills add --adapter=codex-cli --skills=drive,review
 
 # Dry-run: print the JSON plan and do nothing
-npx @ozzylabs/skills install --skills=drive --dry-run
+npx @ozzylabs/skills add --adapter=claude-code --skills=drive --dry-run
 
-# Overwrite skills that are already installed
-npx @ozzylabs/skills install --upgrade
-
-# Skip the interactive overwrite prompt (e.g. CI)
-npx @ozzylabs/skills install --force
+# Project scope — write into a consumer repo (review the diff and commit it).
+# Reaches Claude mobile / web (cloud) sessions that only see committed files.
+npx @ozzylabs/skills add --target=./my-repo
 ```
 
-Supported adapters: `claude-code` (default), `codex-cli`, `gemini-cli`, `copilot`. The output path mirrors what the build pipeline writes under `dist/{adapter-id}/`, transplanted onto `$HOME`. The `install` subcommand has no project-scoped target — `~/.claude/skills/` is the only target it writes to. To deliver skills at **project scope** (the Claude mobile / web cloud case), use the separate `sync-project` subcommand described next.
+Supported adapters: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`. On an **interactive** run `--adapter` defaults to the CLIs detected under `$HOME`; on a **non-interactive** run (CI, pipe) `--adapter` is required. The Claude Code payload is self-contained (ships the `.claude/skills/` wrappers **and** the canonical `.agents/skills/` files they Read); Codex / Gemini / Copilot share the canonical `.agents/skills/` tree.
 
-### Project-scope sync for Claude mobile / web (cloud)
-
-Claude mobile / web (cloud) sessions run "repo only": they discover skills from a consumer repo's committed `.claude/skills/` but never from `~/.claude/skills/`, so `install` (user scope) does not reach them. The per-adapter `dist/{adapter-id}/` payloads also can't be committed as-is — their skill refs are rewritten to `~/.agents/skills/…`, which resolves against an empty `$HOME` in the cloud VM.
-
-`sync-project` is the opt-in project-scope path. It copies `dist/claude-code-project/` — where refs stay **repo-root-relative** and the canonical `.agents/skills/<name>/SKILL.md` files the Claude Code wrappers `Read` are shipped alongside the `.claude/skills/` wrappers (plus `.claude/agents/`) — into a target repo:
-
-```bash
-# Sync every skill into ./my-repo (writes .claude/skills/, .agents/skills/, .claude/agents/)
-npx @ozzylabs/skills sync-project --target=./my-repo
-
-# Sync just the /drive workflow set (drive depends on the others — keep them together)
-npx @ozzylabs/skills sync-project --target=./my-repo \
-  --skills=drive,implement,ship,review,commit,pr,lint,test,commit-conventions,lint-rules
-
-# Preview the plan as JSON without writing
-npx @ozzylabs/skills sync-project --target=./my-repo --dry-run
-```
-
-`--target` is required; there is no implicit default. The command writes files only — review the diff and commit them in the target repo so the cloud session picks them up. Use this only for repos you actually develop via the Claude mobile / web app; everywhere else, user-scope `install` remains the norm.
-
-### Migrating off the legacy project-scoped layout
-
-For repos that previously consumed the generic skills via the legacy Renovate / push-mode sync flow, the migrate subcommand removes the now-redundant project-scoped copies:
-
-```bash
-# Preview the cleanup plan
-npx @ozzylabs/skills migrate --dry-run
-
-# Apply the cleanup (removes the 10 generic skills under .claude/skills/ and
-# .agents/skills/, and strips skills_adapters / skills_commit from
-# .commons/sync.yaml). Pass --keep-sync-yaml to leave the YAML untouched.
-npx @ozzylabs/skills migrate --force
-```
-
-Repo-local skills (anything outside the documented generic 10) are left untouched.
+> **Rolling out (ozzy-labs/skills#151):** the CLI is being rebuilt to the CRUD-symmetric verb set `add` / `update` / `list` / `remove` (+ `fork` / `diff`) with per-item provenance markers and editable-skill protection. `add` (and its `install` alias) is available now; `update` / `list` / `remove` / `fork` / `diff` land in follow-up PRs. The legacy `sync-project` and `migrate` subcommands have been removed — use `add --target <repo>` for project scope.
 
 ## Consumer setup
 
@@ -146,7 +110,7 @@ If you would rather call the CLI directly (e.g. to share a custom install step a
 
 Consumers that previously consumed skills as **project skills** via the legacy push-mode sync flow (`dist/{adapter-id}/` copied into `.claude/skills/` etc.) need to migrate to user skills only. The migration was completed in [issue #100](https://github.com/ozzy-labs/skills/issues/100) by delivering a one-off `chore/migrate-to-user-skills` PR to each consumer. For new consumers, the manual steps are:
 
-1. Remove `.claude/skills/`, `.agents/skills/`, and equivalent in-repo skill mirrors (or run `npx @ozzylabs/skills migrate`).
+1. Remove `.claude/skills/`, `.agents/skills/`, and equivalent in-repo skill mirrors (manually; the `migrate` subcommand has been removed — `skills remove` will cover this once available, see [#151](https://github.com/ozzy-labs/skills/issues/151)).
 2. Drop `skills_commit` / `skills_adapters` from `.commons/sync.yaml`.
 3. Have each contributor run `npx @ozzylabs/skills install` once on their machine.
 
