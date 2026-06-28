@@ -4,7 +4,24 @@ import {
   assertRequiredFields,
   parseSkillDocument,
   serializeFrontmatter,
+  stripBuildControlFrontmatter,
 } from "../scripts/lib/frontmatter.mjs";
+
+test("stripBuildControlFrontmatter removes `adapters` but keeps everything else", () => {
+  const input =
+    "---\nname: foo\ndescription: bar\nadapters: claude-code\ndisable-model-invocation: true\n---\nbody\n";
+  const out = stripBuildControlFrontmatter(input, "foo/SKILL.md");
+  assert.doesNotMatch(out, /^adapters:/m);
+  assert.match(out, /name: foo/);
+  assert.match(out, /description: bar/);
+  assert.match(out, /disable-model-invocation: true/);
+  assert.match(out, /\nbody\n$/);
+});
+
+test("stripBuildControlFrontmatter returns input verbatim when nothing to strip", () => {
+  const input = "---\nname: foo\ndescription: bar\n---\nbody\n";
+  assert.equal(stripBuildControlFrontmatter(input, "foo/SKILL.md"), input);
+});
 
 test("parseSkillDocument extracts frontmatter and body", () => {
   const input = "---\nname: foo\ndescription: bar\n---\n# heading\n\nbody\n";

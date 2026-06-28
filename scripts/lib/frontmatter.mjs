@@ -47,6 +47,31 @@ export function serializeFrontmatter(frontmatter) {
   return lines.join("\n");
 }
 
+// Frontmatter keys that control the build pipeline and must NOT leak into the
+// SKILL.md files shipped to consumers (they are build-time metadata only).
+const BUILD_CONTROL_KEYS = new Set(["adapters"]);
+
+/**
+ * Remove build-control frontmatter keys (e.g. `adapters`) from a raw SKILL.md
+ * before it is emitted to a consumer. Returns the input verbatim when there is
+ * nothing to strip, so skills without such keys stay byte-identical.
+ *
+ * @param {string} raw        Raw SKILL.md text.
+ * @param {string} fileLabel  Path used in error messages.
+ * @returns {string}
+ */
+export function stripBuildControlFrontmatter(raw, fileLabel) {
+  const { frontmatter, body } = parseSkillDocument(raw, fileLabel);
+  if (!Object.keys(frontmatter).some((k) => BUILD_CONTROL_KEYS.has(k))) {
+    return raw;
+  }
+  const cleaned = {};
+  for (const [key, value] of Object.entries(frontmatter)) {
+    if (!BUILD_CONTROL_KEYS.has(key)) cleaned[key] = value;
+  }
+  return serializeFrontmatter(cleaned) + body;
+}
+
 /**
  * Validate required frontmatter fields.
  *

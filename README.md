@@ -161,21 +161,27 @@ Consumers that previously consumed skills as **project skills** via the legacy p
 | `gemini-cli` | `dist/gemini-cli/.agents/skills/{name}/SKILL.md` + `.gemini/settings.json` + `AGENTS.md.snippet` | canonical `SKILL.md` |
 | `copilot` | `dist/copilot/.agents/skills/{name}/SKILL.md` + `copilot-instructions.md.snippet` | canonical `SKILL.md` |
 
-### Claude Code companion file
+### Claude Code companion file (overlay)
 
-A skill may ship `.agents/skills/{name}/SKILL.claude-code.md` alongside the canonical `SKILL.md`. The Claude Code adapter emits the companion verbatim when present, so each skill can carry a Claude-Code-specific wrapper (next-action `AskUserQuestion` menus, `argument-hint`, `disable-model-invocation`, `allowed-tools`, etc.) without polluting the canonical `SKILL.md` other adapters consume.
+A skill may ship `.agents/skills/{name}/SKILL.claude-code.md` alongside the canonical `SKILL.md`. It is an **overlay**: it carries only Claude-Code-specific frontmatter plus a body (next-action `AskUserQuestion` menus, argument parsing, etc.). At build time the Claude Code adapter injects the canonical `description` as the first frontmatter key, so the two can never drift — the companion **must not** duplicate `description`.
 
 Companion frontmatter contract:
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `description` | yes | May be a Claude-Code-tailored shortening of canonical `description` |
+| `description` | — | Must be **absent**; injected from the canonical `SKILL.md` |
 | `disable-model-invocation` | optional | Boolean — opt out of automatic invocation |
 | `allowed-tools` | optional | Comma-separated tool list |
 | `argument-hint` | optional | Display hint for `/skill-name <hint>` |
 | `user-invocable` | optional | `false` for reference-only skills |
 
 `name` is derived from the directory and must not appear in companion frontmatter.
+
+### Adapter-specific sidecars
+
+Any non-`SKILL.*` file under a skill directory is copied verbatim into each adapter payload that ships the skill (e.g. `review/perspectives/<axis>.md`). This is also the extension point for adapter-native config: a Codex skill can carry `agents/openai.yaml` (approval policy / implicit-invocation control) and it rides along to `.agents/skills/{name}/agents/openai.yaml`, which Codex reads and the other tools ignore. No skill in this repo uses one yet.
+
+Build-control frontmatter (`adapters`) is stripped from every emitted `SKILL.md` — it never reaches consumer payloads.
 
 ### Adapter gating
 

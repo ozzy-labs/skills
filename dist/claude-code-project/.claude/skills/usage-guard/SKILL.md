@@ -1,7 +1,6 @@
 ---
 name: usage-guard
 description: Claude Code の Usage Limit（5 時間 = Current / 週次 = Weekly）を監視し、95% 超過で作業を一時停止、リセットで枠が回復したら自動再開する pause/resume エンジン。drive 等の caller が checkpoint で Read するエンジン形態と、`/usage-guard "<継続コマンド>"` で任意作業を guard する単体形態を同梱。Claude 専用（OAuth 使用率エンドポイント + ScheduleWakeup 依存）。
-adapters: claude-code
 user-invocable: true
 argument-hint: "<継続コマンド>（空欄で status 確認のみ）"
 disable-model-invocation: true
