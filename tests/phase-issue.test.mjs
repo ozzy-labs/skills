@@ -58,7 +58,9 @@ test("phase-issue canonical SKILL.md has required frontmatter", async () => {
 
 test("phase-issue companion SKILL.claude-code.md has required frontmatter", async () => {
   const { frontmatter } = await loadCompanion();
-  assertRequiredFields(frontmatter, ["description"], "phase-issue SKILL.claude-code.md");
+  // Overlay companions carry only Claude-only keys; `description` is injected
+  // from the canonical SKILL.md at build time, so it must NOT be duplicated here.
+  assert.ok(!frontmatter.description, "companion must not duplicate canonical description");
   // Companion frontmatter must declare AskUserQuestion in allowed-tools so
   // the interactive flow can run.
   assert.match(

@@ -1,5 +1,4 @@
 ---
-description: Issue または指示をもとに、ブランチ作成・実装を行う
 argument-hint: <#issue-number | instruction>
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion

@@ -1,5 +1,5 @@
 ---
-description: Phase-N tracking issue を生成する。引数で渡された項目はそのまま使い、不足分は AskUserQuestion で対話的に補う。`--draft` で stdout 出力、それ以外は `gh issue create` で起票する。
+description: Phase-N tracking issue を生成する。cross-session handoff context、決定事項表、PR ごとのタスク、DoD、Phase N+1 outlook を含む構造化された issue body を組み立てて gh issue create で起票する。引数で全項目を渡す非対話モードと、不足分を補う対話モード（Claude Code companion）に対応する。
 argument-hint: <phase-number> "<title>" [--description ...] [--refs ...] [--donts ...] [--decisions-file ...] [--tasks-file ...] [--dod ...] [--outlook ...] [--related ...] [--label ...] [--repo ...] [--draft]
 disable-model-invocation: true
 allowed-tools: Bash, Read, Write, AskUserQuestion

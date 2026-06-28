@@ -1,5 +1,4 @@
 ---
-description: lint・コミット・PR 作成を一括実行する
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---

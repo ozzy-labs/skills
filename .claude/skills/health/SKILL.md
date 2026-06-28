@@ -1,5 +1,5 @@
 ---
-description: リポジトリ改修中に意図せず残る状態と skill catalog 整合性を 16 領域に渡って一発確認し、ステータス表で俯瞰しつつ固定語彙の推奨アクションを inline 付与して報告する。`--deep` 指定時は `要確認` 項目を追加調査してラベルを格上げする。検査と提示のみで実行はしない。Routine 互換。
+description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）と skill catalog 整合性を一発で確認し、16 領域のステータス表で俯瞰しつつ各項目に固定語彙の推奨アクションを inline で付与して報告する。`--deep` 指定時は `要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする。検査と提示のみで、削除・close 等の実行は行わない。
 argument-hint: "[--deep]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep

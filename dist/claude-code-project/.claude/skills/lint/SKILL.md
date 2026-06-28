@@ -1,5 +1,5 @@
 ---
-description: 全リンターを自動修正付きで実行し、結果を報告する
+description: 全リンターを自動修正付きで実行し、結果を報告する。コード品質チェック、フォーマット、型チェック、セキュリティスキャンを含む。
 disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, AskUserQuestion
 ---

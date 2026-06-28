@@ -42,7 +42,7 @@ async function loadCanonicalSkills() {
     const label = `.agents/skills/${name}/SKILL.md`;
     const { frontmatter, body } = parseSkillDocument(raw, label);
     assertRequiredFields(frontmatter, ["name", "description"], label);
-    const claudeCodeCompanion = await loadCompanion(name, "claude-code", ["description"]);
+    const claudeCodeCompanion = await loadCompanion(name, "claude-code", []);
     skills.push({
       name,
       description: frontmatter.description,
@@ -138,10 +138,20 @@ test("Claude Code adapter prefers SKILL.claude-code.md when present", async () =
   const out = await new ClaudeCodeAdapter().generate(skills);
   for (const skill of withCompanion) {
     const file = out.find((o) => o.relativePath === `.claude/skills/${skill.name}/SKILL.md`);
-    assert.equal(
-      file.content,
-      skill.claudeCodeCompanion.raw,
-      `${skill.name}: adapter must emit companion content verbatim`,
+    // Overlay model: the wrapper carries the CANONICAL description (single
+    // source) injected over the companion's Claude-specific frontmatter, and
+    // preserves the companion body verbatim.
+    assert.ok(
+      file.content.includes(`description: ${skill.description}`),
+      `${skill.name}: wrapper must carry the canonical description`,
+    );
+    assert.ok(
+      file.content.endsWith(skill.claudeCodeCompanion.body),
+      `${skill.name}: wrapper must preserve the companion body`,
+    );
+    assert.ok(
+      !skill.claudeCodeCompanion.frontmatter.description,
+      `${skill.name}: companion overlay must NOT duplicate description`,
     );
   }
 });

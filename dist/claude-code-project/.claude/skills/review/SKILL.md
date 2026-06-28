@@ -1,5 +1,5 @@
 ---
-description: コード変更や PR を 11 観点でレビューし、JSON 構造化出力 + 人間可読レポートで報告する。quick / deep モード対応。
+description: コード変更や PR を 11 観点（perspectives）でレビューし、JSON 構造化出力 + 人間可読レポートで報告する。quick / deep モードを切替可能。PR 番号またはワーキングツリー差分を入力に取る。
 argument-hint: <#PR-number | (blank for working tree changes)> [--axes=<axis,...>] [--deep]
 disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, AskUserQuestion, Workflow
