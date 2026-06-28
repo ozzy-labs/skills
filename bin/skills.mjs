@@ -15,6 +15,8 @@
 
 import { runAdd } from "./lib/add.mjs";
 import { didYouMean } from "./lib/detect.mjs";
+import { runDiff } from "./lib/diff.mjs";
+import { runFork } from "./lib/fork.mjs";
 import { runList } from "./lib/list.mjs";
 import { runRemove } from "./lib/remove.mjs";
 import { runUpdate } from "./lib/update.mjs";
@@ -30,26 +32,11 @@ Verbs:
   update     Update installed skills, preserving local edits.
   list       Show the catalog and what is installed.
   remove     Uninstall skills (confirmation required). Alias: uninstall.
-  fork       Copy a skill to a user-owned name. (coming — #151)
-  diff       Show a skill's diff against upstream. (coming — #151)
+  fork       Copy a skill to a user-owned name.
+  diff       Show a skill's diff against upstream.
 
 Run 'npx @ozzylabs/skills <verb> --help' for verb-specific options.
 `;
-
-/**
- * Placeholder for verbs whose implementation lands in a later #151 PR. Exits
- * non-zero so callers/scripts don't silently treat a no-op as success.
- *
- * @param {string} verb
- * @returns {number}
- */
-function notYetImplemented(verb) {
-  process.stderr.write(
-    `'${verb}' is not implemented yet — tracked in ozzy-labs/skills#151. ` +
-      `For now use 'add' (alias: install).\n`,
-  );
-  return 1;
-}
 
 async function main(argv) {
   const raw = argv[0];
@@ -74,8 +61,11 @@ async function main(argv) {
   if (verb === "remove") {
     return await runRemove(rest);
   }
-  if (VERBS.includes(verb)) {
-    return notYetImplemented(verb);
+  if (verb === "fork") {
+    return await runFork(rest);
+  }
+  if (verb === "diff") {
+    return await runDiff(rest);
   }
 
   process.stderr.write(
