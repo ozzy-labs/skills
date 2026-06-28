@@ -11,14 +11,14 @@
 
 ## プロジェクト概要
 
-`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`.agents/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、npm package + CLI installer（`npx @ozzylabs/skills install`）で end user のマシンに **user skills** として install する（例: `~/.claude/skills/`）。consumer リポ配下への project skills 自動配信は廃止し、例外として Claude mobile / web (cloud) で開発する repo のみ `sync-project` subcommand で project-scope を opt-in 配信する。
+`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`.agents/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、npm package + CLI installer（`npx @ozzylabs/skills add`）で end user のマシンに **user skills** として install する（例: `~/.claude/skills/`）。consumer リポ配下への project skills 自動配信は廃止し、例外として Claude mobile / web (cloud) で開発する repo のみ `add --target` で project-scope を opt-in 配信する。
 
 ## Tech Stack
 
 - Runtime: Node.js (ESM)
 - Package manager: pnpm
 - Version management: mise (`.mise.toml`)
-- Distribution: npm package + CLI installer。既定は **user-scope**（`npx @ozzylabs/skills install`、[handbook ADR-0027](https://github.com/ozzy-labs/handbook/blob/main/adr/0027-skill-distribution-user-only.md)）。Claude mobile / web (cloud) 用に `sync-project` で project-scope を opt-in 配信する経路を持つ。旧 push 型 sync フローおよび Renovate preset は廃止
+- Distribution: npm package + CLI。既定は **user-scope**（`npx @ozzylabs/skills add`、[handbook ADR-0027](https://github.com/ozzy-labs/handbook/blob/main/adr/0027-skill-distribution-user-only.md)）。Claude mobile / web (cloud) 用に `add --target` で project-scope を opt-in 配信する経路を持つ。旧 push 型 sync フローおよび Renovate preset は廃止
 
 ## 主要コマンド
 
@@ -31,19 +31,23 @@ pnpm run lint:all          # Biome + markdownlint + yamllint + gitleaks
 
 ## CLI Installer (user scope)
 
-`npx @ozzylabs/skills install` で canonical skill バンドルを user-scope（`$HOME` 配下）に install できる。`migrate` subcommand は旧 project-scope レイアウト（汎用 10 件の `.claude/skills/` / `.agents/skills/` と `.commons/sync.yaml` の `skills_adapters` / `skills_commit`）を片付ける:
+CLI は CRUD 対称の verb（`add` / `update` / `list` / `remove` ＋ `fork` / `diff`、`install`/`uninstall` は alias）。**scope は `--target` で決定**（無し=user / 指定=project repo）。installed skill は editable で、CLI は per-item 来歴マーカー（`.ozzylabs-skills.json`）で管理対象を追跡する（共有 `.agents/skills/<name>` base は参照カウント）:
 
 ```bash
-npx @ozzylabs/skills install --adapter=claude-code --skills=drive,review
-npx @ozzylabs/skills install --adapter=codex-cli --upgrade
-npx @ozzylabs/skills migrate --dry-run
+npx @ozzylabs/skills add                                  # 対話=検出 CLI へ / 非対話=--adapter 必須
+npx @ozzylabs/skills add --adapter=codex-cli --skills=drive,review
+npx @ozzylabs/skills list --json
+npx @ozzylabs/skills update --prune                       # 編集は保護（--take-theirs/--keep-mine）
+npx @ozzylabs/skills remove --skills=topics --yes
 ```
 
-`sync-project` subcommand は project-scope への opt-in 配信。Claude mobile / web (cloud) は "repo only" 動作で `~/.claude/skills/` を参照できないため、対象 repo へ相対 ref を保った `dist/claude-code-project/`（`.claude/skills/` + canonical `.agents/skills/` + `.claude/agents/`）をコピーする:
+project-scope（Claude mobile / web cloud 用）は `--target` で対象 repo に相対 ref 保持の payload（`.claude/skills/` + canonical `.agents/skills/` + `.claude/agents/`）をコピーする（commit する）:
 
 ```bash
-npx @ozzylabs/skills sync-project --target=./my-repo --skills=drive,implement,ship,review,commit,pr,lint,test,commit-conventions,lint-rules
+npx @ozzylabs/skills add --target=./my-repo --skills=drive,implement,ship,review,commit,pr,lint,test,commit-conventions,lint-rules
 ```
+
+旧 `sync-project` / `migrate` subcommand は撤去済み（[#151](https://github.com/ozzy-labs/skills/issues/151)）。
 
 詳細は `README.md` の「CLI installer (user-scoped)」セクションを参照。
 
@@ -62,12 +66,12 @@ npx @ozzylabs/skills sync-project --target=./my-repo --skills=drive,implement,sh
 - `src/agents/{name}.md` — Claude Code 専用 agent（[ADR-0026](https://github.com/ozzy-labs/handbook/blob/main/adr/0026-agent-distribution-via-skills-sync.md)）。`dist/claude-code/.claude/agents/{name}.md` のみに出力される
 - `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）。これが npm payload の正準ペイロード
 - `.agents/skills/{name}/SKILL.md` / `.claude/skills/{name}/SKILL.md` — skills repo 自身が dogfood するための in-repo mirror（npm payload には含めない。`package.json#files` で除外）
-- `dist/sync/replace-snippet.sh` — `npx @ozzylabs/skills migrate` / 内部 sync helper 向けマーカー間置換ヘルパー（マーカー欠落時は append でフォールバック）
+- `dist/sync/replace-snippet.sh` — 内部 sync helper 向けマーカー間置換ヘルパー（マーカー欠落時は append でフォールバック）
 - `scripts/build.mjs` — ビルドオーケストレータ
 - `scripts/adapters/{adapter-id}.mjs` — agent 別 adapter（純粋関数、AdapterBase 継承）
 - `scripts/sync/replace-snippet.sh` — `dist/sync/` にコピーされる sync ヘルパーの SSOT
 - `scripts/lib/` — 共通 lib（frontmatter, snippet markers, AdapterBase）
-- `bin/install.mjs` + `bin/lib/` — CLI installer / migrate サブコマンド本体（npm publish payload に含まれる）
+- `bin/skills.mjs` + `bin/lib/` — CLI 本体（add/update/list/remove/fork/diff）（npm publish payload に含まれる）
 - `action.yaml` — composite GitHub Action `ozzy-labs/skills@v1` (CI integration)
 - `.commons/sync.yaml` — このリポ自身が `commons` consumer であるためのメタデータ
 
