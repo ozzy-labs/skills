@@ -296,6 +296,19 @@ async function writeAdapterOutputs(skills, agents) {
       await rm(adapterRoot, { recursive: true, force: true });
     }
     const outputs = await adapter.generate(skills, { agents });
+    if (id === ClaudeCodeAdapter.id) {
+      // Self-containment (issue: dangling user-scope refs). The Claude Code
+      // wrappers Read `.agents/skills/<name>/SKILL.md` (the canonical body), but
+      // historically only the codex-cli payload shipped `.agents/skills/`. A
+      // standalone `install --adapter=claude-code` therefore left those refs
+      // dangling. Ship the canonical `.agents/skills/` files inside the
+      // claude-code payload too; the user-scope rewrite below turns both the
+      // wrapper ref and the shipped file into matching `~/.agents/skills/…`.
+      const baseOutputs = (await new CodexCliAdapter().generate(skills)).filter((out) =>
+        out.relativePath.startsWith(".agents/skills/"),
+      );
+      outputs.push(...baseOutputs);
+    }
     for (const out of outputs) {
       const dest = join(adapterRoot, out.relativePath);
       await mkdir(dirname(dest), { recursive: true });

@@ -104,11 +104,13 @@ This drops the canonical skills into your user-scope skill directory (e.g. `~/.c
 
 ### Adapter opt-in
 
-By default the installer writes the Claude Code adapter output. Pass `--adapter` (repeatable) to opt into additional agents:
+By default the installer writes the Claude Code adapter output. Pass `--adapter` a comma-separated list to install several agents at once:
 
 ```bash
-npx @ozzylabs/skills install --adapter claude-code --adapter codex-cli
+npx @ozzylabs/skills install --adapter=claude-code,codex-cli
 ```
+
+The Claude Code payload is self-contained: it ships the `.claude/skills/` wrappers **and** the canonical `.agents/skills/` files those wrappers Read, so a standalone `--adapter=claude-code` install resolves every reference without also installing `codex-cli`.
 
 | Adapter id | User-scope install target |
 | --- | --- |
