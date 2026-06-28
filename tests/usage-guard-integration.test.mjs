@@ -2,7 +2,7 @@
 //
 // Unlike the unit tests (tests/usage-check.test.mjs, tests/usage-guard-hook.test.mjs)
 // which exercise the exported pure/injectable functions in-process, THIS file
-// spawns the REAL `src/skills/usage-guard/*.mjs` scripts via `node:child_process`
+// spawns the REAL `.agents/skills/usage-guard/*.mjs` scripts via `node:child_process`
 // and asserts on their actual exit code + stdout/stderr. It is the only test
 // that proves the end-to-end CLI contract (stdin payload → exit code → message).
 //
@@ -28,7 +28,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = join(HERE, "..", "src", "skills", "usage-guard");
+const SRC = join(HERE, "..", ".agents", "skills", "usage-guard");
 const HOOK = join(SRC, "usage-guard-hook.mjs");
 const CHECK = join(SRC, "usage-check.mjs");
 

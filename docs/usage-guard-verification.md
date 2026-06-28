@@ -10,7 +10,7 @@ in-process unit tests `tests/usage-check.test.mjs` and
 ## A. Automated integration test (CI)
 
 `tests/usage-guard-integration.test.mjs` spawns the REAL
-`src/skills/usage-guard/{usage-check,usage-guard-hook}.mjs` as child processes
+`.agents/skills/usage-guard/{usage-check,usage-guard-hook}.mjs` as child processes
 and asserts on the actual exit code + stdout/stderr. It is fully hermetic: each
 spawn runs with `HOME=<tmpHome>` (a `fs.mkdtemp` dir under `os.tmpdir()`), so it
 never touches the real `~/.claude`, and it seeds
@@ -144,7 +144,7 @@ Steps:
 > usage-guard is **on by default** in `drive` (Claude Code only; opt out with
 > `--no-usage-guard`). The legacy `--usage-guard` flag is accepted as a
 > deprecated no-op alias. See the `drive` row in the repo `README.md` and
-> `src/skills/drive/SKILL.md` (§オプション).
+> `.agents/skills/drive/SKILL.md` (§オプション).
 
 1. Shell: `node scripts/usage-guard-smoke.mjs seed-over 75`.
 2. Claude: `/drive "<a trivial idempotent task>"` — usage-guard runs by default,

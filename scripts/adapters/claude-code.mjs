@@ -6,7 +6,7 @@
 // `user-invocable`).
 //
 // Each canonical skill may ship an optional companion file at
-// `src/skills/{name}/SKILL.claude-code.md`. When present, the adapter emits
+// `.agents/skills/{name}/SKILL.claude-code.md`. When present, the adapter emits
 // the companion verbatim so the skill can carry a Claude-Code-specific
 // wrapper (next-action AskUserQuestion menus, argument parsing, etc.)
 // without polluting the canonical SKILL.md other adapters consume. When
@@ -44,12 +44,12 @@ export class ClaudeCodeAdapter extends AdapterBase {
     const sortedSkills = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
     const outputs = [];
     for (const skill of sortedSkills) {
-      const canonicalLabel = `src/skills/${skill.name}/SKILL.md`;
+      const canonicalLabel = `.agents/skills/${skill.name}/SKILL.md`;
       assertRequiredFields(skill.frontmatter, ["name", "description"], canonicalLabel);
 
       const companion = skill.claudeCodeCompanion;
       if (companion) {
-        const label = `src/skills/${skill.name}/SKILL.claude-code.md`;
+        const label = `.agents/skills/${skill.name}/SKILL.claude-code.md`;
         assertRequiredFields(companion.frontmatter, ["description"], label);
         outputs.push({
           relativePath: `.claude/skills/${skill.name}/SKILL.md`,

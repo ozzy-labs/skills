@@ -1,6 +1,6 @@
 // Validate review perspective MD files (ADR-0025).
 //
-// Each `src/skills/review/perspectives/<axis>.md` declares one review axis
+// Each `.agents/skills/review/perspectives/<axis>.md` declares one review axis
 // for the review skill / `code-reviewer` agent. The frontmatter must satisfy
 // a documented schema so reviewers can correctly select and apply axes.
 
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const PERSPECTIVES_DIR = join(ROOT, "src", "skills", "review", "perspectives");
+const PERSPECTIVES_DIR = join(ROOT, ".agents", "skills", "review", "perspectives");
 const VALID_CATEGORIES = new Set(["required", "design", "quality", "ux"]);
 
 async function listAxes() {
@@ -47,7 +47,7 @@ test("each perspective MD has required frontmatter keys", async () => {
   for (const filename of axes) {
     const path = join(PERSPECTIVES_DIR, filename);
     const raw = await readFile(path, "utf8");
-    const label = `src/skills/review/perspectives/${filename}`;
+    const label = `.agents/skills/review/perspectives/${filename}`;
     const { frontmatter } = parseSkillDocument(raw, label);
     for (const key of required) {
       assert.ok(
@@ -63,7 +63,7 @@ test("severity_rules frontmatter mentions all three severities", async () => {
   for (const filename of axes) {
     const path = join(PERSPECTIVES_DIR, filename);
     const raw = await readFile(path, "utf8");
-    const label = `src/skills/review/perspectives/${filename}`;
+    const label = `.agents/skills/review/perspectives/${filename}`;
     const { frontmatter } = parseSkillDocument(raw, label);
     for (const sev of ["critical", "warning", "info"]) {
       assert.match(
@@ -80,7 +80,7 @@ test("exit_criteria frontmatter declares drive_loop", async () => {
   for (const filename of axes) {
     const path = join(PERSPECTIVES_DIR, filename);
     const raw = await readFile(path, "utf8");
-    const label = `src/skills/review/perspectives/${filename}`;
+    const label = `.agents/skills/review/perspectives/${filename}`;
     const { frontmatter } = parseSkillDocument(raw, label);
     assert.match(
       frontmatter.exit_criteria,
@@ -100,7 +100,7 @@ test("perspective frontmatter name matches file name", async () => {
   for (const filename of axes) {
     const path = join(PERSPECTIVES_DIR, filename);
     const raw = await readFile(path, "utf8");
-    const label = `src/skills/review/perspectives/${filename}`;
+    const label = `.agents/skills/review/perspectives/${filename}`;
     const { frontmatter } = parseSkillDocument(raw, label);
     const expected = filename.replace(/\.md$/, "");
     assert.equal(
@@ -116,7 +116,7 @@ test("perspective category is one of required/design/quality/ux", async () => {
   for (const filename of axes) {
     const path = join(PERSPECTIVES_DIR, filename);
     const raw = await readFile(path, "utf8");
-    const label = `src/skills/review/perspectives/${filename}`;
+    const label = `.agents/skills/review/perspectives/${filename}`;
     const { frontmatter } = parseSkillDocument(raw, label);
     assert.ok(
       VALID_CATEGORIES.has(frontmatter.category),

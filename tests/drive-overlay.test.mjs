@@ -2,7 +2,7 @@
 //
 // The pause/resume mechanism is Claude-specific (OAuth usage endpoint +
 // ScheduleWakeup), so the wiring lives in the Claude Code overlay
-// (src/skills/drive/SKILL.claude-code.md) — the precedent is `review --deep`.
+// (.agents/skills/drive/SKILL.claude-code.md) — the precedent is `review --deep`.
 // The neutral drive/SKILL.md only documents the behavior as Claude Code only.
 //
 // #130 flips usage-guard from opt-in (`--usage-guard`) to default-on
@@ -24,13 +24,13 @@ import { ClaudeCodeAdapter } from "../scripts/adapters/claude-code.mjs";
 import { assertRequiredFields, parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = join(ROOT, "src", "skills");
+const SRC = join(ROOT, ".agents", "skills");
 
 async function loadCompanion(name, suffix, requiredFields) {
   const file = join(SRC, name, `SKILL.${suffix}.md`);
   if (!existsSync(file)) return null;
   const raw = await readFile(file, "utf8");
-  const label = `src/skills/${name}/SKILL.${suffix}.md`;
+  const label = `.agents/skills/${name}/SKILL.${suffix}.md`;
   const { frontmatter, body } = parseSkillDocument(raw, label);
   assertRequiredFields(frontmatter, requiredFields, label);
   return { frontmatter, body, raw };
@@ -39,7 +39,7 @@ async function loadCompanion(name, suffix, requiredFields) {
 async function loadSkill(name) {
   const file = join(SRC, name, "SKILL.md");
   const raw = await readFile(file, "utf8");
-  const label = `src/skills/${name}/SKILL.md`;
+  const label = `.agents/skills/${name}/SKILL.md`;
   const { frontmatter, body } = parseSkillDocument(raw, label);
   assertRequiredFields(frontmatter, ["name", "description"], label);
   const claudeCodeCompanion = await loadCompanion(name, "claude-code", ["description"]);
@@ -57,7 +57,7 @@ async function loadSkill(name) {
 
 test("drive claude-code companion advertises --no-usage-guard + default-on wiring section", async () => {
   const companion = await loadCompanion("drive", "claude-code", ["description"]);
-  assert.ok(companion, "src/skills/drive/SKILL.claude-code.md must exist");
+  assert.ok(companion, ".agents/skills/drive/SKILL.claude-code.md must exist");
   const raw = companion.raw;
   // argument-hint advertises the opt-out flag (not the legacy opt-in flag)
   assert.match(raw, /argument-hint:.*\[--no-usage-guard\]/);

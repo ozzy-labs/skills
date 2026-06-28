@@ -1,7 +1,7 @@
 // Integration tests for the adapter pipeline.
 //
 // These run all four adapters against the canonical skill list loaded from
-// src/skills/ and assert end-to-end invariants: deterministic output, every
+// .agents/skills/ and assert end-to-end invariants: deterministic output, every
 // adapter wires up, and required snippet markers are present.
 
 import assert from "node:assert/strict";
@@ -17,13 +17,13 @@ import { GeminiCliAdapter } from "../scripts/adapters/gemini-cli.mjs";
 import { assertRequiredFields, parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = join(ROOT, "src", "skills");
+const SRC = join(ROOT, ".agents", "skills");
 
 async function loadCompanion(name, suffix, requiredFields) {
   const file = join(SRC, name, `SKILL.${suffix}.md`);
   if (!existsSync(file)) return null;
   const raw = await readFile(file, "utf8");
-  const label = `src/skills/${name}/SKILL.${suffix}.md`;
+  const label = `.agents/skills/${name}/SKILL.${suffix}.md`;
   const { frontmatter, body } = parseSkillDocument(raw, label);
   assertRequiredFields(frontmatter, requiredFields, label);
   return { frontmatter, body, raw };
@@ -39,7 +39,7 @@ async function loadCanonicalSkills() {
   for (const name of names) {
     const srcFile = join(SRC, name, "SKILL.md");
     const raw = await readFile(srcFile, "utf8");
-    const label = `src/skills/${name}/SKILL.md`;
+    const label = `.agents/skills/${name}/SKILL.md`;
     const { frontmatter, body } = parseSkillDocument(raw, label);
     assertRequiredFields(frontmatter, ["name", "description"], label);
     const claudeCodeCompanion = await loadCompanion(name, "claude-code", ["description"]);
@@ -64,7 +64,7 @@ const ADAPTERS = [
 
 test("every adapter produces non-empty output for canonical skills", async () => {
   const skills = await loadCanonicalSkills();
-  assert.ok(skills.length > 0, "src/skills/ must contain at least one skill");
+  assert.ok(skills.length > 0, ".agents/skills/ must contain at least one skill");
   for (const adapter of ADAPTERS) {
     const out = await adapter.generate(skills);
     assert.ok(out.length > 0, `${adapter.constructor.name} returned no outputs`);
