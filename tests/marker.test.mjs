@@ -27,7 +27,10 @@ test("isMarkerFile matches dir markers, agent sidecars, and nested markers", () 
 });
 
 test("markerPathForFile appends the marker suffix (agent sidecar)", () => {
-  assert.equal(markerPathForFile("/x/.claude/agents/foo.md"), `/x/.claude/agents/foo.md${MARKER_NAME}`);
+  assert.equal(
+    markerPathForFile("/x/.claude/agents/foo.md"),
+    `/x/.claude/agents/foo.md${MARKER_NAME}`,
+  );
 });
 
 test("writeDirMarker / readDirMarker round-trip with sorted adapters + schema", async () => {
@@ -87,5 +90,9 @@ test("the build never ships a provenance marker into dist/", async () => {
       else if (isMarkerFile(entry.name)) offenders.push(full);
     }
   }
-  assert.deepEqual(offenders, [], `dist must not contain provenance markers:\n${offenders.join("\n")}`);
+  assert.deepEqual(
+    offenders,
+    [],
+    `dist must not contain provenance markers:\n${offenders.join("\n")}`,
+  );
 });
