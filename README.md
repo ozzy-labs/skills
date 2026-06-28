@@ -60,7 +60,7 @@ Supported adapters: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`. On an *
 | --- | --- |
 | `add` (alias `install`) | Add skills to a scope. Refuses to overwrite an unmarked (foreign) skill dir without `--force`. |
 | `list` | Show the catalog with installed status. `--json`, `--target`. |
-| `update [<skill>…]` | Re-materialize installed skills, **preserving local edits**: an edited skill is not clobbered — resolve with `--take-theirs` / `--keep-mine`. `--prune` removes skills no longer in the bundle. |
+| `update [<skill>…]` | Re-materialize installed skills, **preserving local edits**: an edited skill is not clobbered — resolve with `--take-theirs` / `--keep-mine` / `--merge` (3-way). `--prune` removes skills no longer in the bundle. |
 | `remove` (alias `uninstall`) | Uninstall skills. Confirmation required (TTY prompt or `--yes`). `--skills` required. |
 | `fork <skill> <new-name>` | Copy an installed skill to a user-owned, unmanaged name (free to edit; never touched by update/remove). |
 | `diff <skill>` | Show a skill's local edits vs the current upstream. |
@@ -69,7 +69,7 @@ Supported adapters: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`. On an *
 
 Installed skills are **editable** — edit them in place under their own name. The CLI tracks what it installed with **per-item provenance markers** (`.ozzylabs-skills.json` co-located in each skill dir; no central registry). The shared `.agents/skills/<name>` base is **reference-counted** across adapters (removing one adapter keeps the base while another needs it). `update` baselines each skill's content hash so it can detect — and refuse to clobber — your local edits.
 
-Project scope (`--target`) writes the committed payload (`.claude/skills/` wrappers + canonical `.agents/skills/` + `.claude/agents/`) with repo-root-relative refs preserved. The legacy `sync-project` and `migrate` subcommands have been removed — use `add --target <repo>`. (3-way `update --merge` is tracked as a follow-up in [#151](https://github.com/ozzy-labs/skills/issues/151).)
+Project scope (`--target`) writes the committed payload (`.claude/skills/` wrappers + canonical `.agents/skills/` + `.claude/agents/`) with repo-root-relative refs preserved. The legacy `sync-project` and `migrate` subcommands have been removed — use `add --target <repo>`. For edited skills, `update --merge` does a 3-way merge (base = the install-time snapshot, mine = your edits, theirs = current upstream); conflicts are left with standard `<<<<<<<` markers.
 
 ## Consumer setup
 

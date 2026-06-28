@@ -399,3 +399,41 @@ test("e2e: update --prune removes installed skills no longer in the bundle", asy
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("e2e: update --merge keeps local edits and re-baselines (upstream unchanged)", async () => {
+  const { appendFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const skillMd = join(home, ".agents", "skills", "drive", "SKILL.md");
+    appendFileSync(skillMd, "\nMY CUSTOM LINE\n");
+
+    const r = runCli(["update", "drive", "--merge"], { home });
+    const out = JSON.parse(r.stdout);
+    const m = out.merged.find((x) => x.skill === "drive");
+    assert.equal(m.status, "merged", `expected clean merge, got ${m?.status}`);
+    assert.match(readFileSync(skillMd, "utf8"), /MY CUSTOM LINE/, "local edit preserved");
+    assert.doesNotMatch(readFileSync(skillMd, "utf8"), /<<<<<<</, "no conflict markers");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: update --merge degrades to a fallback when the merge base (cache) is gone", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    writeFileSync(join(home, ".agents", "skills", "drive", "SKILL.md"), "edited\n");
+    // Wipe the pristine cache → no merge base.
+    await rm(join(home, ".cache"), { recursive: true, force: true });
+
+    const r = runCli(["update", "drive", "--merge"], { home });
+    assert.notEqual(r.status, 0);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.merged.find((x) => x.skill === "drive")?.status, "no-base");
+    assert.match(r.stderr, /no merge base|--take-theirs/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

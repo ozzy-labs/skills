@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ADAPTER_LAYOUT } from "./install.mjs";
 import { computeDirHash, readDirMarker, withAdapterAdded, writeDirMarker } from "./marker.mjs";
+import { savePristine } from "./pristine.mjs";
 
 // The cross-tool base root is shared by every adapter; its marker carries the
 // adapter reference count. Other roots (e.g. `.claude/skills`) are adapter-owned.
@@ -71,6 +72,8 @@ export async function writeMarkers({ home, adapter, skills, bundleVersion }) {
     } else {
       await writeDirMarker(dir, { bundleVersion, adapters: [adapter], extra: { originalHash } });
     }
+    // Snapshot the clean content as the merge base for `update --merge`.
+    await savePristine(home, dir);
   }
 }
 
