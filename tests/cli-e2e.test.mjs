@@ -123,3 +123,63 @@ test("e2e: not-yet-implemented verbs exit non-zero with the #151 pointer", () =>
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /#151/);
 });
+
+test("e2e: add writes provenance markers (base marker carries the adapter)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    const r = runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    assert.equal(r.status, 0, `cli failed: ${r.stderr}`);
+    const marker = JSON.parse(
+      readFileSync(join(home, ".agents", "skills", "drive", ".ozzylabs-skills.json"), "utf8"),
+    );
+    assert.equal(marker.source, "@ozzylabs/skills");
+    assert.deepEqual(marker.adapters, ["codex-cli"]);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: a second adapter reference-counts the shared base marker", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    runCli(["add", "--adapter=claude-code", "--skills=drive", "--force"], { home });
+    const marker = JSON.parse(
+      readFileSync(join(home, ".agents", "skills", "drive", ".ozzylabs-skills.json"), "utf8"),
+    );
+    assert.deepEqual(
+      marker.adapters,
+      ["claude-code", "codex-cli"],
+      "base ref-counts both adapters",
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: add refuses to overwrite an unmarked (foreign) skill dir without --force", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    // Pre-existing, user-authored skill dir with no provenance marker.
+    const foreign = join(home, ".agents", "skills", "drive");
+    mkdirSync(foreign, { recursive: true });
+    writeFileSync(join(foreign, "SKILL.md"), "mine\n");
+
+    const blocked = runCli(["add", "--adapter=codex-cli", "--skills=drive"], { home });
+    assert.notEqual(blocked.status, 0);
+    assert.match(blocked.stderr, /refusing to overwrite|--force/);
+    assert.equal(
+      readFileSync(join(foreign, "SKILL.md"), "utf8"),
+      "mine\n",
+      "foreign file untouched",
+    );
+
+    // --force overwrites and claims it.
+    const forced = runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    assert.equal(forced.status, 0, `forced add failed: ${forced.stderr}`);
+    assert.notEqual(readFileSync(join(foreign, "SKILL.md"), "utf8"), "mine\n");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

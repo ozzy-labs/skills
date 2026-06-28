@@ -15,6 +15,7 @@ import {
   planInstall,
   SUPPORTED_ADAPTERS,
 } from "./install.mjs";
+import { findCollisions, getBundleVersion, writeMarkers } from "./install-markers.mjs";
 import { executeSyncProject, planSyncProject } from "./sync-project.mjs";
 
 const HELP = `npx @ozzylabs/skills add [options]
@@ -167,9 +168,32 @@ export async function runAdd(argv, opts = {}) {
     process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
     return 0;
   }
+
+  // Collision guard: refuse to claim a pre-existing skill directory that is NOT
+  // ours (carries no provenance marker) unless --force is given.
+  if (!force) {
+    const collisions = [];
+    for (const plan of plans) {
+      const skills = skillsFilter ?? plan.skills_available;
+      collisions.push(...(await findCollisions({ home, adapter: plan.adapter, skills })));
+    }
+    if (collisions.length > 0) {
+      process.stderr.write(
+        `error: refusing to overwrite ${collisions.length} existing skill ` +
+          `director${collisions.length === 1 ? "y" : "ies"} not installed by @ozzylabs/skills ` +
+          `(pass --force to overwrite):\n  ${collisions.join("\n  ")}\n`,
+      );
+      return 1;
+    }
+  }
+
+  const bundleVersion = await getBundleVersion(packageRoot);
   const summaries = [];
   for (const plan of plans) {
     const result = await executeInstall(plan, { upgrade: force, force });
+    // Mark every skill this adapter actually wrote (installed or upgraded).
+    const installed = [...new Set([...result.installed, ...result.upgraded])];
+    await writeMarkers({ home, adapter: plan.adapter, skills: installed, bundleVersion });
     summaries.push({ scope: "user", adapter: plan.adapter, ...result });
   }
   const out = summaries.length === 1 ? summaries[0] : summaries;
