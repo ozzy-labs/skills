@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { pristinePath } from "../bin/lib/pristine.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(ROOT, "bin", "skills.mjs");
@@ -433,6 +434,19 @@ test("e2e: update --merge degrades to a fallback when the merge base (cache) is 
     const out = JSON.parse(r.stdout);
     assert.equal(out.merged.find((x) => x.skill === "drive")?.status, "no-base");
     assert.match(r.stderr, /no merge base|--take-theirs/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: remove drops the pristine merge-base cache", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-e2e-"));
+  try {
+    runCli(["add", "--adapter=codex-cli", "--skills=drive", "--force"], { home });
+    const baseDir = join(home, ".agents", "skills", "drive");
+    assert.ok(existsSync(pristinePath(home, baseDir)), "pristine saved on add");
+    runCli(["remove", "--skills=drive", "--yes"], { home });
+    assert.ok(!existsSync(pristinePath(home, baseDir)), "pristine dropped on remove");
   } finally {
     await rm(home, { recursive: true, force: true });
   }

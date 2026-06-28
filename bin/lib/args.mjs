@@ -66,31 +66,3 @@ export function parseFlags(argv, schema, aliases = {}) {
 
   return { values, rejected };
 }
-
-/**
- * Detect `--target`, `--from`, `--to`, etc. — flags that the sub-issue B
- * acceptance criteria explicitly forbid. Throwing here keeps the error message
- * close to the user input so the help text stays the source of truth.
- *
- * @param {string[]} argv
- */
-export function assertNoForbiddenFlags(argv) {
-  const forbidden = new Set([
-    "--target",
-    "--target-dir",
-    "--target=",
-    "--from",
-    "--to",
-    "--project",
-  ]);
-  for (const arg of argv) {
-    // Allow `--target-something-else` to slip through; we only block exact
-    // matches and the `--target=...` form.
-    const head = arg.split("=")[0];
-    if (forbidden.has(arg) || forbidden.has(head) || forbidden.has(`${head}=`)) {
-      throw new Error(
-        `flag ${arg.split("=")[0]} is not supported by 'install' — it writes to the user-scoped skills directory only. For project-scope delivery into a repo (Claude mobile / web), use 'npx @ozzylabs/skills sync-project --target <repo>'.`,
-      );
-    }
-  }
-}

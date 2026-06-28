@@ -1,58 +1,18 @@
-// `npx @ozzylabs/skills install` implementation.
-//
-// The installer copies canonical skill payloads from the package's `dist/`
-// directory into the user-scoped skills directory (always under HOME — never
-// project-scoped). Adapter layouts mirror what the build pipeline writes
-// under `dist/{adapter-id}/`:
+// User-scope install primitives (planInstall / executeInstall) used by
+// `skills add`. Copies canonical skill payloads from the package's
+// `dist/{adapter-id}/` into the user-scoped skills directory under HOME:
 //
 //   claude-code → ~/.claude/skills/{name}/SKILL.md  (+ canonical ~/.agents base)
 //   codex-cli   → ~/.agents/skills/{name}/SKILL.md  (+ extras + AGENTS.md.snippet)
 //   gemini-cli  → ~/.agents/skills/{name}/SKILL.md  (+ ~/.gemini/settings.json + snippet)
 //   copilot     → ~/.agents/skills/{name}/SKILL.md  (+ copilot-instructions snippet)
-//
-// `--dry-run` reports the plan as JSON on stdout without touching the disk.
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertNoForbiddenFlags, parseFlags } from "./args.mjs";
-
-const HELP = `npx @ozzylabs/skills install [options]
-
-Install canonical OzzyLabs skills into the user-scoped skills directory.
-
-Options:
-  --skills=<list>      Comma-separated skill names (default: install all).
-  --adapter=<list>     Comma-separated adapter ids: claude-code (default),
-                       codex-cli, gemini-cli, copilot. Pass several to install
-                       multiple agents at once (e.g. claude-code,codex-cli).
-  --dry-run            Print the install plan as JSON and exit. No files are
-                       written.
-  --upgrade            Overwrite skills that are already installed.
-  --force              Skip the interactive confirmation prompt (non-TTY
-                       sessions skip the prompt automatically).
-  -h, --help           Show this help.
-
-Note: @ozzylabs/skills installs into the user-scoped skills directory only —
-i.e. under \$HOME. Project-scoped install paths (e.g. \`--target\`) are not
-supported and never will be. Use the legacy \`/sync-consumers\` flow if you
-need per-repo skill mirrors.
-`;
 
 const SUPPORTED_ADAPTERS = ["claude-code", "codex-cli", "gemini-cli", "copilot"];
-
-const SCHEMA = {
-  skills: "string",
-  adapter: "string",
-  "dry-run": "boolean",
-  upgrade: "boolean",
-  force: "boolean",
-  help: "boolean",
-};
-
-const ALIASES = { h: "help" };
 
 // Per-adapter description of how to walk the dist tree and map it onto
 // the user HOME directory. Each adapter declares:
@@ -328,111 +288,5 @@ export async function executeInstall(plan, options) {
   };
 }
 
-/**
- * Run the `install` subcommand from CLI argv. Returns a process exit code.
- *
- * @param {string[]} argv The args after the `install` subcommand keyword.
- * @returns {Promise<number>}
- */
-export async function runInstall(argv) {
-  try {
-    assertNoForbiddenFlags(argv);
-  } catch (err) {
-    process.stderr.write(`error: ${err.message}\n\n${HELP}`);
-    return 1;
-  }
 
-  let parsed;
-  try {
-    parsed = parseFlags(argv, SCHEMA, ALIASES);
-  } catch (err) {
-    process.stderr.write(`error: ${err.message}\n\n${HELP}`);
-    return 1;
-  }
-
-  if (parsed.values.help) {
-    process.stdout.write(HELP);
-    return 0;
-  }
-  if (parsed.rejected.length > 0) {
-    process.stderr.write(`error: unknown argument(s): ${parsed.rejected.join(", ")}\n\n${HELP}`);
-    return 1;
-  }
-
-  // `--adapter` accepts a comma-separated list so a single run can install
-  // multiple agents (e.g. `--adapter=claude-code,codex-cli`), mirroring the
-  // `--skills` syntax. Defaults to claude-code.
-  const adapters = (parsed.values.adapter ?? "claude-code")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const skillsFilter = parsed.values.skills
-    ? parsed.values.skills.split(",").map((s) => s.trim()).filter(Boolean)
-    : null;
-  const dryRun = Boolean(parsed.values["dry-run"]);
-  const upgrade = Boolean(parsed.values.upgrade);
-  const force = Boolean(parsed.values.force);
-
-  const packageRoot = await findPackageRoot();
-  const home = process.env.OZZYLABS_SKILLS_HOME ?? homedir();
-
-  const plans = [];
-  for (const adapter of adapters) {
-    try {
-      plans.push(await planInstall({ packageRoot, home, adapter, skillsFilter }));
-    } catch (err) {
-      process.stderr.write(`error: ${err.message}\n`);
-      return 1;
-    }
-  }
-
-  if (dryRun) {
-    const summaries = await Promise.all(plans.map((plan) => summarizePlan(plan, home)));
-    const out = summaries.length === 1 ? summaries[0] : summaries;
-    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
-    return 0;
-  }
-
-  const summaries = [];
-  for (const plan of plans) {
-    const result = await executeInstall(plan, { upgrade, force });
-    summaries.push({
-      target_dir: plan.target_dir,
-      adapter: plan.adapter,
-      installed: result.installed,
-      upgraded: result.upgraded,
-      skipped: result.skipped,
-    });
-  }
-  const out = summaries.length === 1 ? summaries[0] : summaries;
-  process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
-  return 0;
-}
-
-/**
- * Compute a dry-run summary that mirrors `executeInstall`'s result shape so
- * downstream tooling can rely on the same JSON contract.
- *
- * @param {Awaited<ReturnType<typeof planInstall>>} plan
- * @param {string} home
- */
-async function summarizePlan(plan, _home) {
-  const installed = new Set();
-  const upgraded = new Set();
-  const skipped = new Set();
-  for (const file of plan.files) {
-    if (!file.skill) continue;
-    if (existsSync(file.dest)) upgraded.add(file.skill);
-    else installed.add(file.skill);
-  }
-  return {
-    target_dir: plan.target_dir,
-    adapter: plan.adapter,
-    installed: [...installed].sort(),
-    upgraded: [...upgraded].sort(),
-    skipped: [...skipped].sort(),
-    files: plan.files.map((f) => ({ source: f.source, dest: f.dest, skill: f.skill })),
-  };
-}
-
-export { SUPPORTED_ADAPTERS, ADAPTER_LAYOUT, HELP };
+export { SUPPORTED_ADAPTERS, ADAPTER_LAYOUT };
