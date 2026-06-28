@@ -25,8 +25,9 @@ Install canonical OzzyLabs skills into the user-scoped skills directory.
 
 Options:
   --skills=<list>      Comma-separated skill names (default: install all).
-  --adapter=<id>       Adapter id: claude-code (default), codex-cli,
-                       gemini-cli, copilot.
+  --adapter=<list>     Comma-separated adapter ids: claude-code (default),
+                       codex-cli, gemini-cli, copilot. Pass several to install
+                       multiple agents at once (e.g. claude-code,codex-cli).
   --dry-run            Print the install plan as JSON and exit. No files are
                        written.
   --upgrade            Overwrite skills that are already installed.
@@ -55,26 +56,30 @@ const ALIASES = { h: "help" };
 
 // Per-adapter description of how to walk the dist tree and map it onto
 // the user HOME directory. Each adapter declares:
-//   - skillsRoot:  the dist-relative path containing per-skill folders (or
-//                  null if the adapter does not ship per-skill folders).
+//   - skillsRoots: the dist-relative paths containing per-skill folders (empty
+//                  if the adapter does not ship per-skill folders). A skill's
+//                  files may live under more than one root — the claude-code
+//                  payload ships both the `.claude/skills/` wrappers AND the
+//                  canonical `.agents/skills/` files those wrappers Read, so a
+//                  standalone claude-code install is self-contained.
 //   - distSubtree: the dist-relative directory rooted at the user HOME image
 //                  (i.e. everything below this directory is copied to
 //                  `<HOME>/<rest-of-path>`).
 const ADAPTER_LAYOUT = {
   "claude-code": {
-    skillsRoot: ".claude/skills",
+    skillsRoots: [".claude/skills", ".agents/skills"],
     distSubtree: ".",
   },
   "codex-cli": {
-    skillsRoot: ".agents/skills",
+    skillsRoots: [".agents/skills"],
     distSubtree: ".",
   },
   "gemini-cli": {
-    skillsRoot: null,
+    skillsRoots: [],
     distSubtree: ".",
   },
   copilot: {
-    skillsRoot: null,
+    skillsRoots: [],
     distSubtree: ".",
   },
 };
@@ -193,14 +198,21 @@ export async function planInstall({ packageRoot, home, adapter, skillsFilter }) 
     throw new Error(`missing adapter payload at ${distAdapterRoot} — run \`pnpm build\` first?`);
   }
 
-  const skillsAvailable = layout.skillsRoot
-    ? await listSubdirs(join(distAdapterRoot, layout.skillsRoot))
-    : [];
+  const skillRoots = layout.skillsRoots ?? [];
+  // Union the per-skill folder names across every root the adapter ships
+  // (claude-code has both `.claude/skills/` and `.agents/skills/`).
+  const availableSet = new Set();
+  for (const root of skillRoots) {
+    for (const name of await listSubdirs(join(distAdapterRoot, root))) {
+      availableSet.add(name);
+    }
+  }
+  const skillsAvailable = [...availableSet].sort();
 
   // Validate the requested skill list against what the payload actually
   // ships. We accept an empty filter (= install everything) but reject
   // typos eagerly.
-  if (skillsFilter && layout.skillsRoot) {
+  if (skillsFilter && skillRoots.length > 0) {
     const unknown = skillsFilter.filter((s) => !skillsAvailable.includes(s));
     if (unknown.length > 0) {
       throw new Error(
@@ -208,7 +220,7 @@ export async function planInstall({ packageRoot, home, adapter, skillsFilter }) 
       );
     }
   }
-  if (skillsFilter && !layout.skillsRoot) {
+  if (skillsFilter && skillRoots.length === 0) {
     throw new Error(
       `adapter '${adapter}' does not ship per-skill files; --skills is only meaningful for adapters that do (claude-code, codex-cli)`,
     );
@@ -218,8 +230,9 @@ export async function planInstall({ packageRoot, home, adapter, skillsFilter }) 
   const files = [];
   for (const relPath of allFiles) {
     let skillName = null;
-    if (layout.skillsRoot && relPath.startsWith(`${layout.skillsRoot}/`)) {
-      const tail = relPath.slice(layout.skillsRoot.length + 1);
+    const matchedRoot = skillRoots.find((root) => relPath.startsWith(`${root}/`));
+    if (matchedRoot) {
+      const tail = relPath.slice(matchedRoot.length + 1);
       skillName = tail.split("/")[0];
       if (skillsFilter && !skillsFilter.includes(skillName)) continue;
     } else if (skillsFilter) {
@@ -343,7 +356,13 @@ export async function runInstall(argv) {
     return 1;
   }
 
-  const adapter = parsed.values.adapter ?? "claude-code";
+  // `--adapter` accepts a comma-separated list so a single run can install
+  // multiple agents (e.g. `--adapter=claude-code,codex-cli`), mirroring the
+  // `--skills` syntax. Defaults to claude-code.
+  const adapters = (parsed.values.adapter ?? "claude-code")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const skillsFilter = parsed.values.skills
     ? parsed.values.skills.split(",").map((s) => s.trim()).filter(Boolean)
     : null;
@@ -354,29 +373,36 @@ export async function runInstall(argv) {
   const packageRoot = await findPackageRoot();
   const home = process.env.OZZYLABS_SKILLS_HOME ?? homedir();
 
-  let plan;
-  try {
-    plan = await planInstall({ packageRoot, home, adapter, skillsFilter });
-  } catch (err) {
-    process.stderr.write(`error: ${err.message}\n`);
-    return 1;
+  const plans = [];
+  for (const adapter of adapters) {
+    try {
+      plans.push(await planInstall({ packageRoot, home, adapter, skillsFilter }));
+    } catch (err) {
+      process.stderr.write(`error: ${err.message}\n`);
+      return 1;
+    }
   }
 
   if (dryRun) {
-    const summary = await summarizePlan(plan, home);
-    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    const summaries = await Promise.all(plans.map((plan) => summarizePlan(plan, home)));
+    const out = summaries.length === 1 ? summaries[0] : summaries;
+    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
     return 0;
   }
 
-  const result = await executeInstall(plan, { upgrade, force });
-  const summary = {
-    target_dir: plan.target_dir,
-    adapter: plan.adapter,
-    installed: result.installed,
-    upgraded: result.upgraded,
-    skipped: result.skipped,
-  };
-  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  const summaries = [];
+  for (const plan of plans) {
+    const result = await executeInstall(plan, { upgrade, force });
+    summaries.push({
+      target_dir: plan.target_dir,
+      adapter: plan.adapter,
+      installed: result.installed,
+      upgraded: result.upgraded,
+      skipped: result.skipped,
+    });
+  }
+  const out = summaries.length === 1 ? summaries[0] : summaries;
+  process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
   return 0;
 }
 
