@@ -1,5 +1,4 @@
 ---
-description: Conventional Commits のメッセージ生成ルール（Type/Scope 判定表、フォーマット）。他スキルから参照される。
 user-invocable: false
 ---
 

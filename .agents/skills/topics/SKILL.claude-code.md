@@ -1,5 +1,4 @@
 ---
-description: GitHub topics 候補を制約検証・人気度測定・broad+narrow / 単数複数比較・ozzy-labs 慣行で選定し適用する。スコープは ozzy-labs 内利用のみ。
 argument-hint: "<candidate-list> [--repo owner/repo] [--apply | --dry-run]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, AskUserQuestion

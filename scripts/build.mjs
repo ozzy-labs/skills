@@ -36,7 +36,7 @@ import { ClaudeCodeAdapter } from "./adapters/claude-code.mjs";
 import { CodexCliAdapter } from "./adapters/codex-cli.mjs";
 import { CopilotAdapter } from "./adapters/copilot.mjs";
 import { GeminiCliAdapter } from "./adapters/gemini-cli.mjs";
-import { isAdapterAllowed, parseAdapters } from "./lib/adapter-gating.mjs";
+import { parseAdapters } from "./lib/adapter-gating.mjs";
 import { assertRequiredFields, parseSkillDocument } from "./lib/frontmatter.mjs";
 import { rewriteSkillRefsToUserScope } from "./lib/user-scope-refs.mjs";
 
@@ -62,14 +62,13 @@ const CLAUDE_DOGFOOD_TARGET = join(ROOT, ".claude", "skills");
 const CLAUDE_AGENTS_DOGFOOD_TARGET = join(ROOT, ".claude", "agents");
 // `.agents/skills/` is the SSOT and is what Codex CLI + Gemini CLI read
 // directly in-repo — no generation step. Only the Claude Code `.claude/skills/`
-// wrappers are generated as a dogfood mirror. Note: because Codex/Gemini read
-// the SSOT directly, adapter gating cannot hide a `adapters: claude-code` skill
-// (e.g. usage-guard) from their in-repo view — that skill is a no-op there.
-// Gating is still enforced for the shipped `dist/{adapter}/` payloads.
-const DOGFOOD_TARGETS = [{ dir: CLAUDE_DOGFOOD_TARGET, adapterIds: ["claude-code"] }];
+// wrappers are generated (by writeDogfoodTargets). Note: because Codex/Gemini
+// read the SSOT directly, adapter gating cannot hide a `adapters: claude-code`
+// skill (e.g. usage-guard) from their in-repo view — that skill is a no-op
+// there. Gating is still enforced for the shipped `dist/{adapter}/` payloads.
 
 // Internal-use skills are kept in .agents/skills/ for skills/commons repo's own
-// dogfooding (via DOGFOOD_TARGETS) but MUST NOT be shipped to npm consumers.
+// dogfooding but MUST NOT be shipped to npm consumers.
 // See handbook ADR-0027: project skills are limited to skills/commons internal
 // use; the npm payload only carries the generic 10. Excluding them from
 // `writeAdapterOutputs` keeps them out of `dist/{adapter-id}/` and therefore
@@ -158,7 +157,9 @@ async function loadSkills() {
         `${label}: frontmatter name='${frontmatter.name}' does not match directory name='${name}'`,
       );
     }
-    const claudeCodeCompanion = await loadCompanion(name, "claude-code", ["description"]);
+    // Overlay companions carry only Claude-specific frontmatter; `description`
+    // is injected from the canonical SKILL.md at emit time, so none is required.
+    const claudeCodeCompanion = await loadCompanion(name, "claude-code", []);
     const extraFiles = await loadExtraFiles(name);
     // Validate + normalize the optional `adapters` gate once at load time so a
     // typo'd adapter id fails the build early (rather than per-adapter later).
@@ -200,36 +201,22 @@ async function loadAgents() {
 }
 
 async function writeDogfoodTargets(skills, agents) {
-  // Write in-repo dogfood mirrors at `.agents/skills/` and `.claude/skills/`.
-  // These are excluded from the npm payload by `package.json#files` but kept
-  // in the repo so skills repo can use its own slash commands.
-  for (const target of DOGFOOD_TARGETS) {
-    if (existsSync(target.dir)) {
-      await rm(target.dir, { recursive: true, force: true });
-    }
-    await mkdir(target.dir, { recursive: true });
-    // The in-repo .claude/skills/ mirror is what this repo loads when it
-    // dogfoods its own skills. Use the Claude Code companion when present so
-    // dogfood stays in sync with what the Claude Code adapter ships to
-    // consumers.
-    const useCompanion = target.dir === CLAUDE_DOGFOOD_TARGET;
-    // Mirror a skill only when it is allowed for one of this target's adapters
-    // (adapter gating — keeps e.g. `adapters: claude-code` skills out of `.agents/skills/`).
-    const targetSkills = skills.filter((skill) =>
-      target.adapterIds.some((id) => isAdapterAllowed(skill, id)),
-    );
-    for (const skill of targetSkills) {
-      const destDir = join(target.dir, skill.name);
-      await mkdir(destDir, { recursive: true });
-      const content =
-        useCompanion && skill.claudeCodeCompanion ? skill.claudeCodeCompanion.raw : skill.raw;
-      await writeFile(join(destDir, "SKILL.md"), content);
-      for (const extra of skill.extraFiles ?? []) {
-        const dest = join(destDir, extra.relativePath);
-        await mkdir(dirname(dest), { recursive: true });
-        await writeFile(dest, extra.content);
-      }
-    }
+  // Write the in-repo `.claude/skills/` dogfood mirror. `.agents/skills/` is the
+  // SSOT (not generated); only the Claude Code wrappers are produced here. They
+  // come from the SAME ClaudeCodeAdapter that builds the dist payload — single
+  // source of truth — so the overlay merge (canonical description + companion
+  // frontmatter) is applied identically. Refs stay repo-root-relative (no
+  // user-scope rewrite) because this is the in-repo dogfood.
+  if (existsSync(CLAUDE_DOGFOOD_TARGET)) {
+    await rm(CLAUDE_DOGFOOD_TARGET, { recursive: true, force: true });
+  }
+  const outputs = (await new ClaudeCodeAdapter().generate(skills, { agents })).filter((out) =>
+    out.relativePath.startsWith(".claude/skills/"),
+  );
+  for (const out of outputs) {
+    const file = join(ROOT, out.relativePath);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, out.content);
   }
   await writeClaudeAgentsDogfood(agents);
 }
@@ -370,9 +357,7 @@ async function main() {
   const internalNames = skills.filter((s) => INTERNAL_SKILLS.has(s.name)).map((s) => s.name);
   console.log(`✓ Built ${skills.length} skill(s), ${agents.length} agent(s)`);
   console.log("In-repo dogfood (excluded from npm payload):");
-  for (const target of DOGFOOD_TARGETS) {
-    console.log(`  ${target.dir.replace(ROOT, "").replace(/^\//, "")}`);
-  }
+  console.log(`  ${CLAUDE_DOGFOOD_TARGET.replace(ROOT, "").replace(/^\//, "")}`);
   if (agents.length > 0) {
     console.log(`  ${CLAUDE_AGENTS_DOGFOOD_TARGET.replace(ROOT, "").replace(/^\//, "")}`);
   }

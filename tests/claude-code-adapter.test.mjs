@@ -58,16 +58,20 @@ test("Claude Code adapter has id 'claude-code'", () => {
   assert.equal(ClaudeCodeAdapter.id, "claude-code");
 });
 
-test("Claude Code adapter emits companion content when present", async () => {
+test("Claude Code adapter overlays canonical description + companion frontmatter/body", async () => {
   const s = skill("foo", { description: "canonical" });
   s.claudeCodeCompanion = {
-    frontmatter: { description: "wrapper", "disable-model-invocation": "true" },
+    frontmatter: { "disable-model-invocation": "true" },
     body: "# foo\n\nwrapper body\n",
-    raw: "---\ndescription: wrapper\ndisable-model-invocation: true\n---\n# foo\n\nwrapper body\n",
+    raw: "---\ndisable-model-invocation: true\n---\n# foo\n\nwrapper body\n",
   };
   const out = await new ClaudeCodeAdapter().generate([s]);
-  assert.equal(out[0].content, s.claudeCodeCompanion.raw);
-  assert.match(out[0].content, /disable-model-invocation: true/);
+  // Canonical description is injected first, then the companion's Claude-only
+  // keys, then the companion body verbatim. No `name:` key leaks in.
+  assert.equal(
+    out[0].content,
+    "---\ndescription: canonical\ndisable-model-invocation: true\n---\n# foo\n\nwrapper body\n",
+  );
   assert.doesNotMatch(out[0].content, /^name: foo/m);
 });
 
@@ -78,15 +82,16 @@ test("Claude Code adapter falls back to canonical when no companion", async () =
   assert.equal(out[0].content, s.raw);
 });
 
-test("Claude Code adapter throws when companion is missing description", async () => {
+test("Claude Code adapter drops a stray companion description in favour of canonical", async () => {
+  // A companion no longer needs (or should carry) a description — the canonical
+  // one is the single source. A leftover copy is ignored, never duplicated.
   const s = skill("foo", { description: "canonical" });
   s.claudeCodeCompanion = {
-    frontmatter: { "disable-model-invocation": "true" },
-    body: "x",
-    raw: "---\ndisable-model-invocation: true\n---\nx",
+    frontmatter: { description: "stale wrapper copy", "disable-model-invocation": "true" },
+    body: "x\n",
+    raw: "---\ndescription: stale wrapper copy\ndisable-model-invocation: true\n---\nx\n",
   };
-  await assert.rejects(
-    () => new ClaudeCodeAdapter().generate([s]),
-    /SKILL\.claude-code\.md.*missing required field 'description'/,
-  );
+  const out = await new ClaudeCodeAdapter().generate([s]);
+  assert.match(out[0].content, /description: canonical/);
+  assert.doesNotMatch(out[0].content, /stale wrapper copy/);
 });

@@ -42,7 +42,7 @@ async function loadSkill(name) {
   const label = `.agents/skills/${name}/SKILL.md`;
   const { frontmatter, body } = parseSkillDocument(raw, label);
   assertRequiredFields(frontmatter, ["name", "description"], label);
-  const claudeCodeCompanion = await loadCompanion(name, "claude-code", ["description"]);
+  const claudeCodeCompanion = await loadCompanion(name, "claude-code", []);
   return {
     name: frontmatter.name,
     description: frontmatter.description,
@@ -56,7 +56,7 @@ async function loadSkill(name) {
 // --- source companion: default-on opt-out + wiring section ------------------
 
 test("drive claude-code companion advertises --no-usage-guard + default-on wiring section", async () => {
-  const companion = await loadCompanion("drive", "claude-code", ["description"]);
+  const companion = await loadCompanion("drive", "claude-code", []);
   assert.ok(companion, ".agents/skills/drive/SKILL.claude-code.md must exist");
   const raw = companion.raw;
   // argument-hint advertises the opt-out flag (not the legacy opt-in flag)
@@ -75,7 +75,7 @@ test("drive claude-code companion advertises --no-usage-guard + default-on wirin
 });
 
 test("drive companion keeps --usage-guard as a deprecated no-op alias", async () => {
-  const companion = await loadCompanion("drive", "claude-code", ["description"]);
+  const companion = await loadCompanion("drive", "claude-code", []);
   const raw = companion.raw;
   assert.ok(
     raw.includes("--usage-guard") && raw.includes("no-op"),
@@ -84,7 +84,7 @@ test("drive companion keeps --usage-guard as a deprecated no-op alias", async ()
 });
 
 test("drive companion places checkpoints at the four resumable-unit boundaries", async () => {
-  const companion = await loadCompanion("drive", "claude-code", ["description"]);
+  const companion = await loadCompanion("drive", "claude-code", []);
   const raw = companion.raw;
   // Phase 1 start (single mode)
   assert.ok(raw.includes("Phase 1"), "checkpoint at Phase 1 (implement) start");
@@ -97,7 +97,7 @@ test("drive companion places checkpoints at the four resumable-unit boundaries",
 });
 
 test("drive companion gates wave/worker dispatch with headroom-aware projection (#141)", async () => {
-  const companion = await loadCompanion("drive", "claude-code", ["description"]);
+  const companion = await loadCompanion("drive", "claude-code", []);
   const raw = companion.raw;
   // dispatch checkpoints pass --headroom derived from --concurrency
   assert.ok(raw.includes("--headroom"), "dispatch checkpoint passes --headroom to usage-check");
@@ -123,7 +123,7 @@ test("drive companion gates wave/worker dispatch with headroom-aware projection 
 });
 
 test("drive companion documents graceful degrade when the usage-guard skill is absent", async () => {
-  const companion = await loadCompanion("drive", "claude-code", ["description"]);
+  const companion = await loadCompanion("drive", "claude-code", []);
   const raw = companion.raw;
   assert.ok(
     raw.includes("graceful degrade（skill 不在）"),
@@ -138,7 +138,7 @@ test("drive companion documents graceful degrade when the usage-guard skill is a
 });
 
 test("drive companion delegates over-threshold to the usage-guard wait-loop + idempotent resume", async () => {
-  const companion = await loadCompanion("drive", "claude-code", ["description"]);
+  const companion = await loadCompanion("drive", "claude-code", []);
   const raw = companion.raw;
   // Reads/invokes the usage-guard engine
   assert.ok(raw.includes("usage-guard"), "references the usage-guard engine");

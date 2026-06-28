@@ -53,7 +53,9 @@ test("lessons-triage canonical SKILL.md has required frontmatter", async () => {
 
 test("lessons-triage companion SKILL.claude-code.md has required frontmatter", async () => {
   const { frontmatter } = await loadCompanion();
-  assertRequiredFields(frontmatter, ["description"], "lessons-triage SKILL.claude-code.md");
+  // Overlay companions carry only Claude-only keys; `description` is injected
+  // from the canonical SKILL.md at build time, so it must NOT be duplicated here.
+  assert.ok(!frontmatter.description, "companion must not duplicate canonical description");
   assert.match(
     frontmatter["allowed-tools"] ?? "",
     /AskUserQuestion/,

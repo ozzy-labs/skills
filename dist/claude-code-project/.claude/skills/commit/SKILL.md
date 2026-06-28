@@ -1,5 +1,5 @@
 ---
-description: 変更をステージし、Conventional Commits でコミットする（push はしない）
+description: 変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
