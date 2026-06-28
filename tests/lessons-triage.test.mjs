@@ -22,13 +22,13 @@ import { fileURLToPath } from "node:url";
 import { assertRequiredFields, parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SKILL_DIR = join(ROOT, "src", "skills", "lessons-triage");
+const SKILL_DIR = join(ROOT, ".agents", "skills", "lessons-triage");
 const CANONICAL = join(SKILL_DIR, "SKILL.md");
 const COMPANION = join(SKILL_DIR, "SKILL.claude-code.md");
 
 async function loadCanonical() {
   const raw = await readFile(CANONICAL, "utf8");
-  const { frontmatter, body } = parseSkillDocument(raw, "src/skills/lessons-triage/SKILL.md");
+  const { frontmatter, body } = parseSkillDocument(raw, ".agents/skills/lessons-triage/SKILL.md");
   return { frontmatter, body, raw };
 }
 
@@ -36,7 +36,7 @@ async function loadCompanion() {
   const raw = await readFile(COMPANION, "utf8");
   const { frontmatter, body } = parseSkillDocument(
     raw,
-    "src/skills/lessons-triage/SKILL.claude-code.md",
+    ".agents/skills/lessons-triage/SKILL.claude-code.md",
   );
   return { frontmatter, body, raw };
 }

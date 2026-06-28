@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TOPICS_DIR = join(ROOT, "src", "skills", "topics");
+const TOPICS_DIR = join(ROOT, ".agents", "skills", "topics");
 const SKILL_MD = join(TOPICS_DIR, "SKILL.md");
 const SKILL_CLAUDE_MD = join(TOPICS_DIR, "SKILL.claude-code.md");
 
@@ -37,7 +37,7 @@ test("topics skill directory exists", () => {
 
 test("topics SKILL.md has valid frontmatter (name + description)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  const { frontmatter } = parseSkillDocument(raw, "src/skills/topics/SKILL.md");
+  const { frontmatter } = parseSkillDocument(raw, ".agents/skills/topics/SKILL.md");
   assert.equal(frontmatter.name, "topics", "frontmatter name must equal directory name");
   assert.ok(
     frontmatter.description && frontmatter.description.length > 0,
@@ -47,7 +47,7 @@ test("topics SKILL.md has valid frontmatter (name + description)", async () => {
 
 test("topics SKILL.claude-code.md has valid frontmatter (description required)", async () => {
   const raw = await readFile(SKILL_CLAUDE_MD, "utf8");
-  const { frontmatter } = parseSkillDocument(raw, "src/skills/topics/SKILL.claude-code.md");
+  const { frontmatter } = parseSkillDocument(raw, ".agents/skills/topics/SKILL.claude-code.md");
   assert.ok(
     frontmatter.description && frontmatter.description.length > 0,
     "Claude Code companion description must be non-empty",

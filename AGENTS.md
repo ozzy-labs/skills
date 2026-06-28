@@ -11,7 +11,7 @@
 
 ## プロジェクト概要
 
-`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`src/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、npm package + CLI installer（`npx @ozzylabs/skills install`）で end user のマシンに **user skills** として install する（例: `~/.claude/skills/`）。consumer リポ配下への project skills 自動配信は廃止し、例外として Claude mobile / web (cloud) で開発する repo のみ `sync-project` subcommand で project-scope を opt-in 配信する。
+`@ozzylabs/skills`: OzzyLabs 全リポジトリで共有する正準スキルバンドル。`.agents/skills/{name}/SKILL.md` を SSOT として `dist/{adapter-id}/` 配下に agent 別出力を生成し、npm package + CLI installer（`npx @ozzylabs/skills install`）で end user のマシンに **user skills** として install する（例: `~/.claude/skills/`）。consumer リポ配下への project skills 自動配信は廃止し、例外として Claude mobile / web (cloud) で開発する repo のみ `sync-project` subcommand で project-scope を opt-in 配信する。
 
 ## Tech Stack
 
@@ -56,9 +56,9 @@ npx @ozzylabs/skills sync-project --target=./my-repo --skills=drive,implement,sh
 
 ## ディレクトリ構成
 
-- `src/skills/{name}/SKILL.md` — 正準スキル（編集はここ）。frontmatter `adapters`（カンマ区切り文字列・任意）で配信先アダプタを限定できる（例: `adapters: claude-code`）。未指定は全アダプタ配信。詳細は README.md「Adapter gating」を参照
-- `src/skills/{name}/SKILL.claude-code.md` — Claude Code 固有 wrapper（任意）。companion 仕様は README.md を参照
-- `src/skills/{name}/<extra>.md` — 任意の skill 内アセット（例: `review/perspectives/<axis>.md`）。`SKILL.md` / `SKILL.{adapter}.md` 以外のファイルは、その skill が配信される各先（`.claude/skills/{name}/<extra>.md`, `.agents/skills/{name}/<extra>.md` 等）に verbatim でコピーされる（`adapters` で限定された skill は限定先のみ）
+- `.agents/skills/{name}/SKILL.md` — 正準スキル（編集はここ）。frontmatter `adapters`（カンマ区切り文字列・任意）で配信先アダプタを限定できる（例: `adapters: claude-code`）。未指定は全アダプタ配信。詳細は README.md「Adapter gating」を参照
+- `.agents/skills/{name}/SKILL.claude-code.md` — Claude Code 固有 wrapper（任意）。companion 仕様は README.md を参照
+- `.agents/skills/{name}/<extra>.md` — 任意の skill 内アセット（例: `review/perspectives/<axis>.md`）。SSOT に置かれ Codex/Gemini はここを直読みする。`SKILL.md` / `SKILL.{adapter}.md` 以外のファイルは、生成される Claude Code wrapper（`.claude/skills/{name}/<extra>.md`）にも verbatim でコピーされる（`adapters` で限定された skill は限定先のみ）
 - `src/agents/{name}.md` — Claude Code 専用 agent（[ADR-0026](https://github.com/ozzy-labs/handbook/blob/main/adr/0026-agent-distribution-via-skills-sync.md)）。`dist/claude-code/.claude/agents/{name}.md` のみに出力される
 - `dist/{adapter-id}/` — agent 別 adapter 出力（`claude-code` / `codex-cli` / `gemini-cli` / `copilot`）。これが npm payload の正準ペイロード
 - `.agents/skills/{name}/SKILL.md` / `.claude/skills/{name}/SKILL.md` — skills repo 自身が dogfood するための in-repo mirror（npm payload には含めない。`package.json#files` で除外）

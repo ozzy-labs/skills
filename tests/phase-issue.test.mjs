@@ -27,13 +27,13 @@ import { GeminiCliAdapter } from "../scripts/adapters/gemini-cli.mjs";
 import { assertRequiredFields, parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SKILL_DIR = join(ROOT, "src", "skills", "phase-issue");
+const SKILL_DIR = join(ROOT, ".agents", "skills", "phase-issue");
 const CANONICAL = join(SKILL_DIR, "SKILL.md");
 const COMPANION = join(SKILL_DIR, "SKILL.claude-code.md");
 
 async function loadCanonical() {
   const raw = await readFile(CANONICAL, "utf8");
-  const { frontmatter, body } = parseSkillDocument(raw, "src/skills/phase-issue/SKILL.md");
+  const { frontmatter, body } = parseSkillDocument(raw, ".agents/skills/phase-issue/SKILL.md");
   return { frontmatter, body, raw };
 }
 
@@ -41,7 +41,7 @@ async function loadCompanion() {
   const raw = await readFile(COMPANION, "utf8");
   const { frontmatter, body } = parseSkillDocument(
     raw,
-    "src/skills/phase-issue/SKILL.claude-code.md",
+    ".agents/skills/phase-issue/SKILL.claude-code.md",
   );
   return { frontmatter, body, raw };
 }

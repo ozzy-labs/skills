@@ -103,7 +103,7 @@ test("npm pack only ships .mjs (bin), .md (docs), .json (manifests/schemas), .sn
 });
 
 test("npm pack excludes internal-use skills (health/topics/phase-issue) from dist/{adapter-id}/", () => {
-  // ADR-0027: internal-use skills are kept in src/skills/ for skills/commons
+  // ADR-0027: internal-use skills are kept in .agents/skills/ for skills/commons
   // dogfooding but never reach npm consumers. They must be absent from every
   // dist/{adapter-id}/ tree so `npx @ozzylabs/skills install` cannot resurrect
   // the residue we removed from 14 consumers in epic #96.

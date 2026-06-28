@@ -26,22 +26,22 @@ import {
 import { assertRequiredFields, parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = join(ROOT, "src", "skills");
+const SRC = join(ROOT, ".agents", "skills");
 
 // Load a real source skill the way the build does: canonical SKILL.md plus the
 // optional Claude Code companion (carries the Claude-only usage-guard wiring).
 async function loadRealSkill(name) {
   const file = join(SRC, name, "SKILL.md");
   const raw = await readFile(file, "utf8");
-  const { frontmatter } = parseSkillDocument(raw, `src/skills/${name}/SKILL.md`);
-  assertRequiredFields(frontmatter, ["name", "description"], `src/skills/${name}/SKILL.md`);
+  const { frontmatter } = parseSkillDocument(raw, `.agents/skills/${name}/SKILL.md`);
+  assertRequiredFields(frontmatter, ["name", "description"], `.agents/skills/${name}/SKILL.md`);
   let claudeCodeCompanion = null;
   const companionFile = join(SRC, name, "SKILL.claude-code.md");
   if (existsSync(companionFile)) {
     const craw = await readFile(companionFile, "utf8");
     const { frontmatter: cfm, body } = parseSkillDocument(
       craw,
-      `src/skills/${name}/SKILL.claude-code.md`,
+      `.agents/skills/${name}/SKILL.claude-code.md`,
     );
     claudeCodeCompanion = { frontmatter: cfm, body, raw: craw };
   }

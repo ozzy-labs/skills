@@ -4,7 +4,7 @@ English | [日本語](docs/README.ja.md)
 
 Canonical OzzyLabs agent skill bundle for Claude Code, GitHub Copilot, Gemini CLI, and Codex CLI.
 
-`src/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces per-agent outputs under `dist/{adapter-id}/` (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`). End users install these skills as **user skills** (e.g. `~/.claude/skills/`) via the CLI installer shipped in the npm package.
+`.agents/skills/{name}/SKILL.md` is the single source of truth. `pnpm build` produces per-agent outputs under `dist/{adapter-id}/` (`claude-code`, `codex-cli`, `gemini-cli`, `copilot`). End users install these skills as **user skills** (e.g. `~/.claude/skills/`) via the CLI installer shipped in the npm package.
 
 This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs/handbook/blob/main/adr/0016-create-skills-repo.md) decision to extract skills out of the `commons` repository into their own SSOT. Distribution is **user skills by default** (see handbook ADR-0027, in preparation): consumers install via `npx @ozzylabs/skills install`, and project-scope skills (`.claude/skills/` under each consumer repo) are no longer pushed automatically. The supported exception is **Claude mobile / web (cloud) sessions**, which run "repo only" and never see `~/.claude/skills/`: for repos developed that way, `npx @ozzylabs/skills sync-project --target <repo>` opts in to a relative-ref project-scope payload (`dist/claude-code-project/`) — see [Project-scope sync](#project-scope-sync-for-claude-mobile--web-cloud) below. Project-scope skills otherwise remain in use only inside the `skills` / `commons` repos themselves for dogfooding, where the build pipeline emits them from the SSOT.
 
@@ -163,7 +163,7 @@ Consumers that previously consumed skills as **project skills** via the legacy p
 
 ### Claude Code companion file
 
-A skill may ship `src/skills/{name}/SKILL.claude-code.md` alongside the canonical `SKILL.md`. The Claude Code adapter emits the companion verbatim when present, so each skill can carry a Claude-Code-specific wrapper (next-action `AskUserQuestion` menus, `argument-hint`, `disable-model-invocation`, `allowed-tools`, etc.) without polluting the canonical `SKILL.md` other adapters consume.
+A skill may ship `.agents/skills/{name}/SKILL.claude-code.md` alongside the canonical `SKILL.md`. The Claude Code adapter emits the companion verbatim when present, so each skill can carry a Claude-Code-specific wrapper (next-action `AskUserQuestion` menus, `argument-hint`, `disable-model-invocation`, `allowed-tools`, etc.) without polluting the canonical `SKILL.md` other adapters consume.
 
 Companion frontmatter contract:
 
@@ -199,7 +199,7 @@ pnpm test          # adapter unit + integration tests
 pnpm lint:all
 ```
 
-`dist/` is committed and the CI verifies it matches `pnpm build` output. After editing any `src/skills/*/SKILL.md` or `src/skills/*/SKILL.claude-code.md`, run `pnpm build` and commit the resulting `dist/` changes.
+`dist/` is committed and the CI verifies it matches `pnpm build` output. After editing any `.agents/skills/*/SKILL.md` or `.agents/skills/*/SKILL.claude-code.md`, run `pnpm build` and commit the resulting `dist/` changes.
 
 Verifying the `usage-guard` skill: the deterministic signal runs in CI (`tests/usage-guard-integration.test.mjs`); the live `ScheduleWakeup` pause/resume is driven manually via `scripts/usage-guard-smoke.mjs`. See [docs/usage-guard-verification.md](docs/usage-guard-verification.md).
 

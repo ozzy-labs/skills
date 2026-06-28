@@ -5,7 +5,7 @@
 // build orchestrator only — adapters are pure functions.
 
 /**
- * A canonical skill loaded from `src/skills/{name}/SKILL.md`.
+ * A canonical skill loaded from `.agents/skills/{name}/SKILL.md`.
  *
  * @typedef {object} Skill
  * @property {string} name           Skill identifier (matches directory name).
@@ -21,7 +21,7 @@
  *     `argument-hint`, plus AskUserQuestion-driven UX). Other adapters
  *     ignore this field.
  * @property {SkillExtraFile[]} [extraFiles]
- *     Auxiliary files under `src/skills/{name}/` that are NOT the canonical
+ *     Auxiliary files under `.agents/skills/{name}/` that are NOT the canonical
  *     SKILL.md or any adapter companion (`SKILL.<adapter>.md`). Examples:
  *     `perspectives/<axis>.md` for the review skill (ADR-0025). Adapters
  *     that emit a per-skill directory (Claude Code, Codex CLI) copy these
@@ -53,7 +53,7 @@
 
 /**
  * Adapter-specific companion file loaded from
- * `src/skills/{name}/SKILL.{adapter}.md`.
+ * `.agents/skills/{name}/SKILL.{adapter}.md`.
  *
  * @typedef {object} SkillCompanion
  * @property {Record<string, string>} frontmatter

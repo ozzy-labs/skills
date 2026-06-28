@@ -61,22 +61,22 @@ jobs:
 
       - name: Verify build outputs match committed mirrors
         run: |
-          CHANGES=$(git status --porcelain -- dist .agents/skills .claude/skills)
+          CHANGES=$(git status --porcelain -- dist .claude/skills)
           if [ -n "$CHANGES" ]; then
-            echo "dist/, .agents/skills/, or .claude/skills/ is out of date — run 'pnpm build' and commit the result."
+            echo "dist/ or .claude/skills/ is out of date — run 'pnpm build' and commit the result."
             echo "$CHANGES"
-            git diff -- dist .agents/skills .claude/skills
+            git diff -- dist .claude/skills
             exit 1
           fi
 
       - name: Verify build is deterministic
         run: |
           pnpm build
-          CHANGES=$(git status --porcelain -- dist .agents/skills .claude/skills)
+          CHANGES=$(git status --porcelain -- dist .claude/skills)
           if [ -n "$CHANGES" ]; then
             echo "Second build produced different output — adapter pipeline is non-deterministic."
             echo "$CHANGES"
-            git diff -- dist .agents/skills .claude/skills
+            git diff -- dist .claude/skills
             exit 1
           fi
 

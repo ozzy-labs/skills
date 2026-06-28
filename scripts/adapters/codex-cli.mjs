@@ -34,7 +34,7 @@ export class CodexCliAdapter extends AdapterBase {
     const sorted = [...allowed].sort((a, b) => a.name.localeCompare(b.name));
     const outputs = [];
     for (const skill of sorted) {
-      const label = `src/skills/${skill.name}/SKILL.md`;
+      const label = `.agents/skills/${skill.name}/SKILL.md`;
       assertRequiredFields(skill.frontmatter, ["name", "description"], label);
       outputs.push({
         relativePath: `.agents/skills/${skill.name}/SKILL.md`,

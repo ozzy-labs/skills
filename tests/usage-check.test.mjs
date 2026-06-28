@@ -30,7 +30,7 @@ import {
   resolveResumeBuffer,
   resolveThreshold,
   writeCache,
-} from "../src/skills/usage-guard/usage-check.mjs";
+} from "../.agents/skills/usage-guard/usage-check.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXED_NOW = Date.parse("2026-06-15T00:00:00.000Z");

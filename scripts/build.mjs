@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 // Build the @ozzylabs/skills distribution bundle and self-consume mirror.
 //
-// Reads canonical skill files from src/skills/{name}/SKILL.md, validates the
-// frontmatter, and emits two kinds of output:
+// The SSOT is `.agents/skills/{name}/SKILL.md` (authored directly; the
+// cross-tool open-standard location Codex/Gemini read natively). Validates the
+// frontmatter and emits two kinds of output:
 //
 //   1. In-repo dogfood mirrors (NOT part of the npm payload; excluded via
 //      `package.json#files`):
-//        - .agents/skills/{name}/SKILL.md        (Codex CLI / Gemini CLI dogfood)
-//        - .claude/skills/{name}/SKILL.md        (Claude Code dogfood)
+//        - .claude/skills/{name}/SKILL.md        (Claude Code wrapper, GENERATED)
 //        - .claude/agents/{name}.md              (Claude Code dogfood, agents)
-//      Plus any non-SKILL.* files under each skill dir (e.g. perspectives/).
-//      These are kept because skills repo dogfoods its own skill bundle via
-//      slash commands, but they are not shipped to npm consumers. Agents are
-//      Claude Code only, so they mirror only into `.claude/agents/` (never the
-//      codex/gemini `.agents/` dogfood) and reuse the ClaudeCodeAdapter's
-//      `.claude/agents/<name>.md` output path verbatim (no second transform).
+//      `.agents/skills/` itself is the SSOT, read directly by Codex/Gemini, so
+//      it is NOT generated here. Plus any non-SKILL.* files under each skill dir
+//      (e.g. perspectives/) are mirrored into the Claude wrapper. Agents are
+//      Claude Code only, so they mirror only into `.claude/agents/` and reuse the
+//      ClaudeCodeAdapter's `.claude/agents/<name>.md` output verbatim.
 //
 //   2. Adapter outputs under dist/{adapter-id}/, produced by AdapterBase
 //      subclasses. These are the canonical npm payload for consumers — each
@@ -43,7 +42,11 @@ import { rewriteSkillRefsToUserScope } from "./lib/user-scope-refs.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
-const SRC = join(ROOT, "src", "skills");
+// Canonical SSOT: skills are authored directly under `.agents/skills/` (the
+// cross-tool open-standard location Codex/Gemini read natively). Claude Code
+// wrappers under `.claude/skills/` are GENERATED from here; src/skills/ no
+// longer exists.
+const SRC = join(ROOT, ".agents", "skills");
 const SRC_AGENTS = join(ROOT, "src", "agents");
 const DIST = join(ROOT, "dist");
 
@@ -57,17 +60,15 @@ const CLAUDE_DOGFOOD_TARGET = join(ROOT, ".claude", "skills");
 // never the codex/gemini `.agents/` tree). Mirrored from the ClaudeCodeAdapter
 // output so this matches `dist/claude-code/.claude/agents/` verbatim (issue #137).
 const CLAUDE_AGENTS_DOGFOOD_TARGET = join(ROOT, ".claude", "agents");
-// Each dogfood target mirrors the canonical skills for the adapter(s) that
-// read from it: `.agents/skills/` feeds Codex CLI + Gemini CLI, `.claude/skills/`
-// feeds Claude Code. A skill restricted via frontmatter `adapters` is mirrored
-// into a target only when it is allowed for at least one of that target's
-// adapters (e.g. an `adapters: claude-code` skill is kept out of `.agents/skills/`).
-const DOGFOOD_TARGETS = [
-  { dir: join(ROOT, ".agents", "skills"), adapterIds: ["codex-cli", "gemini-cli"] },
-  { dir: CLAUDE_DOGFOOD_TARGET, adapterIds: ["claude-code"] },
-];
+// `.agents/skills/` is the SSOT and is what Codex CLI + Gemini CLI read
+// directly in-repo — no generation step. Only the Claude Code `.claude/skills/`
+// wrappers are generated as a dogfood mirror. Note: because Codex/Gemini read
+// the SSOT directly, adapter gating cannot hide a `adapters: claude-code` skill
+// (e.g. usage-guard) from their in-repo view — that skill is a no-op there.
+// Gating is still enforced for the shipped `dist/{adapter}/` payloads.
+const DOGFOOD_TARGETS = [{ dir: CLAUDE_DOGFOOD_TARGET, adapterIds: ["claude-code"] }];
 
-// Internal-use skills are kept in src/skills/ for skills/commons repo's own
+// Internal-use skills are kept in .agents/skills/ for skills/commons repo's own
 // dogfooding (via DOGFOOD_TARGETS) but MUST NOT be shipped to npm consumers.
 // See handbook ADR-0027: project skills are limited to skills/commons internal
 // use; the npm payload only carries the generic 10. Excluding them from
@@ -101,7 +102,7 @@ async function loadCompanion(name, adapterSuffix, requiredFields) {
   const file = join(SRC, name, `SKILL.${adapterSuffix}.md`);
   if (!existsSync(file)) return null;
   const raw = await readFile(file, "utf8");
-  const label = `src/skills/${name}/SKILL.${adapterSuffix}.md`;
+  const label = `.agents/skills/${name}/SKILL.${adapterSuffix}.md`;
   const { frontmatter, body } = parseSkillDocument(raw, label);
   assertRequiredFields(frontmatter, requiredFields, label);
   return { frontmatter, body, raw };
@@ -123,7 +124,7 @@ async function walkFiles(dir) {
 }
 
 async function loadExtraFiles(skillName) {
-  // Collect any files under src/skills/<name>/ that are NOT the canonical
+  // Collect any files under .agents/skills/<name>/ that are NOT the canonical
   // SKILL.md or an adapter companion (SKILL.<adapter>.md). These are
   // additional skill assets (e.g. perspectives/<axis>.md) that need to be
   // copied verbatim into every skill dest dir.
@@ -149,7 +150,7 @@ async function loadSkills() {
   for (const name of names) {
     const srcFile = join(SRC, name, "SKILL.md");
     const raw = await readFile(srcFile, "utf8");
-    const label = `src/skills/${name}/SKILL.md`;
+    const label = `.agents/skills/${name}/SKILL.md`;
     const { frontmatter, body } = parseSkillDocument(raw, label);
     assertRequiredFields(frontmatter, ["name", "description"], label);
     if (frontmatter.name !== name) {

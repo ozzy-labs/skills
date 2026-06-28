@@ -24,7 +24,7 @@ import {
   parsePayload,
   resolveUsage,
   run,
-} from "../src/skills/usage-guard/usage-guard-hook.mjs";
+} from "../.agents/skills/usage-guard/usage-guard-hook.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXED_NOW = Date.parse("2026-06-15T00:00:00.000Z");
@@ -359,7 +359,7 @@ test("(3b) cold cache → falls through to getUsage (still cache-first internall
 // cache the first call wrote.
 
 test("(#135) hook: cold getUsage writes cache → second resolve hits cache (fetch once)", async () => {
-  const { getUsage, readCache } = await import("../src/skills/usage-guard/usage-check.mjs");
+  const { getUsage, readCache } = await import("../.agents/skills/usage-guard/usage-check.mjs");
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const tmp = await mkdtemp(join(tmpdir(), "ug-hook-cache-"));
@@ -628,10 +628,15 @@ test("usage-guard-hook.mjs is ABSENT from non-claude adapter payloads (gating)",
       `hook must not ship to ${adapterDir} (usage-guard is claude-code-gated)`,
     );
   }
-  // Also absent from the codex canonical .agents/skills mirror in the repo root.
+  // `.agents/skills/` is the SSOT (authored directly), so usage-guard — despite
+  // being `adapters: claude-code` — DOES live there and is visible to Codex /
+  // Gemini reading the repo directly (an accepted no-op leak; the engine needs
+  // Claude's ScheduleWakeup/OAuth and is inert elsewhere). Gating is enforced
+  // for the shipped dist/{adapter}/ payloads (asserted above) — that is what
+  // actually reaches non-Claude consumers.
   assert.equal(
     existsSync(join(ROOT, ".agents", "skills", "usage-guard", "usage-guard-hook.mjs")),
-    false,
-    "hook must not appear under .agents/skills/ (claude-code-gated skill)",
+    true,
+    "usage-guard SSOT lives under .agents/skills/ (gating is enforced at dist, not the SSOT)",
   );
 });
