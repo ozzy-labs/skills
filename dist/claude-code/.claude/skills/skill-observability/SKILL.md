@@ -68,7 +68,7 @@ node obs-emit.mjs --skill=drive  --event=outcome --status=merged --repo="$(git r
 - セッションごとに `heartbeat` 1 件（「観測が走った」記録。空 window が「発火 0」と「hook 未発火」を区別可能に）。
 - transcript 中の各 skill 発火につき `start` 1 件。2 チャネル:
   - model 呼出の `Skill` tool_use → `operation: invoke_agent`
-  - user 入力の `/slash-command` → `operation: slash_command`
+  - user 入力の `/slash-command` → `operation: slash_command`（**実在 skill のみ**。sibling に skill dir が無い組込みコマンド `/clear` `/compact` 等は除外しデータ汚染を防ぐ）
 
 skill の引数（機密を含みうる）は**記録しない**（skill 名と channel のみ）。
 

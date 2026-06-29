@@ -98,6 +98,26 @@ test("deriveEvents: every derived event is schema-valid", async () => {
   }
 });
 
+test("run: user-typed built-in commands (non-skills) are filtered out", async () => {
+  const transcript = [
+    JSON.stringify({ type: "user", message: { content: "<command-name>/clear</command-name>" } }),
+    JSON.stringify({ type: "user", message: { content: "<command-name>/review</command-name>" } }),
+  ].join("\n");
+  const appended = [];
+  await run({
+    readStdinImpl: async () =>
+      JSON.stringify({ session_id: "s1", transcript_path: "/fake/t.jsonl" }),
+    readTranscriptImpl: async () => transcript,
+    isSkillImpl: (name) => name === "review", // /clear is not an installed skill
+    appendImpl: async (ev) => appended.push(ev),
+    now: FIXED_NOW,
+    env: {},
+  });
+  const starts = appended.filter((e) => e.event === "start");
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].skill, "review");
+});
+
 test("run: appends heartbeat + one start per invocation", async () => {
   const appended = [];
   const res = await run({

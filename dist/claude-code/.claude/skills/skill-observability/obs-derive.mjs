@@ -30,11 +30,31 @@
 // block session teardown. Lightweight: lines are substring-prefiltered before
 // any JSON.parse to stay within the SessionEnd timeout budget.
 
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendEvent, buildEvent, loadSchema, validateEvent } from "./obs-emit.mjs";
 
 const SLASH_RE = /<command-name>\/?([a-z][a-z0-9-]*)<\/command-name>/;
+
+// This file ships at <skills-root>/skill-observability/obs-derive.mjs, so the
+// skills root is its grandparent dir. A user-typed /slash-command counts as a
+// skill invocation only if a sibling skill dir exists — this filters out
+// built-in commands (/clear, /compact, /config, /help, …) that would otherwise
+// pollute the data. Model-invoked Skill tool_uses need no such filter (the Skill
+// tool only ever invokes real skills).
+const SKILLS_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * Default predicate: a slash command names a real skill iff a sibling skill dir
+ * with a SKILL.md exists under the skills root.
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isInstalledSkill(name) {
+  return existsSync(join(SKILLS_ROOT, name, "SKILL.md"));
+}
 
 /**
  * Extract the plain text of a transcript message's content (string or block array).
@@ -143,6 +163,7 @@ export async function run({
   readTranscriptImpl = (p) => readFile(p, "utf8"),
   loadSchemaImpl = loadSchema,
   appendImpl = appendEvent,
+  isSkillImpl = isInstalledSkill,
   now = () => new Date(),
   env = process.env,
   warn = (msg) => process.stderr.write(`${msg}\n`),
@@ -163,7 +184,11 @@ export async function run({
     let invocations = [];
     if (transcriptPath) {
       try {
-        invocations = parseTranscript(await readTranscriptImpl(transcriptPath));
+        // Keep model-invoked Skill uses; for user-typed slash commands keep only
+        // those that name a real installed skill (drop built-ins like /clear).
+        invocations = parseTranscript(await readTranscriptImpl(transcriptPath)).filter(
+          (inv) => inv.operation !== "slash_command" || isSkillImpl(inv.skill),
+        );
       } catch (err) {
         // Transcript unreadable/expired → still emit the heartbeat below so the
         // session is recorded as observed-with-no-derivable-data.
