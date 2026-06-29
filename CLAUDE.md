@@ -23,6 +23,7 @@
 - `/topics` — research-driven な GitHub topics 設定（ozzy-labs scope）。候補を公式制約検証 → 人気度測定（session キャッシュ）→ broad+narrow / 単数複数比較 → ozzy-labs 慣行ハードコードで選定し、`--apply` で `gh repo edit --add-topic` を実行、`--dry-run` で分析のみ
 - `/lessons-triage` — セッション教訓 queue（`~/.agents/lessons/queue.jsonl`）を消化し、User Skills 改善の教訓を承認制で ozzy-labs/skills へ issue 起票（HITL、起票のみ）
 - `/usage-guard` — **Claude 専用**。Usage Limit（5 時間 / 週次）を OAuth 使用率エンドポイントで監視し、95%（env で上書き可）超過で自動 pause→`ScheduleWakeup` で待機→回復後に自動再開。drive 等の caller が checkpoint で Read するエンジン形態と、`/usage-guard "<継続コマンド>"`（継続コマンド冪等前提）の単体形態を同梱。endpoint → JSONL → fail-open
+- `/skill-metrics` — observability イベントログ（`~/.agents/observability/events.jsonl`）を read-only 集計し、skill 別発火件数 + 注目イベント（fallback / HITL 却下 / loop 上限 / 中断）を提示。小 n ガードで分母が `min_n`（既定 5）未満なら率を出さず件数のみ。`--since` / `--skill` / `--snapshot` 対応。送信なし（反映は lessons-triage）。計測層は被参照 companion `skill-observability`（イベント契約 `event.schema.json` + emit substrate `obs-emit.mjs` + SessionEnd capture hook `obs-derive.mjs`、いずれも fail-open・privacy 最厳格）が提供
 
 ## Skills の共通ルール
 

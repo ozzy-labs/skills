@@ -12,6 +12,7 @@
 - `pr` — コミット済みの変更をリモートにプッシュし、PR を作成・更新する。
 - `review` — コード変更や PR を 11 観点（perspectives）でレビューし、JSON 構造化出力 + 人間可読レポートで報告する。quick / deep モードを切替可能。PR 番号またはワーキングツリー差分を入力に取る。
 - `ship` — lint・コミット・PR 作成を一括実行する。変更に対して lint → コミット → PR 作成を順に実行する統合パイプライン。
+- `skill-metrics` — ローカルの observability イベントログ（~/.agents/observability/events.jsonl）を集計し、skill 別の発火件数と注目イベント（fallback / HITL 却下 / loop 上限到達 / 中断）を read-only で提示する。「skill のメトリクスを見せて」「観測結果を集計して」「どの skill がよく使われてる?」で発火。送信はしない。
 - `test` — ビルド・テスト・型チェックを実行し、結果を報告する。
 
 <!-- end: @ozzylabs/skills -->
