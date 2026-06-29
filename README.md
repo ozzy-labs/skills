@@ -10,7 +10,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-16 skills total: 11 generic workflow skills shared across all OzzyLabs repositories, 2 Claude-Code-only skills (`usage-guard`, `skill-observability`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
+17 skills total: 12 generic workflow skills shared across all OzzyLabs repositories, 2 Claude-Code-only skills (`usage-guard`, `skill-observability`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
 
 | Skill | Description |
 | --- | --- |
@@ -25,6 +25,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 | `pr` | Push changes and open or update a PR |
 | `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
 | `ship` | Lint + commit + PR creation in one go |
+| `skill-metrics` | Read-only aggregator over the observability event log (`~/.agents/observability/events.jsonl`): per-skill invocation counts + notable friction events (fallback / HITL-reject / loop-cap / abort), with a min-n guard so rates are shown only when the denominator is large enough. Local-only — never sends anything; reflection (issue-filing) is `lessons-triage`'s job. See "Observability" below |
 | `skill-observability` | **Claude Code only.** Referenced companion that defines the skill-improvement loop's measurement layer: the event contract (`event.schema.json`, the single SSOT) and the fail-open emit substrate (`obs-emit.mjs`). Metadata-only, privacy-first (`additionalProperties:false` rejects payloads; repo ids are hashed). See "Observability" below |
 | `test` | Run build, tests, and type checks |
 | `topics` | Research-driven GitHub topics setup (ozzy-labs scope): validate official constraints (lowercase / hyphen / 50 chars / max 20), measure popularity via `gh api search/repositories` with session-scoped cache, decide broad+narrow / singular-plural pairs, and apply ozzy-labs hardcoded conventions (`claude-code` exception, `*-cli` suffix removal, `multi-agent` canonical form). `--apply` to commit, `--dry-run` for analysis only |
@@ -46,7 +47,9 @@ node obs-emit.mjs --skill=review --event=signal  --name=review.loop_iter --value
 node obs-emit.mjs --skill=drive  --event=heartbeat
 ```
 
-Built on top of this contract (separate follow-ups, tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): outcome derivation (`gh`/`git` merge ground truth + session→PR linkage), a `/skill-metrics` aggregator (counts + notable events), and a reflection channel that folds privacy-scrubbed rollups into `lessons-triage` issues (HITL, opt-in).
+The **`skill-metrics`** skill (shipped, all-adapter) aggregates this log read-only into per-skill invocation counts + notable friction events, applying a min-n guard so a misleading "1/1 = 100%" rate is never shown for low-frequency data.
+
+Built on top of this contract (separate follow-ups, tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): outcome derivation (`gh`/`git` merge ground truth + session→PR linkage) and a reflection channel that folds privacy-scrubbed rollups into `lessons-triage` issues (HITL, opt-in).
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 
