@@ -24,13 +24,11 @@ description: ローカルの observability イベントログ（~/.agents/observ
 
 ## 手順
 
-1. 同階層の集計エンジンを実行して JSON rollup を得る:
+1. **本 SKILL.md と同じディレクトリ**の `skill-metrics.mjs` を Bash で実行して JSON rollup を得る（引数はそのまま渡す）。Claude Code では `~/.claude/skills/skill-metrics/skill-metrics.mjs`（dogfood は `<repo>/.claude/skills/skill-metrics/skill-metrics.mjs`）:
 
    ```bash
-   node "$(dirname "$0")/skill-metrics.mjs" [--since=...] [--skill=...] [--snapshot]
+   node <この skill のディレクトリ>/skill-metrics.mjs [--since=...] [--skill=...] [--snapshot]
    ```
-
-   （skill から起動する際は本 SKILL.md と同じディレクトリの `skill-metrics.mjs` を Bash で実行する。）
 
 2. 得た JSON を人間可読に整形して提示する。最低限、以下を含める:
    - **window**: 集計対象期間（since / until）、総イベント数、セッション数
