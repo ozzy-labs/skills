@@ -7,7 +7,7 @@ user-invocable: false
 
 # skill-observability - 計測イベント契約と emit substrate
 
-skill 改善ループ（install→利用→反映）の **計測層** を支える契約とツールを定義する被参照 companion。本 skill 自身は計測を行わず、**イベントの形（schema）と書き込みの作法（emit）の SSOT** を提供する。発火・outcome の実捕捉（痕跡導出 hook）や集計（`/skill-metrics`）は本契約の上に別途構築する。
+skill 改善ループ（install→利用→反映）の **計測層** を支える契約とツールを定義する被参照 companion。**イベントの形（schema）と書き込みの作法（emit）の SSOT**、および transcript から発火を事後導出する **痕跡導出 hook（obs-derive.mjs）** を提供する。集計（`/skill-metrics`）や反映は本契約の上に別途構築する。
 
 ## 原則
 
@@ -60,11 +60,46 @@ node obs-emit.mjs --skill=drive  --event=outcome --status=merged --repo="$(git r
 
 検証に通らないイベント・あらゆる失敗は**追記せず警告して exit 0**（fail-open）。`&&` で連結した caller を壊さない。
 
+## 痕跡導出 hook（obs-derive.mjs）
+
+`obs-derive.mjs`（sibling・SessionEnd hook）が**主捕捉経路**。セッション終了後に transcript を読み、**どの skill が発火したか**を事後導出して obs-emit substrate 経由で記録する。model に mid-run の自己申告を求めず痕跡から再構成するため、**自己申告バイアス**（中断する最悪の run ほど emit を落とす）を回避する。
+
+導出する reliable コア:
+
+- セッションごとに `heartbeat` 1 件（「観測が走った」記録。空 window が「発火 0」と「hook 未発火」を区別可能に）。
+- transcript 中の各 skill 発火につき `start` 1 件。2 チャネル:
+  - model 呼出の `Skill` tool_use → `operation: invoke_agent`
+  - user 入力の `/slash-command` → `operation: slash_command`（**実在 skill のみ**。sibling に skill dir が無い組込みコマンド `/clear` `/compact` 等は除外しデータ汚染を防ぐ）
+
+skill の引数（機密を含みうる）は**記録しない**（skill 名と channel のみ）。
+
+**deferred（本 hook では導出しない）**: merge/abort の **outcome**。セッション終了時点の merge 状態は未確定で session→PR linkage + 遅延再評価が要り、abort 推定（「PR なしで終了」）は人間中断・冪等 resume と区別できずノイズが多い。reliable・低ノイズを保つため別増分に分離する。
+
+### SessionEnd hook を有効化（手動 opt-in）
+
+本リポは settings/hook を配らない（usage-guard hook と同じ方針）。`~/.claude/settings.json`（または `settings.local.json`）に SessionEnd エントリを追加する。`command` は `obs-derive.mjs` の **絶対パス**（user-scope `~/.claude/skills/skill-observability/...` と dogfood `<repo>/.claude/skills/skill-observability/...` で異なる・自分の path を埋める）:
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node /home/<you>/.claude/skills/skill-observability/obs-derive.mjs" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+stdin の SessionEnd JSON（`session_id` / `transcript_path` / `cwd` / `reason`）を受け取り、常に exit 0・軽量（行は substring プレフィルタしてから JSON.parse）。
+
 ## 適用範囲
 
-本 skill は **emit substrate と契約の提供のみ**。以下は本契約の上に別 PR で構築する:
+本 skill は **契約 + emit substrate + 痕跡導出 hook（発火捕捉）** を提供する。以下は本契約の上に別 PR で構築する:
 
-- **痕跡導出 hook**（SessionEnd 等で発火 skill + `gh`/`git` の merge outcome を導出して emit する主経路）。wiring は usage-guard と同様、settings への手動登録を案内する（本リポは hook を自動配線しない）。
+- **outcome 導出**（`gh`/`git` の merge ground truth + session→PR linkage。痕跡導出 hook の次増分）。
 - **`/skill-metrics`**（events.jsonl を件数 + 注目イベントで集計）。
 - **反映チャネル**（lessons-triage の metrics-primed 化。privacy 洗浄済みロールアップを HITL で backlog ポインタ issue に反映）。
 

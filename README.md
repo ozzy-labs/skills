@@ -34,10 +34,11 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ### Observability (skill-improvement loop)
 
-`skill-observability` lays the measurement foundation for a data-driven skill-improvement loop (capture → aggregate → reflect). It ships two artifacts as a referenced companion:
+`skill-observability` lays the measurement foundation for a data-driven skill-improvement loop (capture → aggregate → reflect). It ships three artifacts as a referenced companion:
 
 - **`event.schema.json`** — the single SSOT for the event contract. Both `obs-emit.mjs` and the test suite consume this exact file, so the event shape has no doc/code drift. Field names follow the OpenTelemetry GenAI semantic-convention *shape* (`skill`≈`gen_ai.agent.name`, `operation`≈`gen_ai.operation.name`) without hard-coupling to the still-experimental spec. `additionalProperties:false` is the mechanical privacy guard: any unknown field (payload, diff, token, path) fails validation and is never written.
 - **`obs-emit.mjs`** — the fail-open append+validate write substrate. It records one validated event per call to `~/.agents/observability/events.jsonl` (HOME-anchored, append-only, OTel-independent). It captures nothing on its own and never throws: a rejected or failed emit warns and exits 0 so observability can never break the skill being observed. Repo identifiers passed via `--repo` are hashed (never stored raw).
+- **`obs-derive.mjs`** — the artifact-derived **SessionEnd capture hook** (the primary path that avoids self-report bias). It reads the session transcript after the fact and derives which skills ran — model-invoked `Skill` tool uses (`invoke_agent`) and user-typed `/slash-commands` (`slash_command`) — emitting one `start` per invocation plus a `heartbeat` (so an empty window reads as "0 invocations", not "hook never fired"). Skill args are never recorded. It deliberately does **not** derive merge/abort outcome (deferred: session-end merge state is unconfirmed; abort-inference is noisy). The repo ships no settings/hooks, so wiring is a manual opt-in: add a SessionEnd entry to `~/.claude/settings.json` whose `command` is the absolute path to `obs-derive.mjs` (snippet in the skill's "SessionEnd hook を有効化" section).
 
 ```bash
 node obs-emit.mjs --skill=drive  --event=outcome --status=completed
@@ -45,7 +46,7 @@ node obs-emit.mjs --skill=review --event=signal  --name=review.loop_iter --value
 node obs-emit.mjs --skill=drive  --event=heartbeat
 ```
 
-Built on top of this contract (separate follow-ups, tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): an artifact-derived capture hook (deriving skill invocation + `gh`/`git` merge outcome, the primary path that avoids self-report bias), a `/skill-metrics` aggregator (counts + notable events), and a reflection channel that folds privacy-scrubbed rollups into `lessons-triage` issues (HITL, opt-in).
+Built on top of this contract (separate follow-ups, tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): outcome derivation (`gh`/`git` merge ground truth + session→PR linkage), a `/skill-metrics` aggregator (counts + notable events), and a reflection channel that folds privacy-scrubbed rollups into `lessons-triage` issues (HITL, opt-in).
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 
