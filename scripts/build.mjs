@@ -122,7 +122,7 @@ async function walkFiles(dir) {
   return files;
 }
 
-async function loadExtraFiles(skillName) {
+export async function loadExtraFiles(skillName) {
   // Collect any files under .agents/skills/<name>/ that are NOT the canonical
   // SKILL.md or an adapter companion (SKILL.<adapter>.md). These are
   // additional skill assets (e.g. perspectives/<axis>.md) that need to be
@@ -388,7 +388,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(`✗ Build failed: ${err.message}`);
-  process.exit(1);
-});
+// Only run the build when invoked directly (`node scripts/build.mjs`), not when
+// imported by tests that exercise helpers like loadExtraFiles().
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => {
+    console.error(`✗ Build failed: ${err.message}`);
+    process.exit(1);
+  });
+}

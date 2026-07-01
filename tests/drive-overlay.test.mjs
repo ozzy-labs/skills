@@ -21,6 +21,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ClaudeCodeAdapter } from "../scripts/adapters/claude-code.mjs";
+import { loadExtraFiles } from "../scripts/build.mjs";
 import { assertRequiredFields, parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -203,4 +204,134 @@ test("neutral drive SKILL.md documents usage-guard as default-on + Claude Code o
     raw.includes("PreToolUse hook"),
     "notes an in-flight worker's ceiling is the PreToolUse hook",
   );
+});
+
+// --- #166: self-closing --merge (pre-merge audit + reconciliation) -----------
+//
+// Orchestration --merge must leave no follow-up: workers stop at merge-ready,
+// the parent centralizes merge, and cross-cutting gaps are detected before
+// merge (Final-2) then folded into the introducing PR (Final-3) — all while
+// the worker worktrees still exist (cleanup moved to Final-5, last).
+
+test("neutral drive SKILL.md: workers do not self-merge; parent centralizes merge", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  // worker stops at merge-ready (Phase 4 skipped for workers)
+  assert.ok(
+    raw.includes("worker は Phase 4"),
+    "documents that orchestration workers skip Phase 4 (do not self-merge)",
+  );
+  // worker return status capped at merge-ready
+  assert.ok(
+    raw.includes('"status": "merge-ready" | "failed"'),
+    "worker return status is capped at merge-ready | failed",
+  );
+  // parent merges in dependency order at Final-4
+  assert.ok(
+    raw.includes("Phase Final-4: 依存順マージ"),
+    "documents Final-4 parent-centralized dependency-order merge",
+  );
+});
+
+test("neutral drive SKILL.md: Final phases reordered — audit pre-merge, cleanup last", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  // Final-2 audit is pre-merge
+  assert.ok(
+    raw.includes("Phase Final-2: cross-cutting audit（マージ前"),
+    "Final-2 cross-cutting audit runs pre-merge",
+  );
+  // Final-3 reconciliation folds into the introducing PR
+  assert.ok(
+    raw.includes("Phase Final-3: reconciliation") && raw.includes("導入元 PR"),
+    "Final-3 reconciliation folds gaps into the introducing PR",
+  );
+  // cleanup moved to Final-5 (after merge)
+  assert.ok(
+    raw.includes("Phase Final-5: worker 作業コピーの cleanup"),
+    "cleanup moved to Final-5 (last, after merge)",
+  );
+  // document ORDER must be audit(2) < merge(4) < cleanup(5), not just labels present
+  const iAudit = raw.indexOf("#### Phase Final-2: cross-cutting audit");
+  const iMerge = raw.indexOf("#### Phase Final-4: 依存順マージ");
+  const iCleanup = raw.indexOf("#### Phase Final-5: worker 作業コピーの cleanup");
+  assert.ok(
+    iAudit > 0 && iMerge > iAudit && iCleanup > iMerge,
+    "Final phases are ordered audit(2) → merge(4) → cleanup(5) in the document",
+  );
+  // audit attribution carries source_pr — anchored to the attribution output block
+  // (co-located with category:), not a bare token match
+  assert.ok(
+    raw.includes("導入元 PR に attribution") && /source_pr:[\s\S]{0,80}category:/.test(raw),
+    "audit output block attributes each gap to its source_pr alongside category",
+  );
+  // reconciliation single-pass convergence (specific phrase)
+  assert.ok(raw.includes("1 パス固定"), "reconciliation is a single pass (convergence guarantee)");
+  // fail-soft anchored to the reconciliation failure edge-case row, not any occurrence
+  assert.ok(
+    /reconciliation の lint\/畳み込みが失敗[\s\S]{0,40}fail-soft/.test(raw),
+    "reconciliation fold failure is handled fail-soft (anchored to its edge-case row)",
+  );
+});
+
+test("drive companion: worker prompt forbids self-merge and keeps stacked base", async () => {
+  const companion = await loadCompanion("drive", "claude-code", []);
+  assert.ok(companion, "drive companion must exist");
+  const raw = companion.raw;
+  // subagent prompt: no gh pr merge
+  assert.ok(
+    raw.includes("マージ禁止"),
+    "companion instructs workers not to call gh pr merge (マージ禁止)",
+  );
+  // Final-2/3 run inside the still-present worker worktree, in parallel per PR
+  assert.ok(
+    raw.includes("Phase Final-2: cross-cutting audit") && raw.includes("worktree 内で並列"),
+    "companion runs Final-2 audit inside worker worktrees, parallel per PR",
+  );
+  assert.ok(
+    raw.includes("Phase Final-3: reconciliation") && raw.includes("parallel(gaps.groupBy(pr))"),
+    "companion folds reconciliation per-PR in parallel",
+  );
+  // worktree-safety detail is extracted to a sibling reference (not inline)
+  assert.ok(
+    raw.includes("worktree-safety.claude-code.md"),
+    "companion links to the extracted worktree-safety reference",
+  );
+  // Final-2 audit + Final-3 reconciliation run regardless of --merge (self-closing
+  // guarantee for the --merge-unspecified path); only Final-4 branches on --merge
+  assert.ok(
+    raw.includes("`--merge` 有無を問わず") && raw.includes("Final-3"),
+    "companion runs Final-1..Final-3 regardless of --merge (only Final-4 merge branches)",
+  );
+});
+
+test("drive's real build discovery ships worktree-safety and excludes the companion", async () => {
+  // Exercise the ACTUAL build discovery (scripts/build.mjs loadExtraFiles), not a
+  // hand-built extraFiles array — this guards against a companion-exclusion regex
+  // regression silently dropping the newly extracted worktree-safety.claude-code.md.
+  const extras = await loadExtraFiles("drive");
+  const rels = extras.map((e) => e.relativePath);
+  assert.ok(
+    rels.includes("worktree-safety.claude-code.md"),
+    "build discovery includes the extracted worktree-safety sibling file",
+  );
+  assert.ok(
+    !rels.includes("SKILL.claude-code.md"),
+    "build discovery excludes the SKILL.claude-code.md companion (not an extra file)",
+  );
+  const wt = extras.find((e) => e.relativePath === "worktree-safety.claude-code.md");
+  // the extracted detail (7-axis detection + recovery + cleanup) lives there now
+  assert.ok(wt.content.includes("汚染検出 7 軸"), "extra file carries the 7-axis detection detail");
+  assert.ok(
+    wt.content.includes("recovery シーケンス") && wt.content.includes("cleanup 実行手順"),
+    "extra file carries recovery + cleanup mechanics",
+  );
+});
+
+test("claude-code adapter emits drive's discovered extra files verbatim", async () => {
+  const drive = await loadSkill("drive");
+  drive.extraFiles = await loadExtraFiles("drive");
+  const out = await new ClaudeCodeAdapter().generate([drive]);
+  const wt = out.find(
+    (o) => o.relativePath === ".claude/skills/drive/worktree-safety.claude-code.md",
+  );
+  assert.ok(wt, "claude-code adapter emits the discovered worktree-safety extra file");
 });
