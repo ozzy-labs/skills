@@ -204,3 +204,96 @@ test("neutral drive SKILL.md documents usage-guard as default-on + Claude Code o
     "notes an in-flight worker's ceiling is the PreToolUse hook",
   );
 });
+
+// --- #166: self-closing --merge (pre-merge audit + reconciliation) -----------
+//
+// Orchestration --merge must leave no follow-up: workers stop at merge-ready,
+// the parent centralizes merge, and cross-cutting gaps are detected before
+// merge (Final-2) then folded into the introducing PR (Final-3) — all while
+// the worker worktrees still exist (cleanup moved to Final-5, last).
+
+test("neutral drive SKILL.md: workers do not self-merge; parent centralizes merge", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  // worker stops at merge-ready (Phase 4 skipped for workers)
+  assert.ok(
+    raw.includes("worker は Phase 4"),
+    "documents that orchestration workers skip Phase 4 (do not self-merge)",
+  );
+  // worker return status capped at merge-ready
+  assert.ok(
+    raw.includes('"status": "merge-ready" | "failed"'),
+    "worker return status is capped at merge-ready | failed",
+  );
+  // parent merges in dependency order at Final-4
+  assert.ok(
+    raw.includes("Phase Final-4: 依存順マージ"),
+    "documents Final-4 parent-centralized dependency-order merge",
+  );
+});
+
+test("neutral drive SKILL.md: Final phases reordered — audit pre-merge, cleanup last", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  // Final-2 audit is pre-merge
+  assert.ok(
+    raw.includes("Phase Final-2: cross-cutting audit（マージ前"),
+    "Final-2 cross-cutting audit runs pre-merge",
+  );
+  // Final-3 reconciliation folds into the introducing PR
+  assert.ok(
+    raw.includes("Phase Final-3: reconciliation") && raw.includes("導入元 PR"),
+    "Final-3 reconciliation folds gaps into the introducing PR",
+  );
+  // cleanup moved to Final-5 (after merge)
+  assert.ok(
+    raw.includes("Phase Final-5: worker 作業コピーの cleanup"),
+    "cleanup moved to Final-5 (last, after merge)",
+  );
+  // audit attribution carries source_pr
+  assert.ok(raw.includes("source_pr"), "audit attributes each gap to its source_pr");
+  // 1-pass convergence + fail-soft
+  assert.ok(raw.includes("1 パス固定"), "reconciliation is a single pass (convergence guarantee)");
+  assert.ok(raw.includes("fail-soft"), "unresolved gaps are fail-soft (warning, run continues)");
+});
+
+test("drive companion: worker prompt forbids self-merge and keeps stacked base", async () => {
+  const companion = await loadCompanion("drive", "claude-code", []);
+  assert.ok(companion, "drive companion must exist");
+  const raw = companion.raw;
+  // subagent prompt: no gh pr merge
+  assert.ok(
+    raw.includes("マージ禁止"),
+    "companion instructs workers not to call gh pr merge (マージ禁止)",
+  );
+  // Final-2/3 run inside the still-present worker worktree, in parallel per PR
+  assert.ok(
+    raw.includes("Phase Final-2: cross-cutting audit") && raw.includes("worktree 内で並列"),
+    "companion runs Final-2 audit inside worker worktrees, parallel per PR",
+  );
+  assert.ok(
+    raw.includes("Phase Final-3: reconciliation") && raw.includes("parallel(gaps.groupBy(pr))"),
+    "companion folds reconciliation per-PR in parallel",
+  );
+  // worktree-safety detail is extracted to a sibling reference (not inline)
+  assert.ok(
+    raw.includes("worktree-safety.claude-code.md"),
+    "companion links to the extracted worktree-safety reference",
+  );
+});
+
+test("drive ships the extracted worktree-safety reference (claude-code adapter)", async () => {
+  const drive = await loadSkill("drive");
+  // The build's loadExtraFiles() copies non-SKILL sibling files verbatim; mirror
+  // that here so the adapter emits the extracted worktree-safety reference.
+  const extraRel = "worktree-safety.claude-code.md";
+  const extraContent = await readFile(join(SRC, "drive", extraRel), "utf8");
+  drive.extraFiles = [{ relativePath: extraRel, content: extraContent }];
+  const out = await new ClaudeCodeAdapter().generate([drive]);
+  const wt = out.find((o) => o.relativePath === `.claude/skills/drive/${extraRel}`);
+  assert.ok(wt, "claude-code adapter emits the worktree-safety extra file");
+  // the extracted detail (7-axis detection + recovery + cleanup) lives there now
+  assert.ok(wt.content.includes("汚染検出 7 軸"), "extra file carries the 7-axis detection detail");
+  assert.ok(
+    wt.content.includes("recovery シーケンス") && wt.content.includes("cleanup 実行手順"),
+    "extra file carries recovery + cleanup mechanics",
+  );
+});
