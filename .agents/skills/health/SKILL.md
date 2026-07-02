@@ -1,6 +1,6 @@
 ---
 name: health
-description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）と skill catalog 整合性を `health-check.mjs` エンジンで一発確認し、16 領域のステータス表と固定語彙の推奨アクションを提示する。`--deep` で `要確認` 項目を read-only 追加調査、`--fix` で安全語彙（prune / delete / fetch、`--deep` 昇格した drop）のみ確認付きで実行する。既定は read-only。
+description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）と skill catalog 整合性を `health-check.mjs` エンジンで一発確認し、16 領域のステータス表と固定語彙の推奨アクションを提示する。`--deep` で `要確認` 項目を read-only 追加調査、`--fix` で安全語彙（prune / delete / fetch、`--deep` 昇格した drop）を中央 policy の gate に従って実行する（reversible-local=proceed / irreversible=ask）。既定は read-only。
 ---
 
 # health - リポジトリ状態の確認と推奨アクション提示
@@ -20,8 +20,8 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 
 - 引数なし → Phase 1 のみ（routine 互換・決定論的・read-only）
 - `--deep` → Phase 1 完了後、`要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする
-- `--fix` → 安全語彙の推奨アクションを **一覧提示**（この時点では未実行）。人の確認後 `--fix --yes` で直列実行する
-- `--yes` → `--fix` 併用時のみ有効。確認をスキップして実行する（routine / `/loop` / `schedule` 経由の無人実行に必須）
+- `--fix` → 各安全アクションの gate を中央 autonomy policy（`policy-read.mjs`）で解決する。`reversible-local`（prune / delete / fetch）= `proceed` はその場で実行し audit trail を残す。`irreversible`（`--deep` 昇格の stash drop）= `ask` は個別確認のため一覧提示（未実行）にとどめる。詳細は「`--fix` の安全境界」参照
+- `--yes` → `--fix` 併用時のみ有効。**policy を上書きする明示 opt-out** として全安全アクションを確認なしで実行する（routine / `/loop` / `schedule` 経由の無人実行に必須）
 - `--json` → 人間可読レポートの代わりに構造化 JSON を出力（プログラム連携・デバッグ用）
 
 `--deep` / `--fix` は明示時のみ有効。
@@ -35,7 +35,7 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
    ```
 
 2. エンジンは既定で **ステータス表 + 非 clean section** を整形済みテキストで stdout に出力する。**その出力をそのまま提示**する（再整形・再解釈しない — レンダリングはエンジンの責務）。
-3. `--fix`（`--yes` なし）の場合、エンジンは「実行予定の安全アクション」一覧を出力して**実行せず終了**する。この一覧を人に提示し、**確認を 1 回だけ取る**（確認ゲートの配線はホスト依存 — Claude Code は `SKILL.claude-code.md` 参照）。承認されたら `--fix --yes` で再実行し、実行結果（各行に `✔ done` / `✖ failed`）と実行後ステータス表を提示する。
+3. `--fix`（`--yes` なし）の場合、エンジンは各アクションの gate を policy で解決し、`proceed`（reversible-local）アクションはその場で実行して結果（`✔ done` / `✖ failed`）を併記する。`ask`（irreversible の stash drop）アクションは「確認が必要なアクション」として一覧提示し**実行しない**。この `ask` 一覧を人に提示して個別確認を取る（確認ゲートの配線はホスト依存 — Claude Code は `SKILL.claude-code.md` 参照）。承認されたら `--fix --yes` で再実行して残りを実行する。
 4. gh 未認証・不在などで Triage 系 section が `error` の場合は、その旨をそのまま提示する（git 系の結果は有効）。
 
 ## 推奨アクション語彙（固定・人間可読契約）
@@ -67,10 +67,21 @@ description: リポジトリ改修中に意図せず残る状態（working tree,
 | `drop` | △ | **`--deep` Phase 2 で `drop` に格上げされた stash（HEAD へ clean apply 不可）のみ**。Phase 1 の閾値ベース `drop`（元 branch 消滅）は対象外 |
 | `push` / `要確認` / `要対応` / `abort or continue` | × | 外向き副作用または人間判断領域。エンジンは実行対象にしない |
 
-- **確認ゲートは暫定的に単一確認:** 対象一覧を提示 → 1 回確認 → 直列実行。`--yes` でスキップ。
-- **policy 連携は本 PR 対象外:** externally-visible / irreversible の gate を中央 policy（`policy-read.mjs`）へ委譲する差し替えは **[#181](https://github.com/ozzy-labs/skills/issues/181)-PR3 で実施予定**。本 PR は policy に依存しない単一確認で先行する。
+### 確認ゲートは中央 policy に従う（アクション分類と policy 参照）
+
+確認ゲートは skill 個別の prose ではなく、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙の SSOT）に従う（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R3、[#181](https://github.com/ozzy-labs/skills/issues/181)-PR3。#173 の単一確認を置換）。各安全ラベルを次のクラスに分類し、エンジンが `health-check.mjs` 内から `policy-read.mjs` を読んで有効 gate を解決する:
+
+| `--fix` ラベル | クラス | policy 参照 | ゼロコンフィグ既定 gate | 挙動 |
+|---|---|---|---|---|
+| `prune` / `delete` / `fetch` | `reversible-local` | `--action=worktree-prune` / `--action=branch-delete` / `--class=reversible-local` | `proceed` | その場で実行し結果を併記（audit trail・確認しない） |
+| `drop`（`--deep` 昇格の stash drop） | `irreversible` | `--action=stash-drop` | `ask` | 個別確認を経てから実行（無確認では実行しない） |
+
+gate 語彙は 3 値のみ: `proceed`（確認なしで実行 + audit trail）/ `batch-confirm`（1 回の一括確認）/ `ask`（アクションごとの明示承認）。
+
+- **`--yes` は明示 opt-out:** policy を**上書き**し、全安全アクションを確認なしで実行する（routine / `/loop` / `schedule` の無人実行）。gate が `ask` でも実行される。
+- **policy 不在でも壊れない（fail-safe）:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は必ず厳しい側（`ask`）へ倒す。`policy` skill 自体が未配置で `policy-read.mjs` を import できない環境では、`health-check.mjs` は全アクションを `ask`（従来の単一確認相当・安全側）に倒す。**自律度が緩む方向には決して倒れない。**
 - **実行は直列・per-action 継続:** git 状態を変えるため並列にしない。個別アクションの失敗は継続し、結果を各行に併記する（audit trail）。
-- **既定不変:** 引数なし / `--deep` のみの経路は完全に read-only。
+- **既定不変:** 引数なし / `--deep` のみの経路は完全に read-only。policy が `reversible-local`=`ask` に厳格化されている場合、`--fix`（`--yes` なし）は何も自動実行しない。
 
 ## チェック対象（16 領域）
 

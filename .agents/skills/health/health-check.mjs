@@ -18,18 +18,24 @@
 //   node health-check.mjs            Phase 1, rendered human report (stdout)
 //   node health-check.mjs --deep     Phase 1 + Phase 2 investigation, rendered
 //   node health-check.mjs --json     the structured JSON result instead of text
-//   node health-check.mjs --fix      list the SAFE actions that WOULD run (no
-//                                     execution — this is the confirmation step)
-//   node health-check.mjs --fix --yes   execute the safe actions, annotate each
+//   node health-check.mjs --fix      resolve each safe action's gate against the
+//                                     central policy (ADR-0028 R3): reversible-
+//                                     local (prune/delete/fetch) = `proceed`, so
+//                                     they run now + audit trail; a --deep stash
+//                                     `drop` is irreversible = `ask`, listed for
+//                                     individual confirmation (run on a later --yes)
+//   node health-check.mjs --fix --yes   explicit opt-out: OVERRIDE the policy and
+//                                        execute ALL safe actions, annotate each
 //                                        with ✔/✖ (audit trail), re-check after
 //
-// --fix safe vocabulary (superseding #173's executor; the confirmation gate is
-// a provisional single confirm here — the policy-driven gate lands in #181-PR3):
-//   prune / delete (git branch -d, safe) / fetch  → always eligible
-//   drop                                           → ONLY a `--deep` Phase-2
-//                                                    upgraded stash (clean apply
-//                                                    to HEAD failed)
-//   push / 要確認 / 要対応 / abort or continue      → NEVER executed
+// --fix safe vocabulary (superseding #173's executor). The confirmation gate is
+// now the central policy (policy-read.mjs, consulted via a dynamic import that
+// fails safe to `ask` when the policy skill is absent — see buildPolicyGateResolver):
+//   prune / delete (git branch -d, safe) / fetch  → reversible-local (proceed)
+//   drop                                           → irreversible (ask); ONLY a
+//                                                    `--deep` Phase-2 upgraded
+//                                                    stash (clean apply to HEAD failed)
+//   push / 要確認 / 要対応 / abort or continue      → NEVER executed (not eligible)
 //
 // gh-dependent checks (Triage) run gh inline; when gh is missing/unauthenticated
 // each such section carries a per-check `error` in the JSON (fail-open) — the
@@ -60,6 +66,26 @@ export const VOCAB_ORDER = [ABORT, DELETE, DROP, FETCH, PRUNE, PUSH, ACTION, CON
 // deliberately NOT here: only a Phase-2-upgraded stash (marked eligible at
 // upgrade time) is fixable; a Phase-1 threshold `drop` is not.
 const SAFE_FIX_LABELS = new Set([PRUNE, DELETE, FETCH]);
+
+// Central-policy classification for each safe-fix label (ADR-0028 R3, #181-PR3).
+// Each label maps to a policy action (for fine-grained per-action overrides in
+// policy.yaml) and its action CLASS. reversible-local defaults to `proceed`
+// (execute + audit trail, no confirmation); the irreversible stash `drop`
+// defaults to `ask` (individual confirmation). The gate itself is resolved by
+// policy-read.mjs — this map only CLASSIFIES; it never decides the gate.
+export const FIX_LABEL_POLICY = Object.freeze({
+  [PRUNE]: { action: "worktree-prune", class: "reversible-local" },
+  [DELETE]: { action: "branch-delete", class: "reversible-local" },
+  [FETCH]: { action: null, class: "reversible-local" },
+  [DROP]: { action: "stash-drop", class: "irreversible" },
+});
+
+// Fail-safe gate: when the central policy cannot be consulted (policy skill
+// absent, unreadable, or a value we cannot trust) every action degrades to the
+// STRICTEST gate — individual confirmation — never a looser one. Mirrors
+// policy-read.mjs's FAIL_SAFE_GATE without a hard import dependency, so an absent
+// policy skill can never break health-check itself.
+export const POLICY_FAIL_SAFE_GATE = "ask";
 
 const STALE_DAYS = 14;
 
@@ -935,10 +961,78 @@ export function collectFixPlan(sections) {
     for (const it of s.items) {
       if (!it.fix?.eligible) continue;
       if (!SAFE_FIX_LABELS.has(it.label) && it.label !== DROP) continue; // never a non-safe label
-      plan.push({ section: s.id, label: it.label, text: it.text, args: it.fix.args });
+      plan.push({
+        section: s.id,
+        label: it.label,
+        text: it.text,
+        args: it.fix.args,
+        // Central-policy classification; the gate is resolved by resolveFixGates.
+        policy: FIX_LABEL_POLICY[it.label] ?? { action: null, class: "irreversible" },
+      });
     }
   }
   return plan;
+}
+
+/**
+ * Resolve the central-policy gate for each collected fix item. `resolvePolicy`
+ * is an injected `(query:{action,class}) => {gate,source}` bound to the merged
+ * effective policy (built by buildPolicyGateResolver, or a test double). When it
+ * is absent (policy skill not installed / not injected), every item fails safe
+ * to `ask` — autonomy is never LOOSENED by a missing policy. Mutates + returns
+ * the plan (each item gains `gate` / `gate_source`). Exported for tests.
+ * @param {Array<{policy:{action:string|null,class:string}}>} plan
+ * @param {((q:{action?:string,class?:string})=>{gate?:string,source?:string})|null|undefined} resolvePolicy
+ */
+export function resolveFixGates(plan, resolvePolicy) {
+  const canResolve = typeof resolvePolicy === "function";
+  for (const p of plan) {
+    if (canResolve) {
+      const r = resolvePolicy(p.policy) ?? {};
+      p.gate = typeof r.gate === "string" ? r.gate : POLICY_FAIL_SAFE_GATE;
+      p.gate_source = r.source ?? "policy";
+    } else {
+      p.gate = POLICY_FAIL_SAFE_GATE;
+      p.gate_source = "policy-absent";
+    }
+  }
+  return plan;
+}
+
+/**
+ * Dynamically import the central-policy read substrate (../policy/policy-read.mjs).
+ * A dynamic import (not a static one) is deliberate: an install that ships
+ * `health` without the `policy` companion must degrade to `null` (→ fail-safe
+ * ask) instead of crashing health-check at module load. Returns the module, or
+ * null on any failure. `importImpl` is injectable for tests.
+ * @param {{ importImpl?: (u:string)=>Promise<unknown> }} [deps]
+ * @returns {Promise<Record<string, any>|null>}
+ */
+export async function loadPolicyResolver({ importImpl } = {}) {
+  const imp = importImpl ?? ((u) => import(u));
+  try {
+    const url = new URL("../policy/policy-read.mjs", import.meta.url).href;
+    return (await imp(url)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build the `resolvePolicy(query)` resolver run() consumes under --fix: read the
+ * merged user+repo policy once (fail-safe, via policy-read's own reader), then
+ * resolve each {action,class} against it with policy-read's own resolveGate — no
+ * duplicated policy logic here. Returns null when the policy skill is absent, so
+ * run() then fails safe to `ask`. Exported for tests / callers.
+ * @param {string} cwd  repo root for the repo-scoped policy.yaml
+ * @param {{ importImpl?: (u:string)=>Promise<unknown> }} [deps]
+ * @returns {Promise<((q:{action?:string,class?:string})=>{gate:string,class:string|null,source:string})|null>}
+ */
+export async function buildPolicyGateResolver(cwd, deps = {}) {
+  const mod = await loadPolicyResolver(deps);
+  if (!mod || typeof mod.run !== "function" || typeof mod.resolveGate !== "function") return null;
+  const effective = await mod.run(["--repo-root", cwd]);
+  return (query) => mod.resolveGate(effective, query);
 }
 
 function executeFix(ctx, plan) {
@@ -950,6 +1044,7 @@ function executeFix(ctx, plan) {
       section: p.section,
       label: p.label,
       text: p.text,
+      gate: p.gate ?? null,
       command: `git ${p.args.join(" ")}`,
       ok,
       result: ok ? "done" : `failed: ${firstLine(r.stderr) || firstLine(r.error?.message) || "unknown"}`,
@@ -1063,21 +1158,43 @@ export function run(argv = [], deps = {}) {
 
   if (fix) {
     const plan = collectFixPlan(sections);
-    result.fix_plan = plan.map((p) => ({
+    resolveFixGates(plan, deps.resolvePolicy);
+    result.policy_consulted = typeof deps.resolvePolicy === "function";
+    const decorate = (p) => ({
       section: p.section,
       label: p.label,
       text: p.text,
       command: `git ${p.args.join(" ")}`,
-    }));
+      gate: p.gate,
+      class: p.policy.class,
+    });
+    result.fix_plan = plan.map(decorate);
+
+    let executed = [];
     if (yes) {
+      // --yes = explicit opt-out: OVERRIDE the policy and execute every safe
+      // action (still only the safe vocabulary collectFixPlan already allowed).
+      result.policy_override = true;
+      executed = plan;
       result.fix_results = executeFix(ctx, plan);
+    } else {
+      // Policy-driven: `proceed` items (reversible-local) run now + audit trail;
+      // everything else (`ask` — irreversible stash drop, or a fail-safe when the
+      // policy is absent) waits for individual confirmation and runs on a later
+      // --yes. This preserves the read-only invariant whenever the gate is `ask`.
+      const proceed = plan.filter((p) => p.gate === "proceed");
+      const pending = plan.filter((p) => p.gate !== "proceed");
+      executed = proceed;
+      if (proceed.length) result.fix_results = executeFix(ctx, proceed);
+      result.fix_pending = pending.length > 0;
+      result.fix_pending_items = pending.map(decorate);
+    }
+    if (executed.length) {
       // Re-check (Phase 1 only) so the report can show the after-state.
       const afterCtx = buildCtx(cwd, false, deps);
       const after = collect(afterCtx);
       cleanItems(after);
       result.after = after;
-    } else {
-      result.fix_pending = true;
     }
   }
 
@@ -1130,25 +1247,32 @@ export function render(result) {
   const lines = renderStatusTable(result.sections);
   lines.push(...renderNonCleanSections(result.sections));
 
-  if (result.fix_pending) {
-    lines.push("", `## 実行予定の安全アクション (${result.fix_plan.length})`);
-    if (result.fix_plan.length === 0) {
-      lines.push("(none: 安全に自動実行できるアクションはありません)");
-    } else {
-      for (const p of result.fix_plan) lines.push(`- [${p.label}] ${p.text}  → ${p.command}`);
-      lines.push("", "確認後、--yes を付けて再実行すると上記を直列実行します。");
-    }
-  }
-
-  if (result.fix_results) {
+  // Executed actions (policy `proceed` items, or all under --yes) — audit trail.
+  if (result.fix_results?.length) {
     lines.push("", `## 実行結果 (${result.fix_results.length})`);
     for (const r of result.fix_results) {
       const mark = r.ok ? "✔ done" : `✖ ${r.result}`;
-      lines.push(`- [${r.label}] ${r.text}  → ${r.command}  … ${mark}`);
+      const gate = r.gate ? ` [gate:${r.gate}]` : "";
+      lines.push(`- [${r.label}]${gate} ${r.text}  → ${r.command}  … ${mark}`);
     }
-    if (result.after) {
-      lines.push("", "### 実行後のステータス", ...renderStatusTable(result.after));
+  }
+
+  // Actions gated `ask` (irreversible / fail-safe) — awaiting individual confirm.
+  if (result.fix_pending_items?.length) {
+    lines.push("", `## 確認が必要なアクション (${result.fix_pending_items.length}・gate=ask)`);
+    for (const p of result.fix_pending_items) {
+      lines.push(`- [${p.label}] (${p.class}) ${p.text}  → ${p.command}`);
     }
+    lines.push("", "個別に承認後、--yes を付けて再実行すると実行します。");
+  }
+
+  // --fix ran but there was nothing to execute or confirm.
+  if (result.fix && !result.fix_results?.length && !result.fix_pending_items?.length) {
+    lines.push("", "## 安全に自動実行できるアクションはありません");
+  }
+
+  if (result.after) {
+    lines.push("", "### 実行後のステータス", ...renderStatusTable(result.after));
   }
 
   return lines.join("\n");
@@ -1158,7 +1282,13 @@ export function render(result) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
-  const result = run(argv);
+  const cwd = typeof args["repo-root"] === "string" ? args["repo-root"] : process.cwd();
+  // Consult the central policy only when --fix needs a gate decision. The
+  // resolver is async (it may dynamic-import the policy skill); run() itself
+  // stays synchronous and just consumes the resolved resolver (or null →
+  // fail-safe ask when the policy skill is absent).
+  const resolvePolicy = args.fix ? await buildPolicyGateResolver(cwd) : undefined;
+  const result = run(argv, { resolvePolicy });
   if (args.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   else process.stdout.write(`${render(result)}\n`);
   process.exit(0);
