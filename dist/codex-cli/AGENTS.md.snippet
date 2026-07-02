@@ -2,6 +2,7 @@
 
 ## Available Skills
 
+- `backlog` — open issue を `backlog.mjs` エンジンで収集し、依存グラフ（drive の依存記法 SSOT を再利用）と固定語彙の優先度規則で並べ、着手候補を提示して drive 引数形式（例 `#12,#15 -> #18`）で出力する。既定は提示のみ、`--drive[=N]` で確認後 drive へ、`--auto` は `auto-ok` ラベル付き issue のみ無確認で drive へ（HATL）。単一リポのみ。
 - `commit` — 変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
 - `commit-conventions` — Conventional Commits のメッセージ生成ルール（Type/Scope 判定表、フォーマット）。他スキルから参照される。
 - `drive` — Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。オーケストレーションではマージ前に cross-cutting を検出・自己解消し、1 run で follow-up を残さない。
