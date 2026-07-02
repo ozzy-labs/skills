@@ -86,7 +86,7 @@ Supported adapters: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`. On an *
 | `remove` (alias `uninstall`) | Uninstall skills. Confirmation required (TTY prompt or `--yes`). `--skills` required. |
 | `fork <skill> <new-name>` | Copy an installed skill to a user-owned, unmanaged name (free to edit; never touched by update/remove). |
 | `diff <skill>` | Show a skill's local edits vs the current upstream. |
-| `hooks <add\|remove> <name>` | Wire/unwire an optional Claude Code hook (`usage-guard`, `observability`) into your local settings. Resolves the script's absolute path, previews a diff, confirms (`--yes` non-interactively). |
+| `hooks <add\|remove\|status> [<name>]` | Wire/unwire/inspect an optional Claude Code hook (`usage-guard`, `observability`). `add`/`remove` resolve the script's absolute path, preview a diff, and confirm (`--yes` non-interactively); `add usage-guard` also suggests the endpoint-path permissions allowlist (`--no-permissions` to skip). `status` reports each hook's wiring and, for a wired usage-guard, diagnoses whether the guard is effective or has degraded to a no-op. |
 
 ### State & editable skills
 
@@ -108,11 +108,21 @@ npx @ozzylabs/skills hooks add observability --scope=user
 # Preview the settings diff without writing anything
 npx @ozzylabs/skills hooks add usage-guard --dry-run
 
+# Wire the hook but skip the permissions suggestion
+npx @ozzylabs/skills hooks add usage-guard --no-permissions
+
 # Remove only the entry this CLI wrote (other hooks stay untouched)
 npx @ozzylabs/skills hooks remove usage-guard
+
+# Inspect wiring + diagnose whether a wired usage-guard is actually effective
+npx @ozzylabs/skills hooks status
 ```
 
 `hooks add` resolves the script from the installed skill dir (run `add --skills=usage-guard` first if it is missing), previews the settings diff, and asks before writing (`--yes` is required on non-interactive / CI runs). It edits `settings.local.json` by default (`--scope=user` for `settings.json`), is idempotent (a re-add is a no-op), only ever touches the entries it owns, and refuses to overwrite an unparseable settings file. The repo still ships no settings/hooks — this only writes your local settings on request.
+
+`hooks add usage-guard` additionally proposes the **permissions allowlist** the endpoint path needs — a `Read(//…/.credentials.json)` and a `Bash(node …/usage-check.mjs:*)` entry (see the skill's §環境要件) — folded into the same diff. It is a non-destructive, idempotent append to `permissions.allow`; `--no-permissions` opts out and still wires the hook. Without those grants the guard silently falls back to `fail-open` (effectively OFF).
+
+`hooks status` is read-only: it scans both settings files and reports, per hook, whether it is wired. For a wired usage-guard it runs `usage-check.mjs` once and diagnoses the `source` — `endpoint`/`cache` mean the guard is effective, while `jsonl`/`fail-open` mean it has degraded to a no-op (with a pointer to the skill's §環境要件). This catches the failure mode where the hook is wired but the endpoint path is blocked, so the guard is quietly off.
 
 ## Consumer setup
 

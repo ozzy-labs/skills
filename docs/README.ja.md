@@ -95,11 +95,21 @@ npx @ozzylabs/skills hooks add observability --scope=user
 # 書き込まずに settings の diff を確認（非対話/CI では適用に --yes 必須）
 npx @ozzylabs/skills hooks add usage-guard --dry-run
 
+# permissions 提案を出さず hook 配線のみ
+npx @ozzylabs/skills hooks add usage-guard --no-permissions
+
 # CLI が書いたエントリのみ削除（他の hook はそのまま）
 npx @ozzylabs/skills hooks remove usage-guard
+
+# 配線状態を確認し、配線済み usage-guard が実効かどうかを診断
+npx @ozzylabs/skills hooks status
 ```
 
 install 済み skill dir から script を解決し（無ければ先に `add --skills=usage-guard`）、settings の diff を提示してから確認する（非対話では `--yes` 必須）。既定は `settings.local.json`（`--scope=user` で `settings.json`）を編集し、再 add は冪等 no-op、自分が書いたエントリのみ操作し、壊れた JSON settings は上書きしない。リポは依然 settings/hooks を配信せず、要求時にローカル settings を書くだけ。
+
+`hooks add usage-guard` は加えて、endpoint 経路に必要な **permissions allowlist**（`Read(//…/.credentials.json)` と `Bash(node …/usage-check.mjs:*)`。詳細は skill の §環境要件）を同じ diff に折り込んで提案する。`permissions.allow` への非破壊・冪等な追記で、`--no-permissions` で見送っても hook 配線は続行する。この許可がないと guard は `fail-open`（事実上 OFF）に縮退する。
+
+`hooks status` は read-only。両方の settings ファイルを走査し hook ごとの配線有無を表示する。配線済み usage-guard については `usage-check.mjs` を 1 回実行して `source` を診断する（`endpoint`/`cache` は実効、`jsonl`/`fail-open` は no-op へ縮退＝§環境要件 へ案内）。hook は配線済みだが endpoint 経路がブロックされ guard が黙って OFF、という失敗を検出できる。
 
 ## Consumer セットアップ
 

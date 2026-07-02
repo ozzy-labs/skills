@@ -1,5 +1,6 @@
-// `skills hooks add|remove` — wire the optional Claude Code hooks that ship as
-// extra files inside a skill directory (ozzy-labs/skills#174 PR 1).
+// `skills hooks add|remove|status` — wire, unwire, or inspect the optional
+// Claude Code hooks that ship as extra files inside a skill directory
+// (ozzy-labs/skills#174 PR 1 = add/remove, PR 2 = status + permissions).
 //
 // Two hooks are opt-in today and require a hand-written absolute path in
 // settings: usage-guard's PreToolUse ceiling (`usage-guard-hook.mjs`) and
@@ -11,11 +12,24 @@
 // every other entry byte-for-byte, and refuses to overwrite a settings file it
 // cannot parse. The repo still ships no settings/hooks — the CLI just writes local
 // settings on explicit user consent (same dry-run / diff / confirm UX as `remove`).
+//
+// PR 2 adds two things on top of that core (#174):
+//   - `hooks status`: scans both settings files and reports, per hook, whether it
+//     is wired. For a wired usage-guard it runs `usage-check.mjs` once and
+//     diagnoses the `source` — `endpoint`/`cache` mean the guard is effective,
+//     `jsonl`/`fail-open` mean it has silently degraded to a no-op (the exact
+//     failure usage-guard's own SKILL.md §環境要件 warns about).
+//   - permissions suggestion: `hooks add usage-guard` also proposes the
+//     permissions allowlist the endpoint path needs (`~/.claude/.credentials.json`
+//     Read + `node …/usage-check.mjs` exec), folded into the same diff. It is a
+//     non-destructive append to `permissions.allow`; `--no-permissions` opts out
+//     and still wires the hook.
 
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseFlags } from "./args.mjs";
 import { didYouMean } from "./detect.mjs";
 import { findPackageRoot } from "./install.mjs";
@@ -42,19 +56,36 @@ export const HOOK_DEFS = {
 
 const HOOK_NAMES = Object.keys(HOOK_DEFS);
 
-const HELP = `npx @ozzylabs/skills hooks <add|remove> <${HOOK_NAMES.join("|")}> [options]
+// Hooks that `status` lists as forward-looking but that are not wireable yet
+// (the policy PreToolUse gate lands in a later #174 PR). Surfacing them keeps the
+// status view honest about what the CLI can and cannot wire today.
+export const PLANNED_HOOK_NAMES = ["policy"];
 
-Wire (or unwire) an optional Claude Code hook shipped with a skill. The hook
-script's absolute path is resolved from the installed skill dir and written into
-your local Claude settings. Only entries this CLI owns are ever modified.
+const HELP = `npx @ozzylabs/skills hooks <add|remove|status> [<${HOOK_NAMES.join("|")}>] [options]
+
+Wire, unwire, or inspect the optional Claude Code hooks shipped with a skill. A
+hook script's absolute path is resolved from the installed skill dir and written
+into your local Claude settings. Only entries this CLI owns are ever modified.
+
+Actions:
+  add <name>      Wire a hook. For usage-guard, also suggests (in the same diff)
+                  the permissions allowlist the endpoint path needs; opt out with
+                  --no-permissions and the hook is still wired.
+  remove <name>   Remove only the hook entry this CLI wrote.
+  status          Report each hook's wiring state. For a wired usage-guard, run
+                  usage-check.mjs once and diagnose whether the guard is effective
+                  (source endpoint/cache) or has degraded to a no-op (jsonl/
+                  fail-open). Read-only — never writes settings.
 
 Hooks:
   usage-guard     PreToolUse ceiling (usage-guard-hook.mjs, matcher "*").
   observability   SessionEnd capture (obs-derive.mjs).
 
 Options:
-  --scope=<user|local>  Settings file to edit: 'local' → settings.local.json
-                        (default), 'user' → settings.json.
+  --scope=<user|local>  Settings file to edit (add/remove): 'local' →
+                        settings.local.json (default), 'user' → settings.json.
+  --no-permissions      (add usage-guard) Skip the permissions allowlist
+                        suggestion; wire the hook only.
   --dry-run             Print the diff + JSON plan and exit. Writes nothing.
   --yes                 Skip the confirmation prompt (required non-interactively).
   -h, --help            Show this help.
@@ -63,6 +94,7 @@ Options:
 const SCHEMA = {
   scope: "string",
   "dry-run": "boolean",
+  "no-permissions": "boolean",
   yes: "boolean",
   help: "boolean",
 };
@@ -189,6 +221,123 @@ export function removeHookEntry(settings, def) {
 }
 
 /**
+ * Build the permissions allowlist rules the usage-guard endpoint path needs
+ * (usage-guard SKILL.md §環境要件): a Read of the OAuth credentials file and a
+ * Bash exec of the usage-check script. Claude Code permission rule syntax:
+ *   - absolute file reads use a DOUBLE-slash prefix → `Read(//abs/path)`
+ *   - Bash rules are command prefixes with a `:*` "any trailing args" suffix.
+ *
+ * @param {{ credentialsPath: string, usageCheckPath: string }} paths
+ * @returns {string[]}
+ */
+export function buildUsagePermissionRules({ credentialsPath, usageCheckPath }) {
+  return [`Read(/${credentialsPath})`, `Bash(node ${usageCheckPath}:*)`];
+}
+
+/**
+ * Pure: non-destructively append permission rules to `permissions.allow`.
+ * Idempotent — a rule already present (byte-for-byte) is skipped. `deny`/`ask`
+ * and every existing allow entry are preserved untouched.
+ *
+ * @param {object} settings
+ * @param {string[]} rules
+ * @returns {{ settings: object, changed: boolean, added: string[] }}
+ */
+export function addPermissionEntries(settings, rules) {
+  const next = structuredClone(settings);
+  if (!next.permissions || typeof next.permissions !== "object" || Array.isArray(next.permissions)) {
+    next.permissions = {};
+  }
+  if (!Array.isArray(next.permissions.allow)) next.permissions.allow = [];
+  const allow = next.permissions.allow;
+  const added = [];
+  for (const rule of rules) {
+    if (!allow.includes(rule)) {
+      allow.push(rule);
+      added.push(rule);
+    }
+  }
+  if (added.length === 0) return { settings, changed: false, added: [] };
+  return { settings: next, changed: true, added };
+}
+
+/**
+ * Classify a usage-check `source` for the status diagnosis. `endpoint`/`cache`
+ * mean the guard is reading the real OAuth signal (effective); `jsonl`/
+ * `fail-open` mean it has degraded to a coarse estimate or a no-op — the exact
+ * silent-OFF failure usage-guard's §環境要件 warns about. Anything else is
+ * unknown.
+ *
+ * @param {string|null|undefined} source
+ * @returns {{ effective: boolean|null, symbol: string, label: string }}
+ */
+export function classifyUsageSource(source) {
+  if (source === "endpoint" || source === "cache") {
+    return { effective: true, symbol: "✅", label: `guard is effective (source=${source})` };
+  }
+  if (source === "jsonl" || source === "fail-open") {
+    return {
+      effective: false,
+      symbol: "⚠️",
+      label: `guard is DEGRADED (source=${source}) — endpoint path unavailable; see usage-guard SKILL.md §環境要件 (endpoint 経路が使えること)`,
+    };
+  }
+  return {
+    effective: null,
+    symbol: "?",
+    label: source ? `unknown source '${source}'` : "could not determine source",
+  };
+}
+
+/** Find the command string that wires `def` in `settings`, or null. */
+function findWiredCommand(settings, def) {
+  const bucket = settings?.hooks?.[def.event];
+  if (!Array.isArray(bucket)) return null;
+  for (const group of bucket) {
+    if (!group || !Array.isArray(group.hooks)) continue;
+    for (const h of group.hooks) {
+      if (commandReferencesScript(h?.command, def.script)) return h.command;
+    }
+  }
+  return null;
+}
+
+/**
+ * Diagnose the usage-check `source` for `hooks status`. Runs `node <scriptPath>`
+ * once and parses the last JSON line's `source`. A fixture JSON can be injected
+ * via `OZZYLABS_SKILLS_USAGE_CHECK_JSON` (bypasses the spawn) so status is
+ * diagnosable without touching the real endpoint / credentials — used by tests
+ * and as a manual override. Any failure resolves to `{ source: null }` so status
+ * stays read-only and never throws.
+ *
+ * @param {{ scriptPath: string|null, env?: NodeJS.ProcessEnv, spawnImpl?: Function }} opts
+ * @returns {{ source: string|null, error?: string }}
+ */
+export function diagnoseUsageSource({ scriptPath, env = process.env, spawnImpl = spawnSync }) {
+  const fixture = env?.OZZYLABS_SKILLS_USAGE_CHECK_JSON;
+  if (fixture !== undefined && fixture !== "") {
+    try {
+      return { source: JSON.parse(fixture)?.source ?? null };
+    } catch {
+      return { source: null, error: "invalid OZZYLABS_SKILLS_USAGE_CHECK_JSON fixture" };
+    }
+  }
+  if (!scriptPath) return { source: null, error: "usage-check.mjs not found" };
+  try {
+    const res = spawnImpl("node", [scriptPath], { encoding: "utf8", timeout: 15_000, env });
+    if (res?.error) return { source: null, error: res.error.message };
+    const lines = String(res?.stdout ?? "")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    if (lines.length === 0) return { source: null, error: "no usage-check output" };
+    return { source: JSON.parse(lines[lines.length - 1])?.source ?? null };
+  } catch (err) {
+    return { source: null, error: err.message };
+  }
+}
+
+/**
  * Minimal LCS line diff. Returns `+`/`-`/`  ` prefixed lines (the caller filters
  * to changed lines for display). Dependency-free — settings files are small.
  *
@@ -280,12 +429,21 @@ export async function runHooks(argv, opts = {}) {
   }
 
   const [action, name] = positionals;
-  if (action !== "add" && action !== "remove") {
+  if (action !== "add" && action !== "remove" && action !== "status") {
     process.stderr.write(
-      `error: expected 'add' or 'remove'${action ? ` (got '${action}')` : ""}\n\n${HELP}`,
+      `error: expected 'add', 'remove', or 'status'${action ? ` (got '${action}')` : ""}\n\n${HELP}`,
     );
     return 1;
   }
+
+  const base = process.env.OZZYLABS_SKILLS_HOME ?? homedir();
+
+  // `status` takes no hook name and never writes — dispatch before the
+  // name/def/scope validation the mutating actions need.
+  if (action === "status") {
+    return await runStatus({ base, opts, env: process.env });
+  }
+
   if (!name) {
     process.stderr.write(`error: hooks ${action} requires a hook name (${HOOK_NAMES.join(" | ")})\n`);
     return 1;
@@ -304,7 +462,6 @@ export async function runHooks(argv, opts = {}) {
     return 1;
   }
 
-  const base = process.env.OZZYLABS_SKILLS_HOME ?? homedir();
   const claudeDir = join(base, ".claude");
   const settingsFile = join(claudeDir, scope === "user" ? "settings.json" : "settings.local.json");
 
@@ -316,13 +473,10 @@ export async function runHooks(argv, opts = {}) {
   const currentSettings = read.settings;
 
   let command = null;
+  let permissionsAdded = [];
   let result;
   if (action === "add") {
-    let scopeRoots = opts.scopeRoots;
-    if (!scopeRoots) {
-      const packageRoot = await findPackageRoot().catch(() => null);
-      scopeRoots = packageRoot ? [base, packageRoot] : [base];
-    }
+    const scopeRoots = await resolveScopeRoots(base, opts);
     const scriptPath = await resolveScriptPath(scopeRoots, def);
     if (!scriptPath) {
       process.stderr.write(
@@ -331,7 +485,24 @@ export async function runHooks(argv, opts = {}) {
       return 1;
     }
     command = buildCommand(scriptPath);
-    result = addHookEntry(currentSettings, def, command);
+    const hookRes = addHookEntry(currentSettings, def, command);
+    let working = hookRes.settings;
+    let permsChanged = false;
+    // usage-guard also proposes the permissions allowlist its endpoint path needs
+    // (credentials Read + node exec, per §環境要件) folded into the same diff.
+    // Non-destructive + idempotent; `--no-permissions` opts out yet still wires
+    // the hook (#174 PR 2).
+    if (name === "usage-guard" && !parsed.values["no-permissions"]) {
+      const rules = buildUsagePermissionRules({
+        credentialsPath: join(base, ".claude", ".credentials.json"),
+        usageCheckPath: join(dirname(scriptPath), "usage-check.mjs"),
+      });
+      const permsRes = addPermissionEntries(working, rules);
+      working = permsRes.settings;
+      permsChanged = permsRes.changed;
+      permissionsAdded = permsRes.added;
+    }
+    result = { settings: working, changed: hookRes.changed || permsChanged };
   } else {
     result = removeHookEntry(currentSettings, def);
   }
@@ -351,9 +522,15 @@ export async function runHooks(argv, opts = {}) {
     .filter((l) => l.startsWith("+") || l.startsWith("-"))
     .join("\n");
 
+  const permBlock =
+    permissionsAdded.length > 0
+      ? `\n  + permissions.allow (suggested — --no-permissions to skip; declining still wires the hook):\n${permissionsAdded
+          .map((r) => `      ${r}`)
+          .join("\n")}`
+      : "";
   const header =
     action === "add"
-      ? `hooks add ${name} → ${settingsFile}\n  + ${def.event}${def.matcher ? ` (matcher: ${def.matcher})` : ""}: ${command}`
+      ? `hooks add ${name} → ${settingsFile}\n  + ${def.event}${def.matcher ? ` (matcher: ${def.matcher})` : ""}: ${command}${permBlock}`
       : `hooks remove ${name} → ${settingsFile}\n  - ${def.event} entries referencing ${def.script}`;
   process.stdout.write(`${header}\n\nDiff:\n${diff}\n`);
 
@@ -363,6 +540,7 @@ export async function runHooks(argv, opts = {}) {
     event: def.event,
     settings_file: settingsFile,
     ...(command ? { command } : {}),
+    ...(permissionsAdded.length > 0 ? { permissions_added: permissionsAdded } : {}),
     changed: true,
   };
 
@@ -386,6 +564,124 @@ export async function runHooks(argv, opts = {}) {
 
   await mkdir(claudeDir, { recursive: true });
   await writeFile(settingsFile, `${afterStr}\n`);
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  return 0;
+}
+
+/** Resolve the roots `resolveScriptPath` scans (tests may inject `scopeRoots`). */
+async function resolveScopeRoots(base, opts) {
+  if (opts.scopeRoots) return opts.scopeRoots;
+  const packageRoot = await findPackageRoot().catch(() => null);
+  return packageRoot ? [base, packageRoot] : [base];
+}
+
+/**
+ * Resolve the usage-check.mjs the status diagnosis should run: prefer the sibling
+ * of the actually-wired usage-guard-hook.mjs (so it matches the wired install
+ * byte-for-byte), else fall back to normal skill-dir resolution.
+ *
+ * @param {string|null} wiredCommand the wired PreToolUse command string
+ * @param {string[]} scopeRoots
+ * @returns {Promise<string|null>}
+ */
+async function resolveUsageCheckPath(wiredCommand, scopeRoots) {
+  const m = /(\S*usage-guard-hook\.mjs)/.exec(wiredCommand ?? "");
+  if (m) {
+    const sibling = join(dirname(m[1]), "usage-check.mjs");
+    if (existsSync(sibling)) return sibling;
+  }
+  return await resolveScriptPath(scopeRoots, { skill: "usage-guard", script: "usage-check.mjs" });
+}
+
+/**
+ * `hooks status` — read-only wiring report. Scans both settings files, reports
+ * per-hook wiring, and for a wired usage-guard runs usage-check.mjs once to
+ * diagnose whether the guard is effective (endpoint/cache) or degraded
+ * (jsonl/fail-open). Never writes settings.
+ *
+ * @param {{ base: string, opts: object, env: NodeJS.ProcessEnv }} ctx
+ * @returns {Promise<number>} exit code (always 0 — read-only)
+ */
+async function runStatus({ base, opts, env }) {
+  const claudeDir = join(base, ".claude");
+  const files = [
+    { label: "settings.local.json", path: join(claudeDir, "settings.local.json") },
+    { label: "settings.json", path: join(claudeDir, "settings.json") },
+  ];
+  const loaded = [];
+  for (const f of files) {
+    const r = await readSettings(f.path);
+    // Read-only diagnostic: a parse error is noted, not fatal (unlike the
+    // mutating actions, which refuse to overwrite an unparseable file).
+    loaded.push({ ...f, settings: r.error ? {} : r.settings, error: r.error });
+  }
+
+  const rows = [];
+  for (const hookName of HOOK_NAMES) {
+    const def = HOOK_DEFS[hookName];
+    let wiredIn = null;
+    let command = null;
+    for (const f of loaded) {
+      const cmd = findWiredCommand(f.settings, def);
+      if (cmd) {
+        wiredIn = f.label;
+        command = cmd;
+        break;
+      }
+    }
+    rows.push({ name: hookName, event: def.event, wired: Boolean(command), settings_file: wiredIn, command });
+  }
+
+  // usage-guard source diagnosis (only when wired).
+  let diagnosis = null;
+  const ug = rows.find((r) => r.name === "usage-guard");
+  if (ug?.wired) {
+    const scopeRoots = await resolveScopeRoots(base, opts);
+    const usageCheckPath = await resolveUsageCheckPath(ug.command, scopeRoots);
+    diagnosis = diagnoseUsageSource({ scriptPath: usageCheckPath, env });
+  }
+
+  // ── render (human-readable) ─────────────────────────────────────────────────
+  const out = [`Hook wiring status — ${claudeDir}`, ""];
+  for (const row of rows) {
+    if (row.wired) {
+      out.push(`  ${row.name.padEnd(14)}(${row.event}) ✅ wired [${row.settings_file}]`);
+      if (row.name === "usage-guard" && diagnosis) {
+        const c = classifyUsageSource(diagnosis.source);
+        out.push(`      usage-check: ${c.symbol} ${c.label}`);
+      }
+    } else {
+      out.push(
+        `  ${row.name.padEnd(14)}(${row.event}) ✗ not wired — \`npx @ozzylabs/skills hooks add ${row.name}\``,
+      );
+    }
+  }
+  for (const planned of PLANNED_HOOK_NAMES) {
+    out.push(`  ${planned.padEnd(14)}(planned)    — not yet available`);
+  }
+  for (const f of loaded.filter((x) => x.error)) {
+    out.push(`  note: ${f.label} unreadable — ${f.error}`);
+  }
+  process.stdout.write(`${out.join("\n")}\n\n`);
+
+  // ── machine-readable summary ────────────────────────────────────────────────
+  const summary = {
+    action: "status",
+    base: claudeDir,
+    hooks: rows.map((r) => ({
+      name: r.name,
+      event: r.event,
+      wired: r.wired,
+      ...(r.settings_file ? { settings_file: r.settings_file } : {}),
+      ...(r.name === "usage-guard" && diagnosis
+        ? {
+            usage_source: diagnosis.source,
+            usage_effective: classifyUsageSource(diagnosis.source).effective,
+          }
+        : {}),
+    })),
+    planned: PLANNED_HOOK_NAMES,
+  };
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   return 0;
 }
