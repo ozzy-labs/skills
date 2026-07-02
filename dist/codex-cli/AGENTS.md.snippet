@@ -5,6 +5,7 @@
 - `backlog` — open issue を `backlog.mjs` エンジンで収集し、依存グラフ（drive の依存記法 SSOT を再利用）と固定語彙の優先度規則で並べ、着手候補を提示して drive 引数形式（例 `#12,#15 -> #18`）で出力する。既定は提示のみ、`--drive[=N]` で確認後 drive へ、`--auto` は `auto-ok` ラベル付き issue のみ無確認で drive へ（HATL）。単一リポのみ。
 - `commit` — 変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
 - `commit-conventions` — Conventional Commits のメッセージ生成ルール（Type/Scope 判定表、フォーマット）。他スキルから参照される。
+- `deps` — renovate / dependabot 等の automation PR を `deps.mjs` エンジンで列挙し、semver 区分（PR タイトル / branch / manifest diff、grouped は最大 bump）・CI 状態・lockfile 整合・peer / engines 変更で固定語彙判定する。patch/minor + CI green + lockfile 整合 → auto-merge 候補、major / CI red / pending / peer / engines → 要確認。author 判定は health 領域 15 と同一（`*[bot]` / `app/*`、release-please は除外＝ /release の責務）。`--dry-run` は判定のみ、`--auto` は確認なし実行。merge は中央 autonomy policy の irreversible gate に従う（`--auto` は policy 上書き）。
 - `drive` — Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。オーケストレーションではマージ前に cross-cutting を検出・自己解消し、1 run で follow-up を残さない。
 - `implement` — Issue または指示をもとに、ブランチ作成・実装計画・コード変更を行う。Issue 番号またはテキスト指示を受け取る。
 - `lessons-triage` — セッション教訓 queue（~/.agents/lessons/queue.jsonl）を消化し、transcript から User Skills に関する教訓を抽出して、承認された分のみ ozzy-labs/skills へ issue 起票する。「教訓を整理して」「lessons を消化して」「セッションの振り返り」で発火。
