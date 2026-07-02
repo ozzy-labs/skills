@@ -522,6 +522,14 @@ test("resolveFixGates: resolver present → per-class gate; absent → fail-safe
   assert.equal(plan2[0].gate, POLICY_FAIL_SAFE_GATE);
   assert.equal(plan2[0].gate, "ask");
   assert.equal(plan2[0].gate_source, "policy-absent");
+
+  // A resolver that THROWS is a fail-safe: the item degrades to ask, never a
+  // looser gate, and the engine does not crash.
+  const plan3 = [{ label: "delete", policy: FIX_LABEL_POLICY.delete }];
+  resolveFixGates(plan3, () => {
+    throw new Error("boom");
+  });
+  assert.equal(plan3[0].gate, "ask");
 });
 
 test("loadPolicyResolver: resolves the real sibling policy-read.mjs; import failure → null", async () => {

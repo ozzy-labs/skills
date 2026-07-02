@@ -988,7 +988,14 @@ export function resolveFixGates(plan, resolvePolicy) {
   const canResolve = typeof resolvePolicy === "function";
   for (const p of plan) {
     if (canResolve) {
-      const r = resolvePolicy(p.policy) ?? {};
+      // fail-safe: a resolver that throws (or returns a value we cannot trust)
+      // degrades to the strict gate — autonomy is never loosened by an error.
+      let r = {};
+      try {
+        r = resolvePolicy(p.policy) ?? {};
+      } catch {
+        r = {};
+      }
       p.gate = typeof r.gate === "string" ? r.gate : POLICY_FAIL_SAFE_GATE;
       p.gate_source = r.source ?? "policy";
     } else {
