@@ -1,11 +1,13 @@
 ---
 name: topics
-description: GitHub topics 候補を制約検証・人気度測定・broad+narrow / 単数複数比較・ozzy-labs 慣行ハードコードで選定し、`gh repo edit --add-topic` で適用する。スコープは ozzy-labs 内利用のみ。
+description: GitHub topics 候補を `topics.mjs` エンジンで制約検証・人気度測定・broad+narrow / 単数複数比較・ozzy-labs 慣行ハードコードして選定し、policy の `externally-visible` gate（既定 batch-confirm）に従って `gh repo edit --add-topic` で適用する。スコープは ozzy-labs 内利用のみ。
 ---
 
 # topics - research-driven GitHub topics setup（ozzy-labs scope）
 
-GitHub topics の選定は、毎リポで「候補列挙 → 人気度確認 → 公式制約 validation → 単数複数比較 → ozzy-labs 慣行と整合 → `gh repo edit --add-topic` 適用」の手作業を繰り返している。本スキルは選定段階の判断と適用段階の作業を一本化する。
+GitHub topics の選定は、毎リポで「候補列挙 → 公式制約 validation → 人気度確認 → broad+narrow / 単数複数比較 → ozzy-labs 慣行と整合 → `gh repo edit --add-topic` 適用」の手作業を繰り返している。本スキルは選定段階の判断と適用段階の作業を一本化する。
+
+決定論（公式制約 validation・人気度取得・broad+narrow 5x 判定・単数複数比較・ozzy-labs 慣行の変換 / 除外 / ハードコード保持・最終選定・レンダリング）は同梱の **`topics.mjs` エンジン**が担う（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1、先行例 `usage-check.mjs` / `skill-metrics.mjs` / `policy-read.mjs` / `health-check.mjs`）。本 SKILL.md は判断層 — **いつエンジンを呼ぶか・結果をどう提示するか・どこで人に確認するか（policy gate）** — に絞る。
 
 **スコープ**: ozzy-labs 配下リポジトリの利用に限定する。クロス-org 汎用化・永続キャッシュ・他 org 用慣行は対象外（[スコープ外](#スコープ外)参照）。
 
@@ -13,92 +15,30 @@ GitHub topics の選定は、毎リポで「候補列挙 → 人気度確認 →
 
 ```text
 topics <candidate-list>
-  --repo owner/repo  (省略時は cwd の origin)
-  --apply            (確認なしで gh repo edit を実行)
+  --repo owner/repo  (省略時は cwd の origin から解決)
+  --apply            (policy の batch-confirm を明示 opt-out し、確認なしで適用)
   --dry-run          (適用せず分析だけ)
 ```
 
 - `<candidate-list>` は `,` 区切り、または複数引数
-- `--apply` と `--dry-run` を同時指定した場合は `--dry-run` を優先する（誤適用防止）
-- `--repo` 未指定時は `git remote get-url origin` から `owner/repo` を抽出する。GitHub remote が見つからない場合は中断する
+- `--apply` と `--dry-run` を同時指定した場合は `--dry-run` を優先する（誤適用防止。エンジンが強制する）
+- `--repo` 未指定時はエンジンが `git remote get-url origin` から `owner/repo` を抽出する。GitHub remote が見つからない場合は結果 JSON の `repo_error` に載る
 
 ## 手順
 
-### Step 1: GitHub 公式制約 validation
+1. **本 SKILL.md と同じディレクトリ**の `topics.mjs` を Bash で実行する（引数はそのまま渡す）。Claude Code では `~/.claude/skills/topics/topics.mjs`（dogfood は `<repo>/.claude/skills/topics/topics.mjs`、Codex/Gemini は `.agents/skills/topics/topics.mjs`）:
 
-GitHub topics の公式仕様に従って候補を篩い分ける（公式制約。Settings 画面でも同じ規則）:
+   ```bash
+   node <この skill のディレクトリ>/topics.mjs <candidate-list> [--repo owner/repo] [--dry-run]
+   ```
 
-| 制約 | 内容 |
-| --- | --- |
-| 文字種 | 半角 lowercase 英数字とハイフン `-` のみ（`a-z`, `0-9`, `-`） |
-| 形式 | 先頭・末尾はハイフン不可 |
-| 長さ | 最大 50 文字 |
-| 個数 | 1 リポにつき最大 20 個 |
+   エンジンは既定で **整形済みテキスト**（候補数 / 制約 filter 結果 / 人気度表 / broad+narrow・単数複数の判定 / 慣行変換 / 最終 topics / apply プラン）を stdout に出力する。`--json` で構造化 JSON を得られる。
 
-違反した候補は **除外して報告** する。除外理由を明示する（例: `Foo-Bar → 除外（uppercase 含む）`）。20 個超過時は重複排除後の上位を採用し、超過分を報告する。
+2. エンジンの出力を **そのまま提示**する（再整形・再解釈しない — 制約 validation・5x 判定・単数複数・ozzy-labs 慣行はすべてエンジンの責務）。人気度不明（API 失敗）の候補は表に `人気度不明` として明示され、5x / 単数複数比較の対象外になっている。
+3. `repo_error` が立っている（GitHub remote 不在）場合は、その旨を提示し `--repo owner/repo` の明示を促す。
+4. 適用（`gh repo edit --add-topic`）は下記 **policy の `externally-visible` gate** に従う。
 
-### Step 2: 人気度取得（session 内キャッシュ）
-
-各候補について GitHub Search API でリポジトリ件数を取得する:
-
-```bash
-gh api "search/repositories?q=topic:<name>" --jq .total_count
-```
-
-**session 内キャッシュ**: 同一 session で同じ topic を複数回問い合わせる場合（broad+narrow 比較・単数複数比較などで再利用）、初回値をメモして再呼出を抑止する。永続化はしない（[スコープ外](#スコープ外) 2 を参照）。
-
-API 失敗時は当該候補のみ「人気度不明」と報告し、他候補の処理は継続する。判定上は `0` 扱いにせず、後続の 5x 比較や単数複数比較でも対象外とする。
-
-### Step 3: broad+narrow 併記の閾値判定
-
-候補内で意味的に重なる broad/narrow ペアを検出し、人気度比から推奨を決定する:
-
-| 関係 | 推奨 |
-| --- | --- |
-| broad ≥ narrow × 5 | broad-only を推奨（narrow は冗長） |
-| broad / narrow が同じオーダー（5 倍未満かつ broad のほうが多い） | 併記を推奨 |
-| narrow > broad | ozzy-labs ハードコード例外として扱う（Step 5 を優先） |
-
-**broad/narrow ペアの判定基準**: 候補リスト内で、片方が他方の prefix / 完全包含語であり、ハイフンで連結された派生語の関係にあるものを検出する（例: `ai` ⊃ `ai-agents`、`agent` ⊃ `multi-agent`）。完全一致ではない単純な共起（例: `news` と `release-notes`）は対象外。
-
-### Step 4: 単数 / 複数の標準形比較
-
-候補内に末尾 `-s` の付替えで意味が一致する組がある場合、両者の人気度を比較し優位な形を推奨する。
-
-例:
-
-- `agent` vs `agents` → 人気度の高い方を採用
-- `topic` vs `topics`
-
-Step 3 と重複する場合（`agent` ⊃ `multi-agent` のような派生語ペアではない単純な単数複数）、Step 4 のみ適用する。
-
-### Step 5: ozzy-labs 慣行のハードコード
-
-ozzy-labs リポ群で繰り返し採用してきた慣行をハードコードする。Step 3/4 の機械判定より優先する:
-
-1. **`claude-code` は `claude` の上位扱いとして許容**: Anthropic の製品名 topic として `claude` 単独より優先度が高い。両者が候補にあれば併記を推奨する（broad+narrow 5x 例外。実測値 `claude-code` ≈ 25k vs `claude` ≈ 21k で narrow > broad の典型）
-2. **`multi-agent` 形を採用、`multi-agents` / `multiagent` は除外**: ハイフン付き単数形に統一する
-3. **`*-cli` サフィックス除去ルール**: `codex-cli`, `gemini-cli`, `copilot-cli` は `codex`, `gemini`, `copilot` に変換する。**例外**: `claude-code` は製品名（ハイフンが `cli` を意味しない）ため変換しない
-
-ハードコードによる変換・除外は理由とともに報告する（例: `codex-cli → codex（*-cli サフィックス除去）`、`multiagent → 除外（multi-agent に統一）`）。
-
-### Step 6: 出力と適用
-
-#### 出力
-
-```text
-Candidates: 19
-Filtered (constraints): 19/19 valid
-Popularity:
-  ai           120,879
-  ai-agents     28,093
-  claude-code   25,514  (>= claude × 1.2 — both retained per ozzy-labs convention)
-  claude        21,062
-  ...
-Final 16 topics: ai, ai-agents, agentic, multi-agent, cli, claude, claude-code, codex, gemini, copilot, rss, web-scraping, news, release-notes, research, markdown
-```
-
-#### 適用（policy の `externally-visible` gate に従う）
+## 適用（policy の `externally-visible` gate に従う）
 
 `gh repo edit --add-topic` の適用は **外部可視アクション**。個別の承認ゲートを prose にハードコードせず、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙の SSOT）に従う。分類とゼロコンフィグ既定:
 
@@ -115,42 +55,38 @@ node <policy skill のディレクトリ>/policy-read.mjs --action=topics-apply 
 
 flag は policy と整合させる:
 
-- `--dry-run` 指定時: 出力のみ、適用も確認もしない（API 呼び出しなし）
-- `--apply` 指定時: **`batch-confirm` の明示 opt-out**。確認なしで `gh repo edit <owner/repo> --add-topic <topic1>,<topic2>,...` を実行する
-- どちらも未指定時: policy の gate に従う。gate=`batch-confirm`（既定）では最終 topics リストを 1 回まとめて提示して一括確認する（ホストの確認 UI で適用可否を確認。テキスト出力で `Apply? [Y/n]` のような選択肢を列挙しない。Claude Code では AskUserQuestion — `SKILL.claude-code.md` 参照）。gate=`proceed` なら確認なしで適用、gate=`ask` なら 1 topic ずつ確認する
+- `--dry-run` 指定時: エンジンは分析のみ出力し、適用も確認もしない（`gh repo edit` を呼ばない）
+- `--apply` 指定時: **`batch-confirm` の明示 opt-out**。エンジンが確認なしで `gh repo edit <owner/repo> --add-topic <topic1>,<topic2>,...` を実行し、`gh repo view --json repositoryTopics` で検証まで行う
+- どちらも未指定時（`plan` モード）: エンジンは適用せず `apply_command`（実行予定コマンド）を返す。gate に従って人に確認する:
+  - gate=`batch-confirm`（既定）: 最終 topics リストを 1 回まとめて提示して一括確認する（ホストの確認 UI。テキスト出力で `Apply? [Y/n]` を列挙しない。Claude Code では AskUserQuestion — `SKILL.claude-code.md` 参照）。承認されたら **同じ引数に `--apply` を付けて再実行**する
+  - gate=`proceed`: 確認なしで `--apply` 付き再実行
+  - gate=`ask`: 1 topic ずつ確認する
 
 **policy 不在でも壊れない:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は厳しい側（`ask`）へ倒す。`policy` skill 未配置の環境では上表のゼロコンフィグ既定 gate（`externally-visible`=`batch-confirm`）を直接適用する。
 
-適用後、結果を確認する:
+適用後、エンジンは実適用値（`apply.verified_topics`）を返す。期待値（`final_topics`）と実適用値の差分を最終レポートに含める。
 
-```bash
-gh repo view <owner/repo> --json repositoryTopics
-```
+## エラーハンドリング（エンジンが JSON に載せる）
 
-期待値（適用候補）と実適用値の差分を最終レポートに含める。
-
-## エラーハンドリング
-
-| 状況 | 動作 |
+| 状況 | エンジンの動作 |
 | --- | --- |
-| `gh` CLI が未認証 | エラーメッセージを表示して中断（GitHub Search API も失敗するため） |
-| GitHub Search API rate limit / network error | 該当候補のみ「人気度不明」と報告し、他は継続。判定上は対象外（0 扱いにしない） |
-| `--repo` 未指定で GitHub remote 不在 | 中断し、`--repo owner/repo` の明示を促す |
-| 制約違反候補 100% | 「適用可能な候補なし」と報告し中断（API は呼ばない） |
-| `gh repo edit --add-topic` 失敗 | 失敗 topic を列挙して中断（部分成功した topic は再表示する） |
+| `gh` CLI が未認証 | `gh_available:false`。各候補の popularity は `null` + `popularity_errors` に理由。5x / 単数複数比較は対象外（0 扱いにしない）。SKILL 判断層は「人気度不明のため信頼できる比較不可」を提示する |
+| GitHub Search API rate limit / network error | 該当候補のみ `popularity=null` + 理由。他候補は継続 |
+| `--repo` 未指定で GitHub remote 不在 | `repo_error` を立てる。適用は行わない |
+| 制約違反候補 100% | `error: no applicable candidates`。popularity API は呼ばない |
+| `gh repo edit --add-topic` 失敗（`--apply` 時） | `apply.applied:false` + `apply.error`。SKILL 判断層が失敗を提示する |
 
 ## スコープ外
 
 | 項目 | 除外理由 |
 | --- | --- |
 | 1. クロス-org 汎用化 | 現時点では ozzy-labs 専用。汎用化は別 issue で検討 |
-| 2. 永続キャッシュ | session 内のみ。複数 session に跨る最適化は対象外 |
+| 2. 永続キャッシュ | session 内のみ（エンジンは 1 実行内で各 topic を 1 回だけ問い合わせる）。複数 session に跨る最適化は対象外 |
 | 3. topics 適用部分の他リポ責務 | `commons/init-templates.sh` の `--topics` は「指定リストの適用」のみを担う。本スキルは選定支援、commons は適用、と責務を分離する。両者は人間オペレータ経由で連携する |
 
 ## 注意事項
 
 - `.env` ファイルは読み取り・ステージングしない
-- `gh` CLI が未認証の場合はエラーメッセージを表示して中断する
-- ハードコードされた ozzy-labs 慣行（Step 5）は機械判定より優先する。例外を増やす場合は本スキル MD の改訂で行う（Claude の自由判断で慣行拡張しない）
+- ハードコードされた ozzy-labs 慣行（`claude-code` 例外・`*-cli` 除去・`multi-agent` 形固定・`claude`+`claude-code` 併記保持）はエンジン内に実装され、機械判定（broad+narrow 5x / 単数複数）より優先する。例外を増やす場合は `topics.mjs` + 本 SKILL.md の同時改訂で行う（Claude の自由判断で慣行拡張しない）
 - topics 適用は policy の `externally-visible` gate（既定 `batch-confirm`）に従う。個別の承認ゲートを prose にハードコードしない
 - `--apply` は `batch-confirm` の明示 opt-out として確認をスキップするため、必ず `--dry-run` で内容を確認した後に使う運用を推奨する
