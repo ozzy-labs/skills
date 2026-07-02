@@ -133,6 +133,7 @@ gate ごとの挙動:
 
 - `.env` ファイルは読み取り・ステージングしない
 - 依存記法の SSOT は drive（`drive-plan.mjs`）。backlog は import で再利用し、規則を再掲しない
+- **`drive` skill を同階層に要する**: `backlog.mjs` は sibling の `drive/drive-plan.mjs` を import する（依存規則の重複を避けるため）。backlog は drive へ handoff する skill なので drive は常に併存する前提。単体 install（backlog のみ）は想定しない
 - 優先度は固定語彙（上表）でエンジンが決定する。Claude は再ソートしない
 - `--auto` は必ず `auto-ok` ラベルでゲートする（ゲーティングなしの無確認起動は存在しない）
 - drive 起動は policy の `externally-visible` gate（既定 `batch-confirm`）に従う
