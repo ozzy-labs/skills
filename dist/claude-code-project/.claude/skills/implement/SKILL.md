@@ -18,15 +18,18 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 - **引数なしの場合:** AskUserQuestion で「何を実装しますか？（Issue 番号 or 説明）」と確認する（`answers` パラメータは設定しない）
 - **`gh` CLI エラー時:** 認証エラーの場合は `gh auth login` の実行を案内して中断する
 
-### 実装計画の確認
+### 実装計画の確認（policy の gate に従う）
 
-実装計画を提示した後、AskUserQuestion で確認する（`answers` パラメータは設定しない）:
+「アクション分類と policy 参照」で解決した gate に応じて分岐する:
 
-- **「この計画で実装」**
-- **「計画を修正」**
-- **「キャンセル」**
+- **gate=`proceed`（`reversible-local` の既定）:** AskUserQuestion を出さず、計画を提示して実装を進める（計画・変更内容を audit trail として報告に残す）
+- **gate=`ask`（`irreversible`: migration / データ削除 / CI・リリース設定変更）:** 実装計画を提示した後、AskUserQuestion で確認する（`answers` パラメータは設定しない）:
+  - **「この計画で実装」**
+  - **「計画を修正」**
+  - **「キャンセル」**
+- **gate=`batch-confirm`:** 着手前に 1 回だけまとめて確認する
 
-**重要:** 承認なしにコード変更を開始しない。
+**drive 配下:** 自律実行が委任済みのため、`reversible-local` の `proceed` により従来どおり承認をスキップして進める。`ask` と判定したアクションのみ確認する。
 
 ### 完了後の次のアクション
 
