@@ -1,16 +1,11 @@
-// Validate the topics skill (issue #63).
+// Tests for the topics skill (issue #63) — engine-based after ADR-0028 R1.
 //
-// The topics skill is a prompt-driven workflow: there is no JS module that
-// implements topic selection. These tests therefore cover two things:
-//
-//   1. SKILL.md / SKILL.claude-code.md present and structurally valid
-//      (frontmatter shape + name match + documented behaviors).
-//   2. Fixture-based assertions that exercise the documented validation
-//      rules (GitHub constraints, broad+narrow 5x ratio, singular/plural
-//      comparison, ozzy-labs hardcoded conventions). The fixtures are pure
-//      data; the rules are reimplemented here as the canonical reference
-//      that the SKILL.md is expected to describe. If the SKILL.md drifts
-//      from these rules, doc-content assertions in this file catch it.
+// The determinism now lives in `.agents/skills/topics/topics.mjs`, so these
+// tests drive the ENGINE directly: fixture inputs -> topics.mjs JSON output
+// (constraint filter / popularity 5x / singular-plural / ozzy conventions /
+// apply plan), with `gh` and `git` dependency-injected. A thin layer of
+// doc-content assertions keeps SKILL.md / the companion honest about the
+// engine call + the policy gate (they no longer re-encode the rules).
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -18,21 +13,103 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  applyCountCap,
+  applyOzzyConventions,
+  broadNarrowDecision,
+  detectBroadNarrowPairs,
+  detectSingularPluralPairs,
+  fetchPopularity,
+  filterConstraints,
+  isBroadOf,
+  ozzyHardcodedRetentions,
+  parseArgs,
+  parseRepoSlug,
+  render,
+  run,
+  selectTopics,
+  singularPluralDecision,
+  validateConstraint,
+} from "../.agents/skills/topics/topics.mjs";
 import { parseSkillDocument } from "../scripts/lib/frontmatter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TOPICS_DIR = join(ROOT, ".agents", "skills", "topics");
 const SKILL_MD = join(TOPICS_DIR, "SKILL.md");
 const SKILL_CLAUDE_MD = join(TOPICS_DIR, "SKILL.claude-code.md");
+const ENGINE = join(TOPICS_DIR, "topics.mjs");
 
 // ---------------------------------------------------------------------------
-// 1. SKILL.md structural validation
+// gh / git test doubles
 // ---------------------------------------------------------------------------
 
-test("topics skill directory exists", () => {
+/**
+ * A gh runner that answers `gh api search/repositories?q=topic:<name>` from a
+ * popularity map, and `gh repo edit` / `gh repo view` for the apply path.
+ * `unauth` simulates an unauthenticated CLI; `unknown` names return a failing
+ * search (so the engine records popularity=null, never 0).
+ */
+function mockGh({ popularity = {}, unauth = false, applyFail = false, viewTopics = null } = {}) {
+  const calls = [];
+  const fn = (args) => {
+    calls.push(args);
+    if (args[0] === "api") {
+      if (unauth) {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "gh auth login: not logged into any host",
+          error: null,
+        };
+      }
+      const m = String(args[1]).match(/topic:(.+)$/);
+      const name = m ? m[1] : "";
+      if (name in popularity) {
+        return { status: 0, stdout: `${popularity[name]}\n`, stderr: "", error: null };
+      }
+      // unknown topic -> simulate an API failure (popularity unknown)
+      return { status: 1, stdout: "", stderr: "API rate limit exceeded", error: null };
+    }
+    if (args[0] === "repo" && args[1] === "edit") {
+      return applyFail
+        ? { status: 1, stdout: "", stderr: "HTTP 403: forbidden", error: null }
+        : { status: 0, stdout: "", stderr: "", error: null };
+    }
+    if (args[0] === "repo" && args[1] === "view") {
+      const nodes = (viewTopics ?? []).map((n) => ({ name: n }));
+      return {
+        status: 0,
+        stdout: JSON.stringify({ repositoryTopics: nodes }),
+        stderr: "",
+        error: null,
+      };
+    }
+    return { status: 0, stdout: "", stderr: "", error: null };
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+function mockGit(remoteUrl = "git@github.com:ozzy-labs/skills.git") {
+  return (args) => {
+    if (args[0] === "remote" && args[1] === "get-url") {
+      return remoteUrl === null
+        ? { status: 1, stdout: "", stderr: "fatal: No such remote 'origin'", error: null }
+        : { status: 0, stdout: `${remoteUrl}\n`, stderr: "", error: null };
+    }
+    return { status: 0, stdout: "", stderr: "", error: null };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 1. SKILL.md / companion structural validation
+// ---------------------------------------------------------------------------
+
+test("topics skill directory ships SKILL.md, companion, and the engine", () => {
   assert.ok(existsSync(TOPICS_DIR), `expected ${TOPICS_DIR} to exist`);
   assert.ok(existsSync(SKILL_MD), "SKILL.md must exist");
   assert.ok(existsSync(SKILL_CLAUDE_MD), "SKILL.claude-code.md must exist");
+  assert.ok(existsSync(ENGINE), "topics.mjs engine must exist");
 });
 
 test("topics SKILL.md has valid frontmatter (name + description)", async () => {
@@ -48,8 +125,6 @@ test("topics SKILL.md has valid frontmatter (name + description)", async () => {
 test("topics SKILL.claude-code.md is a Claude-only overlay (no duplicated description)", async () => {
   const raw = await readFile(SKILL_CLAUDE_MD, "utf8");
   const { frontmatter } = parseSkillDocument(raw, ".agents/skills/topics/SKILL.claude-code.md");
-  // Overlay companions carry only Claude-only keys; `description` is injected
-  // from the canonical SKILL.md at build time, so it must NOT be duplicated here.
   assert.ok(
     !frontmatter.description,
     "Claude Code companion must not duplicate description (canonical is the single source)",
@@ -59,7 +134,6 @@ test("topics SKILL.claude-code.md is a Claude-only overlay (no duplicated descri
     "true",
     "topics companion must carry its Claude-only frontmatter",
   );
-  // Companion must not redeclare `name` (the canonical SKILL.md owns it).
   assert.equal(
     frontmatter.name,
     undefined,
@@ -68,78 +142,21 @@ test("topics SKILL.claude-code.md is a Claude-only overlay (no duplicated descri
 });
 
 // ---------------------------------------------------------------------------
-// 2. Documented behaviors (acceptance criteria 1-7 of #63)
+// 2. Thin doc-content assertions: engine call + policy gate are documented
 // ---------------------------------------------------------------------------
 
-test("SKILL.md documents GitHub official constraints (#63 AC2)", async () => {
+test("SKILL.md points at the topics.mjs engine (ADR-0028 R1)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  // Must mention the four constraints: lowercase, hyphen, 50 chars, 20 max.
-  assert.match(raw, /lowercase/i, "must document lowercase constraint");
-  assert.match(raw, /ハイフン|hyphen|`-`/i, "must document hyphen constraint");
-  assert.match(raw, /50/, "must document 50-character length cap");
-  assert.match(raw, /20/, "must document 20-topic count cap");
-});
-
-test("SKILL.md documents popularity lookup with session cache (#63 AC3)", async () => {
-  const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(
-    raw,
-    /search\/repositories\?q=topic:/,
-    "must document the gh api search query for popularity",
-  );
-  assert.match(raw, /total_count/, "must reference total_count from the search endpoint");
-  assert.match(raw, /session 内キャッシュ|session\s*cache/i, "must require session-scoped cache");
-});
-
-test("SKILL.md documents broad+narrow 5x threshold (#63 AC4)", async () => {
-  const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /broad/i, "must mention broad/narrow concept");
-  assert.match(raw, /narrow/i, "must mention narrow concept");
-  assert.match(raw, /\b5\b|×\s*5|x\s*5/, "must document 5x threshold");
-});
-
-test("SKILL.md documents singular/plural comparison (#63 AC5)", async () => {
-  const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /単数.*複数|単数\s*\/\s*複数/, "must document singular/plural comparison rule");
-  assert.match(raw, /-s\b/, "must reference the -s suffix as the comparison key");
-});
-
-test("SKILL.md hardcodes ozzy-labs conventions (#63 AC6)", async () => {
-  const raw = await readFile(SKILL_MD, "utf8");
-  // claude-code preferred over claude
-  assert.match(raw, /claude-code/, "must hardcode claude-code as a special case");
-  assert.match(raw, /claude\b/, "must compare claude-code with claude");
-  // multi-agent fixed form
-  assert.match(raw, /multi-agent/, "must hardcode multi-agent as the canonical form");
-  assert.match(
-    raw,
-    /multi-agents|multiagent/,
-    "must mention rejected variants (multi-agents / multiagent)",
-  );
-  // *-cli suffix removal with claude-code as exception
-  assert.match(raw, /-cli/, "must document the *-cli suffix removal rule");
-  assert.match(
-    raw,
-    /codex.*gemini.*copilot|gemini.*codex.*copilot|copilot.*codex.*gemini/s,
-    "must enumerate the three CLIs subject to suffix removal",
-  );
-});
-
-test("SKILL.md documents --dry-run and --apply flags (#63 AC7)", async () => {
-  const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /--dry-run/, "must document --dry-run flag");
-  assert.match(raw, /--apply/, "must document --apply flag");
+  assert.match(raw, /topics\.mjs/, "must instruct running the topics.mjs engine");
+  assert.match(raw, /node <[^>]*>\/topics\.mjs/, "must show the node topics.mjs invocation");
 });
 
 test("SKILL.md classes topics apply as externally-visible and references policy (#181 PR2)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  // Application is now expressed as an action class + central policy reference,
-  // not a bespoke confirmation prose.
   assert.match(raw, /externally-visible/, "topics apply must be classed as externally-visible");
   assert.match(raw, /batch-confirm/, "zero-config gate for topics apply must be batch-confirm");
   assert.match(raw, /policy-read\.mjs/, "must point at the policy read substrate");
   assert.match(raw, /topics-apply/, "must name the policy action for `gh repo edit --add-topic`");
-  // --apply is reframed as the explicit batch-confirm opt-out.
   assert.match(
     raw,
     /--apply[^\n]*opt-out|opt-out[^\n]*--apply|明示 opt-out/,
@@ -147,110 +164,52 @@ test("SKILL.md classes topics apply as externally-visible and references policy 
   );
 });
 
-test("SKILL.claude-code.md gates apply confirmation on the policy batch-confirm gate (#181 PR2)", async () => {
+test("SKILL.md documents --dry-run / --apply and the ozzy-labs scope", async () => {
+  const raw = await readFile(SKILL_MD, "utf8");
+  assert.match(raw, /--dry-run/, "must document --dry-run flag");
+  assert.match(raw, /--apply/, "must document --apply flag");
+  assert.match(raw, /ozzy-labs/i, "must declare ozzy-labs scope");
+  assert.match(raw, /スコープ外|out of scope/i, "must enumerate explicit scope-out items");
+});
+
+test("SKILL.claude-code.md keeps the batch-confirm + AskUserQuestion apply UI (#181 PR2)", async () => {
   const raw = await readFile(SKILL_CLAUDE_MD, "utf8");
   assert.match(raw, /batch-confirm/, "companion must reference the batch-confirm gate");
   assert.match(raw, /AskUserQuestion/, "companion must keep the AskUserQuestion confirmation flow");
-});
-
-test("SKILL.md documents scope (ozzy-labs only) and exclusions", async () => {
-  const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /ozzy-labs/i, "must declare ozzy-labs scope");
-  assert.match(
-    raw,
-    /スコープ外|out of scope/i,
-    "must enumerate explicit scope-out items (cross-org, persistent cache, init-templates)",
-  );
+  assert.match(raw, /topics\.mjs/, "companion must call the engine, not re-encode the rules");
 });
 
 // ---------------------------------------------------------------------------
-// 3. Fixture-based rule reference (canonical implementation of the spec)
+// 3. Engine: arg parsing
 // ---------------------------------------------------------------------------
-//
-// The topics skill is executed by an LLM following SKILL.md prose. To pin down
-// the rules and detect doc drift, we re-implement them here as small pure
-// functions and exercise them with fixtures. If the SKILL.md changes without
-// updating these fixtures (or vice versa), the test suite breaks loudly.
 
-/**
- * GitHub official topic constraints.
- * @param {string} topic
- * @returns {{ valid: boolean, reason?: string }}
- */
-function validateConstraint(topic) {
-  if (typeof topic !== "string" || topic.length === 0) {
-    return { valid: false, reason: "empty" };
-  }
-  if (topic.length > 50) return { valid: false, reason: "length>50" };
-  if (!/^[a-z0-9-]+$/.test(topic)) return { valid: false, reason: "charset" };
-  if (topic.startsWith("-") || topic.endsWith("-")) {
-    return { valid: false, reason: "leading/trailing hyphen" };
-  }
-  return { valid: true };
-}
+test("parseArgs: comma list + multiple positional args + flags", () => {
+  const a = parseArgs(["ai,claude-code", "rss", "--repo", "ozzy-labs/skills", "--dry-run"]);
+  assert.deepEqual(a.candidates, ["ai", "claude-code", "rss"]);
+  assert.equal(a.repo, "ozzy-labs/skills");
+  assert.equal(a.dryRun, true);
+  assert.equal(a.apply, false);
+});
 
-/**
- * Cap the candidate list to GitHub's max of 20 topics.
- * Returns at most 20 entries; additional entries are reported as overflow.
- */
-function applyCountCap(topics, max = 20) {
-  const unique = [...new Set(topics)];
-  return {
-    accepted: unique.slice(0, max),
-    overflow: unique.slice(max),
-  };
-}
+test("parseArgs: --apply flag and --repo=value form", () => {
+  const a = parseArgs(["ai", "--apply", "--repo=owner/name", "--json"]);
+  assert.deepEqual(a.candidates, ["ai"]);
+  assert.equal(a.apply, true);
+  assert.equal(a.repo, "owner/name");
+  assert.equal(a.json, true);
+});
 
-/**
- * Decide broad+narrow recommendation given popularity counts.
- * @param {number} broad
- * @param {number} narrow
- * @returns {"broad-only" | "both" | "ozzy-hardcode"}
- */
-function broadNarrowDecision(broad, narrow) {
-  if (broad >= narrow * 5) return "broad-only";
-  if (narrow > broad) return "ozzy-hardcode";
-  return "both";
-}
+// ---------------------------------------------------------------------------
+// 3. Engine: Step 1 constraints
+// ---------------------------------------------------------------------------
 
-/**
- * Apply ozzy-labs hardcoded conventions to a candidate list.
- * - `multi-agents` / `multiagent` → drop in favor of `multi-agent`
- * - `<name>-cli` → strip `-cli` for codex / gemini / copilot
- *   (claude-code is the explicit exception: it is a product name)
- */
-function applyOzzyConventions(candidates) {
-  const out = [];
-  const dropped = [];
-  const renamed = [];
-  for (const c of candidates) {
-    if (c === "multi-agents" || c === "multiagent") {
-      dropped.push({ from: c, reason: "multi-agent canonical form" });
-      continue;
-    }
-    if (c === "codex-cli" || c === "gemini-cli" || c === "copilot-cli") {
-      const stripped = c.slice(0, -"-cli".length);
-      renamed.push({ from: c, to: stripped, reason: "*-cli suffix removed" });
-      out.push(stripped);
-      continue;
-    }
-    // claude-code is preserved verbatim — it's a product name, not "<tool>-cli"
-    out.push(c);
-  }
-  // Deduplicate after rewrite (e.g. ["codex-cli", "codex"] → ["codex"]).
-  return { out: [...new Set(out)], dropped, renamed };
-}
-
-// --- constraint fixtures ---
-
-test("fixture: constraint validation accepts well-formed topics", () => {
-  const valid = ["ai", "ai-agents", "claude-code", "multi-agent", "rss", "web-scraping", "a1"];
-  for (const t of valid) {
-    assert.deepEqual(validateConstraint(t), { valid: true }, `expected ${t} to be valid`);
+test("validateConstraint accepts well-formed topics", () => {
+  for (const t of ["ai", "ai-agents", "claude-code", "multi-agent", "rss", "web-scraping", "a1"]) {
+    assert.deepEqual(validateConstraint(t), { valid: true }, `expected ${t} valid`);
   }
 });
 
-test("fixture: constraint validation rejects malformed topics", () => {
+test("validateConstraint rejects malformed topics with a reason", () => {
   const cases = [
     { topic: "AI", reason: "charset" },
     { topic: "Foo-Bar", reason: "charset" },
@@ -262,51 +221,31 @@ test("fixture: constraint validation rejects malformed topics", () => {
     { topic: "a".repeat(51), reason: "length>50" },
   ];
   for (const { topic, reason } of cases) {
-    const result = validateConstraint(topic);
-    assert.equal(result.valid, false, `expected ${JSON.stringify(topic)} to be invalid`);
-    assert.equal(result.reason, reason, `expected reason '${reason}' for ${JSON.stringify(topic)}`);
+    const r = validateConstraint(topic);
+    assert.equal(r.valid, false, `expected ${JSON.stringify(topic)} invalid`);
+    assert.equal(r.reason, reason);
   }
 });
 
-test("fixture: count cap returns first 20 and reports overflow", () => {
-  const inputs = Array.from({ length: 25 }, (_, i) => `t${i}`);
-  const { accepted, overflow } = applyCountCap(inputs);
-  assert.equal(accepted.length, 20, "must accept at most 20");
-  assert.equal(overflow.length, 5, "must report 5 overflow items");
-  assert.equal(accepted[0], "t0");
+test("filterConstraints dedupes and separates valid / rejected", () => {
+  const { valid, rejected } = filterConstraints(["ai", "ai", "Foo", "rss", "bad_x"]);
+  assert.deepEqual(valid, ["ai", "rss"]);
+  assert.deepEqual(rejected.map((r) => r.topic).sort(), ["Foo", "bad_x"]);
+});
+
+test("applyCountCap returns first 20 (deduped) and reports overflow", () => {
+  const { accepted, overflow } = applyCountCap(Array.from({ length: 25 }, (_, i) => `t${i}`));
+  assert.equal(accepted.length, 20);
+  assert.equal(overflow.length, 5);
   assert.equal(overflow[0], "t20");
+  assert.deepEqual(applyCountCap(["a", "b", "a"]).accepted, ["a", "b"]);
 });
 
-test("fixture: count cap dedupes before counting", () => {
-  const inputs = ["a", "b", "a", "c", "b"];
-  const { accepted, overflow } = applyCountCap(inputs);
-  assert.deepEqual(accepted, ["a", "b", "c"]);
-  assert.deepEqual(overflow, []);
-});
+// ---------------------------------------------------------------------------
+// 3. Engine: Step 5 ozzy conventions
+// ---------------------------------------------------------------------------
 
-// --- broad+narrow fixtures ---
-
-test("fixture: broad-only recommended when broad >= narrow * 5", () => {
-  // Realistic-looking numbers: broad >> narrow.
-  assert.equal(broadNarrowDecision(120_000, 20_000), "broad-only"); // ratio = 6
-  assert.equal(broadNarrowDecision(50_000, 10_000), "broad-only"); // exactly 5x
-  assert.equal(broadNarrowDecision(100, 1), "broad-only"); // tiny narrow
-});
-
-test("fixture: both retained when broad < narrow * 5 and broad > narrow", () => {
-  // Same-order-of-magnitude case.
-  assert.equal(broadNarrowDecision(28_000, 10_000), "both"); // ratio < 5
-  assert.equal(broadNarrowDecision(30_000, 28_000), "both"); // close
-});
-
-test("fixture: narrow > broad triggers ozzy-hardcode path (claude-code case)", () => {
-  // The motivating example from #63: claude-code (~25k) > claude (~21k).
-  assert.equal(broadNarrowDecision(21_062, 25_514), "ozzy-hardcode");
-});
-
-// --- ozzy-labs convention fixtures ---
-
-test("fixture: multi-agents / multiagent are dropped in favor of multi-agent", () => {
+test("applyOzzyConventions: multi-agents / multiagent dropped for multi-agent", () => {
   const { out, dropped } = applyOzzyConventions([
     "multi-agent",
     "multi-agents",
@@ -317,69 +256,260 @@ test("fixture: multi-agents / multiagent are dropped in favor of multi-agent", (
   assert.deepEqual(dropped.map((d) => d.from).sort(), ["multi-agents", "multiagent"]);
 });
 
-test("fixture: *-cli suffix removed for codex / gemini / copilot", () => {
-  const { out, renamed } = applyOzzyConventions(["codex-cli", "gemini-cli", "copilot-cli"]);
-  assert.deepEqual(out.sort(), ["codex", "copilot", "gemini"]);
-  assert.equal(renamed.length, 3, "all three CLI suffixes must be renamed");
-  assert.ok(
-    renamed.every((r) => r.reason.includes("*-cli")),
-    "rename reason must reference the *-cli rule",
-  );
+test("applyOzzyConventions: *-cli stripped for codex/gemini/copilot, claude-code exempt", () => {
+  const { out, renamed } = applyOzzyConventions([
+    "codex-cli",
+    "gemini-cli",
+    "copilot-cli",
+    "claude-code",
+  ]);
+  assert.deepEqual(out.sort(), ["claude-code", "codex", "copilot", "gemini"]);
+  assert.equal(renamed.length, 3);
+  assert.ok(renamed.every((r) => r.reason.includes("*-cli")));
 });
 
-test("fixture: claude-code is the explicit exception (not stripped)", () => {
-  const { out, renamed } = applyOzzyConventions(["claude-code", "codex-cli"]);
-  assert.ok(out.includes("claude-code"), "claude-code must remain unchanged");
-  assert.ok(out.includes("codex"), "codex-cli must still be stripped to codex");
-  // Only codex-cli should be in the rename list.
-  assert.equal(renamed.length, 1);
-  assert.equal(renamed[0].from, "codex-cli");
+test("applyOzzyConventions dedupes after rewrite (codex-cli + codex -> codex)", () => {
+  assert.deepEqual(applyOzzyConventions(["codex-cli", "codex"]).out, ["codex"]);
 });
 
-test("fixture: applying conventions dedupes after rewrite (codex-cli + codex → codex)", () => {
-  const { out } = applyOzzyConventions(["codex-cli", "codex"]);
-  assert.deepEqual(out, ["codex"], "duplicate after suffix-strip must be removed");
+test("ozzyHardcodedRetentions: claude + claude-code retained together", () => {
+  assert.deepEqual(ozzyHardcodedRetentions(["ai", "claude", "claude-code"])[0].topics, [
+    "claude",
+    "claude-code",
+  ]);
+  assert.deepEqual(ozzyHardcodedRetentions(["ai", "claude"]), []);
 });
 
-// --- end-to-end ozzy-labs candidate fixture ---
+// ---------------------------------------------------------------------------
+// 3. Engine: Step 3 broad+narrow
+// ---------------------------------------------------------------------------
 
-test("fixture: end-to-end ozzy-labs realistic candidate list", () => {
-  // Reproduces the agentic-watch setup mentioned in #63.
-  const candidates = [
+test("isBroadOf: hyphen-derivative pairs only", () => {
+  assert.equal(isBroadOf("ai", "ai-agents"), true);
+  assert.equal(isBroadOf("agent", "multi-agent"), true);
+  assert.equal(isBroadOf("claude", "claude-code"), true);
+  assert.equal(isBroadOf("news", "release-notes"), false);
+  assert.equal(isBroadOf("ai", "agentic"), false);
+  assert.equal(isBroadOf("ai", "ai"), false);
+});
+
+test("detectBroadNarrowPairs finds derivative pairs", () => {
+  const pairs = detectBroadNarrowPairs(["ai", "ai-agents", "agentic", "claude", "claude-code"]);
+  assert.deepEqual(pairs.map((p) => `${p.broad}>${p.narrow}`).sort(), [
+    "ai>ai-agents",
+    "claude>claude-code",
+  ]);
+});
+
+test("broadNarrowDecision: 5x threshold, both, ozzy-hardcode, indeterminate", () => {
+  assert.equal(broadNarrowDecision(120000, 20000), "broad-only"); // ratio 6
+  assert.equal(broadNarrowDecision(50000, 10000), "broad-only"); // exactly 5x
+  assert.equal(broadNarrowDecision(28000, 10000), "both"); // < 5x
+  assert.equal(broadNarrowDecision(21062, 25514), "ozzy-hardcode"); // narrow > broad
+  assert.equal(broadNarrowDecision(null, 5), "indeterminate"); // unknown popularity
+  assert.equal(broadNarrowDecision(5, null), "indeterminate");
+});
+
+// ---------------------------------------------------------------------------
+// 3. Engine: Step 4 singular / plural
+// ---------------------------------------------------------------------------
+
+test("detectSingularPluralPairs + singularPluralDecision pick the popular form", () => {
+  assert.deepEqual(detectSingularPluralPairs(["agent", "agents", "ai"]), [
+    { singular: "agent", plural: "agents" },
+  ]);
+  assert.deepEqual(singularPluralDecision("agent", 100, "agents", 500), {
+    chosen: "agents",
+    dropped: "agent",
+  });
+  assert.deepEqual(singularPluralDecision("agent", 500, "agents", 100), {
+    chosen: "agent",
+    dropped: "agents",
+  });
+  // unknown popularity leaves the pair undecided (both kept)
+  assert.deepEqual(singularPluralDecision("agent", null, "agents", 100), {
+    chosen: null,
+    dropped: null,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Engine: Step 2 popularity (mocked gh, session cache = query once)
+// ---------------------------------------------------------------------------
+
+test("fetchPopularity: parses counts, dedupes queries, records failures as null", () => {
+  const gh = mockGh({ popularity: { ai: 120879, rss: 4200 } });
+  const { counts, errors } = fetchPopularity(gh, ["ai", "rss", "ai", "nope"]);
+  assert.equal(counts.ai, 120879);
+  assert.equal(counts.rss, 4200);
+  assert.equal(counts.nope, null); // failed lookup -> null, never 0
+  assert.ok(errors.nope, "failure reason recorded for the unknown topic");
+  // session cache: each unique topic queried exactly once (ai not queried twice)
+  const apiCalls = gh.calls.filter((a) => a[0] === "api");
+  assert.equal(apiCalls.length, 3);
+});
+
+test("parseRepoSlug: ssh / https / trailing .git", () => {
+  assert.equal(parseRepoSlug("git@github.com:ozzy-labs/skills.git"), "ozzy-labs/skills");
+  assert.equal(parseRepoSlug("https://github.com/ozzy-labs/skills"), "ozzy-labs/skills");
+  assert.equal(parseRepoSlug("https://github.com/ozzy-labs/skills.git"), "ozzy-labs/skills");
+  assert.equal(parseRepoSlug("https://example.com/x/y"), null);
+});
+
+// ---------------------------------------------------------------------------
+// 3. Engine: selectTopics (pure, over a fixed popularity map)
+// ---------------------------------------------------------------------------
+
+test("selectTopics: broad-only pruning drops the redundant narrow term", () => {
+  const r = selectTopics(["ai", "ai-agents"], { ai: 1_000_000, "ai-agents": 1000 });
+  assert.deepEqual(r.final_topics, ["ai"]);
+  assert.ok(r.dropped_by_decision.includes("ai-agents"));
+  assert.equal(r.broad_narrow[0].decision, "broad-only");
+});
+
+test("selectTopics: ozzy hardcode retention overrides broad-only for claude/claude-code", () => {
+  // Even with a lopsided popularity that would prune the narrow term, the
+  // hardcoded convention keeps both.
+  const r = selectTopics(["claude", "claude-code"], { claude: 1_000_000, "claude-code": 1000 });
+  assert.deepEqual(r.final_topics.sort(), ["claude", "claude-code"]);
+  assert.deepEqual(r.dropped_by_decision, []);
+  assert.equal(r.conventions.hardcoded.length, 1);
+});
+
+test("selectTopics: end-to-end ozzy-labs realistic list -> Final 16 topics", () => {
+  // Reproduces the agentic-watch setup from #63 (post-constraint valid list).
+  const valid = [
     "ai",
     "ai-agents",
     "agentic",
     "multi-agent",
-    "multiagent", // dropped
+    "multiagent", // convention drop
     "cli",
     "claude",
     "claude-code",
-    "codex-cli", // → codex
-    "gemini-cli", // → gemini
-    "copilot-cli", // → copilot
+    "codex-cli", // -> codex
+    "gemini-cli", // -> gemini
+    "copilot-cli", // -> copilot
     "rss",
     "web-scraping",
     "news",
     "release-notes",
     "research",
     "markdown",
-    "Foo-Bar", // dropped (charset)
-    "ai_agents", // dropped (charset)
   ];
-  // Step 1: constraints
-  const valid = candidates.filter((c) => validateConstraint(c).valid);
-  // Step 5: ozzy conventions
-  const { out } = applyOzzyConventions(valid);
-  // Step 1 (count cap)
-  const { accepted, overflow } = applyCountCap(out);
+  const counts = {
+    ai: 120879,
+    "ai-agents": 28093,
+    agentic: 3000,
+    "multi-agent": 4000,
+    cli: 90000,
+    claude: 21062,
+    "claude-code": 25514,
+    codex: 5000,
+    gemini: 6000,
+    copilot: 7000,
+    rss: 4200,
+    "web-scraping": 8000,
+    news: 9000,
+    "release-notes": 1200,
+    research: 30000,
+    markdown: 40000,
+  };
+  const r = selectTopics(valid, counts);
+  assert.equal(r.final_topics.length, 16, JSON.stringify(r.final_topics));
+  assert.ok(!r.final_topics.includes("multiagent"), "multiagent replaced by multi-agent");
+  assert.ok(!r.final_topics.includes("codex-cli"), "codex-cli stripped");
+  assert.ok(r.final_topics.includes("codex"), "codex present after strip");
+  assert.ok(r.final_topics.includes("claude") && r.final_topics.includes("claude-code"));
+  assert.ok(r.final_topics.includes("multi-agent"));
+  // ai / ai-agents are same order of magnitude (ratio < 5) -> both kept
+  assert.ok(r.final_topics.includes("ai") && r.final_topics.includes("ai-agents"));
+});
 
-  assert.ok(!accepted.includes("Foo-Bar"), "uppercase must be filtered");
-  assert.ok(!accepted.includes("ai_agents"), "underscore must be filtered");
-  assert.ok(!accepted.includes("multiagent"), "multiagent must be replaced by multi-agent");
-  assert.ok(!accepted.includes("codex-cli"), "codex-cli must be stripped");
-  assert.ok(accepted.includes("codex"), "codex must be present after suffix removal");
-  assert.ok(accepted.includes("claude-code"), "claude-code must survive as-is");
-  assert.ok(accepted.includes("multi-agent"), "multi-agent canonical form must be present");
-  assert.ok(accepted.length <= 20, "must respect 20-topic cap");
-  assert.equal(overflow.length, 0, "this fixture sits within the 20 cap");
+// ---------------------------------------------------------------------------
+// 3. Engine: run() modes (plan / dry-run / apply) with injected gh + git
+// ---------------------------------------------------------------------------
+
+const PLAN_POP = { ai: 120000, rss: 4200, claude: 21062, "claude-code": 25514 };
+
+test("run: default is a PLAN — no gh repo edit, apply_command populated", () => {
+  const gh = mockGh({ popularity: PLAN_POP });
+  const r = run(["ai,rss", "--repo", "ozzy-labs/skills"], { ghRun: gh, gitRun: mockGit() });
+  assert.equal(r.mode, "plan");
+  assert.equal(r.apply_pending, true);
+  assert.equal(r.applied, false);
+  assert.ok(r.apply_command.startsWith("gh repo edit ozzy-labs/skills --add-topic"));
+  assert.ok(!gh.calls.some((a) => a[0] === "repo" && a[1] === "edit"), "plan must not apply");
+});
+
+test("run: --dry-run analyzes but never applies", () => {
+  const gh = mockGh({ popularity: PLAN_POP });
+  const r = run(["ai", "--dry-run"], { ghRun: gh, gitRun: mockGit() });
+  assert.equal(r.mode, "dry-run");
+  assert.equal(r.applied, false);
+  assert.equal(r.repo, "ozzy-labs/skills"); // resolved from the git remote
+  assert.ok(!gh.calls.some((a) => a[0] === "repo" && a[1] === "edit"));
+});
+
+test("run: --dry-run wins over --apply (誤適用防止)", () => {
+  const gh = mockGh({ popularity: PLAN_POP });
+  const r = run(["ai", "--apply", "--dry-run"], { ghRun: gh, gitRun: mockGit() });
+  assert.equal(r.mode, "dry-run");
+  assert.ok(!gh.calls.some((a) => a[0] === "repo" && a[1] === "edit"));
+});
+
+test("run: --apply executes gh repo edit and verifies via gh repo view", () => {
+  const gh = mockGh({ popularity: PLAN_POP, viewTopics: ["ai", "rss"] });
+  const r = run(["ai,rss", "--apply", "--repo", "ozzy-labs/skills"], {
+    ghRun: gh,
+    gitRun: mockGit(),
+  });
+  assert.equal(r.mode, "apply");
+  assert.equal(r.applied, true);
+  const edit = gh.calls.find((a) => a[0] === "repo" && a[1] === "edit");
+  assert.ok(edit, "gh repo edit must run");
+  assert.ok(edit.includes("--add-topic"));
+  assert.deepEqual(r.apply.verified_topics, ["ai", "rss"]);
+});
+
+test("run: --apply surfaces a failed gh repo edit", () => {
+  const gh = mockGh({ popularity: PLAN_POP, applyFail: true });
+  const r = run(["ai", "--apply", "--repo", "ozzy-labs/skills"], { ghRun: gh, gitRun: mockGit() });
+  assert.equal(r.applied, false);
+  assert.ok(r.apply.error, "apply error surfaced");
+});
+
+test("run: unauthenticated gh -> gh_available false, popularity null (not 0)", () => {
+  const gh = mockGh({ unauth: true });
+  const r = run(["ai,claude", "--dry-run"], { ghRun: gh, gitRun: mockGit() });
+  assert.equal(r.gh_available, false);
+  assert.equal(r.popularity.ai, null);
+  assert.equal(r.popularity.claude, null);
+});
+
+test("run: all candidates rejected -> error, popularity API never called", () => {
+  const gh = mockGh({ popularity: PLAN_POP });
+  const r = run(["Foo_Bar", "BAD", "--dry-run"], { ghRun: gh, gitRun: mockGit() });
+  assert.match(r.error, /no applicable candidates/);
+  assert.equal(r.constraints.valid.length, 0);
+  assert.ok(!gh.calls.some((a) => a[0] === "api"), "must not call the search API");
+});
+
+test("run: no GitHub remote and no --repo -> repo_error set", () => {
+  const gh = mockGh({ popularity: PLAN_POP });
+  const r = run(["ai"], { ghRun: gh, gitRun: mockGit(null) });
+  assert.equal(r.repo, null);
+  assert.equal(r.repo_error, "no GitHub remote");
+});
+
+// ---------------------------------------------------------------------------
+// 3. Engine: render smoke
+// ---------------------------------------------------------------------------
+
+test("render: human report includes the final topics line and apply plan", () => {
+  const gh = mockGh({ popularity: PLAN_POP });
+  const r = run(["ai,rss", "--repo", "ozzy-labs/skills"], { ghRun: gh, gitRun: mockGit() });
+  const text = render(r);
+  assert.match(text, /Final \d+ topics:/);
+  assert.match(text, /Apply plan:/);
 });
