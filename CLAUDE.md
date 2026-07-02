@@ -12,8 +12,6 @@
 - skills / commons リポ内部 (本リポ等) では project skills として `.claude/skills/` 配下に置かれている (build pipeline で SSOT から生成)
 - 特定アダプタ限定の skill は SSOT 側 frontmatter `adapters`（カンマ区切り・例 `adapters: claude-code`）で配信先を絞れる (詳細は AGENTS.md / README.md「Adapter gating」)
 - `/implement` — Issue または指示をもとに、ブランチ作成・実装
-- `/lint` — 全リンターを自動修正付きで実行
-- `/test` — ビルド・テスト・型チェックを実行
 - `/commit` — 変更をステージし、Conventional Commits でコミット
 - `/pr` — 変更を push し、PR を作成・更新
 - `/review` — コード変更や PR を 11 観点（正確性 / セキュリティ / 規約 / アーキテクチャ / 互換性 / 保守性 / テスト / パフォーマンス / 可観測性 / ユーザビリティ / ドキュメント整合性）でレビューし、JSON 構造化出力を併載。`--axes=<list>` で観点指定、`--deep` で観点別 subagent 並列起動
@@ -45,7 +43,7 @@ npx @ozzylabs/skills migrate --dry-run                         # 旧 project-sco
 Claude mobile / web (cloud) セッションは "repo only" 動作で `~/.claude/skills/` を見られないため、`install` では届かない。その用途で開発する repo には `sync-project` で **project-scope**（相対 ref を保った `dist/claude-code-project/`）を opt-in 配信する:
 
 ```bash
-npx @ozzylabs/skills sync-project --target=./my-repo --skills=drive,implement,ship,review,commit,pr,lint,test,commit-conventions,lint-rules
+npx @ozzylabs/skills sync-project --target=./my-repo --skills=drive,implement,ship,review,verify,commit,pr,commit-conventions
 ```
 
 詳細は `README.md` の「CLI installer (user-scoped)」を参照。

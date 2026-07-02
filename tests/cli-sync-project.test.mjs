@@ -52,7 +52,7 @@ test("planSyncProject ships both the wrapper and the canonical for a skill", asy
 test("planSyncProject always includes shared agents regardless of --skills filter", async () => {
   const target = await mkdtemp(join(tmpdir(), "skills-sync-"));
   try {
-    const plan = await planSyncProject({ packageRoot: ROOT, target, skillsFilter: ["lint"] });
+    const plan = await planSyncProject({ packageRoot: ROOT, target, skillsFilter: ["verify"] });
     const dests = plan.files.map((f) =>
       f.dest
         .slice(target.length + 1)

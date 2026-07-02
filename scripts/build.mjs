@@ -52,7 +52,7 @@ const DIST = join(ROOT, "dist");
 
 // In-repo dogfood targets: these mirror the canonical skill files into
 // `.agents/skills/` and `.claude/skills/` so the skills repo can use its own
-// slash commands (e.g. `/drive`, `/lint`). They are NOT shipped to npm —
+// slash commands (e.g. `/drive`, `/verify`). They are NOT shipped to npm —
 // `package.json#files` only includes `dist/`, `bin/`, `schemas/`, etc.
 const CLAUDE_DOGFOOD_TARGET = join(ROOT, ".claude", "skills");
 // Claude Code agents dogfood target. Agents are Claude Code only (ADR-0026),
