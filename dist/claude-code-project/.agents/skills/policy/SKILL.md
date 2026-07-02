@@ -96,12 +96,62 @@ fail-safe の作法:
 - **parse 不能なファイル** → そのファイルを無視し `degraded: true`。もう一方のファイル + 既定で解決する（危険クラスの既定は元々 `ask`）。
 - あらゆる失敗で throw せず exit 0。`&&` で連結した caller を壊さない。
 
+## PreToolUse enforcement hook（Claude Code / `policy-hook.mjs`）
+
+prose 層（各 skill の「自アクションを分類して policy を引く」）はあくまで **依頼**であり、モデルが無視・迂回し得る。`policy-hook.mjs`（sibling・`usage-guard-hook.mjs` と同型の PreToolUse hook）は**実行エンジン側の gate 強制**で、これを物理的に塞ぐ。全 tool 呼び出し前（subagent 内含む）に発火し、**特定の不可逆コマンド**を検出したときだけ policy を引いて deny/allow を決める。
+
+| 検出コマンド | 引く action（class） | ゼロコンフィグ既定 gate | hook の挙動 |
+| --- | --- | --- | --- |
+| `gh pr merge …` | `merge`（`irreversible`） | `ask` | deny（exit 2） |
+| `gh release create …` | `release-create`（`irreversible`） | `ask` | deny |
+| `git push --force` / `-f` / `--force-with-lease` | `force-push`（`irreversible`） | `ask` | deny |
+| `npm` / `pnpm` / `yarn publish` | `publish`（`irreversible`） | `ask` | deny |
+
+- **gate → 判定:** 解決した gate が `ask` なら deny（exit 2 + 理由を stderr）、`proceed` / `batch-confirm` なら allow。hook が hard-block するのは `ask` のみ（batch 確認は caller / prose 層の責務）。
+- **narrow gating（全 tool deny 事故の防止）:** policy を引くのは**上表の不可逆コマンドにマッチした時だけ**。それ以外（読取・編集・safe な git/gh/npm・非 Bash tool）は素通し。matcher にバグがあっても「危険コマンドを取りこぼす」方向にしか倒れず、全 tool を deny してセッションを wedge させることはない。
+- **一過性で hard-stop させない（`usage-guard-hook.mjs` から踏襲）:**
+  - **(a) file kill-switch:** `~/.claude/policy-guard/DISABLE` があれば冒頭で即 no-op allow。`!` シェルから `touch` すれば設定編集不要・セッション内で即解除できる。
+  - **(b) policy 読取不能・パース不能 → allow + stderr 警告:** `policy-read.mjs` が `degraded` を返す／resolver が throw する等で **gate を信頼できないとき**は deny せず allow する。gate 対象コマンドの検出はできても gate 値を信頼できないなら通す。**resumable prose-layer checkpoint（drive / health / lessons-triage）が同じ `policy-read.mjs`（fail-safe に `ask`）を引く一次ゲート**であり、hook は二次的な網なので broken policy でセッションを止めない側に倒す。
+  - **(c) proceed 上書き（`--merge` 相当）:** すでに gate を解決し自律を委任された caller（例 `drive --merge` は prose で merge を `proceed` に上書き）は `POLICY_GUARD_PROCEED=<action>[,<action>…]`（`all` / `*` も可）を export する。hook はその action を再ゲートせず allow する。これで正当な opt-in マージが強制網に阻まれない。
+- **subagent:** payload の `agent_id` を deny メッセージに `[origin: subagent <id>]` として付す（走行中 worker の mid-unit ceiling として機能）。
+
+### 配線（本 PR では自動配線しない）
+
+hook スクリプトは全 adapter payload に同梱されるが、**settings への配線は本 PR の scope 外**。将来 `hooks add policy`（[#174](https://github.com/ozzy-labs/skills/issues/174) の hooks CLI に追加予定。現状 `usage-guard` / `observability` のみ対応）が担う。それまでは手動で `~/.claude/settings.local.json` に 1 エントリ追加する（settings は mid-session reload されるため再起動不要）:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /home/<you>/.claude/skills/policy/policy-hook.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **hook スクリプトパスは絶対パスを手で埋める**（settings 内では skill-dir 相対参照が効かない）。パスは環境で揺れる:
+>
+> - **user-scope**（`npx @ozzylabs/skills install`）: `~/.claude/skills/policy/policy-hook.mjs`（`~` は展開されないので `/home/<you>/.claude/…` の形でフルに書く）
+> - **dogfood**（skills/commons リポ内）: `<repo>/.claude/skills/policy/policy-hook.mjs`
+>
+> どちらも「`policy-read.mjs` と同じ階層の `policy-hook.mjs`」を指す。matcher は不可逆コマンドが Bash 経由なので `"Bash"` で十分（`"*"` でも可・非 Bash tool は command が無く素通し）。
+
+**無効化:** `touch ~/.claude/policy-guard/DISABLE`（即時・設定編集不要）、または settings から上記エントリを削除（恒久）。
+
 ## 適用範囲
 
-本 skill は **契約（schema）+ 読取 substrate** のみを提供する。以下は本契約の上に別 PR で構築する（本 PR には含めない）:
+本 skill は **契約（schema）+ 読取 substrate + PreToolUse enforcement hook** を提供する。以下は本契約の上に別 PR で構築する（本 PR には含めない）:
 
-- **各 skill の適用**（implement / lessons-triage / topics 等のゲート記述を「自アクションを分類して policy を引く」に置換）。
-- **Claude Code の PreToolUse hook**（`policy-hook.mjs`。`gh pr merge` / `gh release` 等を実行エンジン側で policy 参照して deny/allow）。
+- **各 skill の適用**（implement / lessons-triage / topics 等のゲート記述を「自アクションを分類して policy を引く」に置換。R3 PR2/PR3 で実装済み）。
+- **hook の自動配線**（`hooks add policy`。[#174](https://github.com/ozzy-labs/skills/issues/174) の hooks CLI に追加予定）。
 
 ## 注意事項
 
