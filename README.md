@@ -10,7 +10,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ## Skills in v0.x
 
-17 skills total: 12 generic workflow skills shared across all OzzyLabs repositories, 2 Claude-Code-only skills (`usage-guard`, `skill-observability`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
+18 skills total: 13 generic workflow skills shared across all OzzyLabs repositories (including the reference-only `policy` companion), 2 Claude-Code-only skills (`usage-guard`, `skill-observability`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
 
 | Skill | Description |
 | --- | --- |
@@ -23,6 +23,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 | `lessons-triage` | Triage the session-lessons queue (`~/.agents/lessons/queue.jsonl`, filled by the dotfiles `lesson-capture.sh` hook): extract User-Skills improvement lessons from session transcripts and file approved ones as issues on ozzy-labs/skills. HITL — every issue requires per-item approval; no repo edits, no auto-apply |
 | `lint-rules` | Lint configuration reference |
 | `phase-issue` | Generate a Phase-N tracking issue: assembles a structured body (cross-session handoff context, decision table, per-PR tasks, DoD, Phase N+1 outlook) and files it via `gh issue create`. Non-interactive by default — all sections passed as arguments; the Claude Code companion adds an interactive mode that collects missing ones. `--draft` prints the body to stdout instead of filing |
+| `policy` | Referenced companion (non-user-invocable) defining the central autonomy policy contract (ADR-0028 R3): the action 3-class model (reversible-local / externally-visible / irreversible), the gate vocabulary (`proceed` / `batch-confirm` / `ask`), the `~/.agents/policy.yaml` (user) + `.agents/policy.yaml` (repo, overrides user) hierarchy, and zero-config defaults equal to today's behavior. Ships `policy.schema.json` (schema SSOT) and the all-adapter `policy-read.mjs` read CLI that merges the two files and prints the effective policy as JSON, fail-safe to `ask` on any untrusted value |
 | `pr` | Push changes and open or update a PR |
 | `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
 | `ship` | Lint + commit + PR creation in one go |
