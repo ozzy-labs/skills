@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ozzy-labs/skills/schemas/policy.schema.json",
+  "title": "Autonomy policy",
+  "description": "Single SSOT for the central autonomy policy contract (ADR-0028 R3). Both policy-read.mjs (runtime read/merge/validate) and the test suite consume this file, so the policy shape has exactly one source of truth (no doc/code drift), mirroring skill-observability's event.schema.json. Skills classify each of their actions into one of three classes (reversible-local / externally-visible / irreversible) and read the resolved gate; a gate is one of proceed / batch-confirm / ask. additionalProperties:false at the top level is the mechanical guard against typo'd/unknown config keys silently loosening autonomy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {
+      "description": "Policy contract version. Bump on any breaking change; consumers gate on it.",
+      "const": 1
+    },
+    "classes": {
+      "description": "Per-class gate overrides. Absent classes fall back to the zero-config defaults baked into policy-read.mjs (reversible-local=proceed, externally-visible=batch-confirm, irreversible=ask), which reproduce today's behavior.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reversible-local": {
+          "description": "Reversible local actions (branch-scoped edits, safe branch delete, worktree prune). Default: proceed + audit trail.",
+          "enum": ["proceed", "batch-confirm", "ask"]
+        },
+        "externally-visible": {
+          "description": "Externally visible actions (issue create, PR create, topics apply, PR comment). Default: batch-confirm (one bulk confirmation).",
+          "enum": ["proceed", "batch-confirm", "ask"]
+        },
+        "irreversible": {
+          "description": "Irreversible / destructive actions (merge, publish, stash drop, force). Default: ask (always an Approval Gate).",
+          "enum": ["proceed", "batch-confirm", "ask"]
+        }
+      }
+    },
+    "actions": {
+      "description": "Per-action gate overrides keyed by kebab-case action name (e.g. merge, issue-create). An action override wins over its class default. Action names are open by design (each skill declares its own), so this map validates values (a gate token) and key shape, not an enumerated key set.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" },
+      "additionalProperties": {
+        "description": "Gate for this action.",
+        "enum": ["proceed", "batch-confirm", "ask"]
+      }
+    }
+  }
+}
