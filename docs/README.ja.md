@@ -84,7 +84,7 @@ npx @ozzylabs/skills add --target=./my-repo
 
 ### Hook 配線
 
-2 つの skill は Claude Code hook を extra file として同梱する: usage-guard の PreToolUse ceiling（`usage-guard-hook.mjs`）と skill-observability の SessionEnd capture（`obs-derive.mjs`）。有効化には hook エントリの `command` に **絶対パス**を書く必要があり、そのパスは user-scope install（`~/.claude/skills/…`）と本リポでの dogfood（`<repo>/.claude/skills/…`）で異なる。`hooks add` がこのパスを自動解決する:
+3 つの skill は Claude Code hook を extra file として同梱する: usage-guard の PreToolUse ceiling（`usage-guard-hook.mjs`）、skill-observability の SessionEnd capture（`obs-derive.mjs`）、中央 autonomy policy の PreToolUse enforcement gate（`policy-hook.mjs`）。有効化には hook エントリの `command` に **絶対パス**を書く必要があり、そのパスは user-scope install（`~/.claude/skills/…`）と本リポでの dogfood（`<repo>/.claude/skills/…`）で異なる。`hooks add` がこのパスを自動解決する:
 
 ```bash
 # usage-guard の PreToolUse ceiling を ~/.claude/settings.local.json に配線
@@ -92,6 +92,10 @@ npx @ozzylabs/skills hooks add usage-guard
 
 # skill-observability の SessionEnd capture を配線（--scope=user で settings.json）
 npx @ozzylabs/skills hooks add observability --scope=user
+
+# 中央 autonomy policy の PreToolUse gate を配線（gh pr merge / npm publish /
+# git push --force など不可逆コマンドに narrow-gate）
+npx @ozzylabs/skills hooks add policy
 
 # 書き込まずに settings の diff を確認（非対話/CI では適用に --yes 必須）
 npx @ozzylabs/skills hooks add usage-guard --dry-run
@@ -111,6 +115,25 @@ install 済み skill dir から script を解決し（無ければ先に `add --
 `hooks add usage-guard` は加えて、endpoint 経路に必要な **permissions allowlist**（`Read(//…/.credentials.json)` と `Bash(node …/usage-check.mjs:*)`。詳細は skill の §環境要件）を同じ diff に折り込んで提案する。`permissions.allow` への非破壊・冪等な追記で、`--no-permissions` で見送っても hook 配線は続行する。この許可がないと guard は `fail-open`（事実上 OFF）に縮退する。
 
 `hooks status` は read-only。両方の settings ファイルを走査し hook ごとの配線有無を表示する。配線済み usage-guard については `usage-check.mjs` を 1 回実行して `source` を診断する（`endpoint`/`cache` は実効、`jsonl`/`fail-open` は no-op へ縮退＝§環境要件 へ案内）。hook は配線済みだが endpoint 経路がブロックされ guard が黙って OFF、という失敗を検出できる。
+
+`hooks add policy` は**中央 autonomy policy** の PreToolUse enforcement gate を配線する。narrow-gate 設計で、不可逆な Bash コマンド（`gh pr merge` / `gh release create` / `git push --force` / `npm`・`pnpm`・`yarn publish`）だけを検査し、解決 gate が `ask` のとき deny する。それ以外の tool 呼び出しは素通し。既に自律を委任された caller（例 `drive --merge` は `merge` を `proceed` に上書き）は `POLICY_GUARD_PROCEED=merge` を export して自分の承認済みマージが再ブロックされないようにする。契約と kill-switch（`~/.claude/policy-guard/DISABLE`）は `policy` skill を参照。
+
+### Autonomy policy 雛形
+
+`policy init` は中央 autonomy policy の `policy.yaml` 雛形（3 クラス既定 + コメント付き action 上書き例）を生成する。生成物はゼロコンフィグ相当の有効な policy（編集するまで現行挙動を再現）:
+
+```bash
+# ~/.agents/policy.yaml（user 既定）を生成
+npx @ozzylabs/skills policy init
+
+# <repo>/.agents/policy.yaml（repo 上書き。user より優先）を生成
+npx @ozzylabs/skills policy init --scope=repo
+
+# 書き込まず雛形を表示
+npx @ozzylabs/skills policy init --dry-run
+```
+
+非破壊で、既存の `policy.yaml` は上書きしない（note を出して skip）。`--yes` で確認プロンプトを省略（非対話/CI では必須）。
 
 ## Consumer セットアップ
 

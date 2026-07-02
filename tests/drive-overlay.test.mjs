@@ -385,3 +385,45 @@ test("neutral drive SKILL.md documents policy-absence fail-safe for merge", asyn
   );
   assert.match(raw, /fail-safe/, "must reference the fail-safe design");
 });
+
+// --- #174 PR3 / #195: --merge sets POLICY_GUARD_PROCEED so a wired policy hook
+// does not re-block drive's own pre-authorized merge -------------------------
+
+test("neutral drive SKILL.md: --merge sets POLICY_GUARD_PROCEED for gh pr merge (closes #195 gap)", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  // the merge-policy subsection explains the proceed-override env channel
+  assert.match(
+    raw,
+    /POLICY_GUARD_PROCEED/,
+    "documents the POLICY_GUARD_PROCEED proceed-override channel",
+  );
+  // both merge command sites carry the env prefix so the wired hook allows them
+  assert.match(
+    raw,
+    /POLICY_GUARD_PROCEED=merge gh pr merge --auto --squash/,
+    "single-mode Phase 4 merge sets POLICY_GUARD_PROCEED=merge",
+  );
+  assert.match(
+    raw,
+    /POLICY_GUARD_PROCEED=merge gh pr merge <上流> --squash/,
+    "orchestration Final-4 merge sets POLICY_GUARD_PROCEED=merge",
+  );
+  // ties it to the wired PreToolUse hook + the CLI wiring path so intent is legible
+  assert.match(
+    raw,
+    /policy-hook\.mjs/,
+    "references the PreToolUse policy-hook the prefix unblocks",
+  );
+  assert.match(raw, /hooks add policy/, "points at the CLI wiring path for the policy hook");
+});
+
+test("drive claude-code companion: merge commands carry POLICY_GUARD_PROCEED", async () => {
+  const companion = await loadCompanion("drive", "claude-code", []);
+  const raw = companion.raw;
+  assert.match(
+    raw,
+    /POLICY_GUARD_PROCEED=merge gh pr merge/,
+    "companion merge commands set POLICY_GUARD_PROCEED=merge",
+  );
+  assert.match(raw, /policy-hook\.mjs/, "companion references the PreToolUse policy-hook");
+});

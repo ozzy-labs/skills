@@ -1,11 +1,15 @@
 // `skills hooks add|remove|status` — wire, unwire, or inspect the optional
 // Claude Code hooks that ship as extra files inside a skill directory
-// (ozzy-labs/skills#174 PR 1 = add/remove, PR 2 = status + permissions).
+// (ozzy-labs/skills#174 PR 1 = add/remove, PR 2 = status + permissions,
+// PR 3 = the policy PreToolUse gate).
 //
-// Two hooks are opt-in today and require a hand-written absolute path in
-// settings: usage-guard's PreToolUse ceiling (`usage-guard-hook.mjs`) and
-// skill-observability's SessionEnd capture (`obs-derive.mjs`). This verb resolves
-// the script's absolute path from the installed skill directory and read-modify-
+// Three hooks are opt-in today and require a hand-written absolute path in
+// settings: usage-guard's PreToolUse ceiling (`usage-guard-hook.mjs`),
+// skill-observability's SessionEnd capture (`obs-derive.mjs`), and the central
+// autonomy policy's PreToolUse enforcement gate (`policy-hook.mjs`, matcher "*"
+// — narrow-gated to irreversible Bash commands like `gh pr merge`, so a non-Bash
+// tool call carries no command and is allowed untouched). This verb resolves the
+// script's absolute path from the installed skill directory and read-modify-
 // writes it into `~/.claude/settings.local.json` (or `settings.json` with
 // `--scope=user`), so the user never hand-copies a path. It only ever touches the
 // entries it owns (identified by the script filename in the `command`), preserves
@@ -52,14 +56,27 @@ export const HOOK_DEFS = {
     matcher: null,
     script: "obs-derive.mjs",
   },
+  // Central autonomy policy PreToolUse enforcement gate (ADR-0028 R3). Same
+  // wiring shape as usage-guard (PreToolUse, matcher "*"), a DIFFERENT script,
+  // so both can coexist as sibling PreToolUse entries — `addHookEntry`
+  // disambiguates by the script filename in the `command`. The hook itself is
+  // narrow-gated to irreversible Bash commands, so matcher "*" is safe (a
+  // non-Bash tool call has no command and passes through).
+  policy: {
+    skill: "policy",
+    event: "PreToolUse",
+    matcher: "*",
+    script: "policy-hook.mjs",
+  },
 };
 
 const HOOK_NAMES = Object.keys(HOOK_DEFS);
 
-// Hooks that `status` lists as forward-looking but that are not wireable yet
-// (the policy PreToolUse gate lands in a later #174 PR). Surfacing them keeps the
-// status view honest about what the CLI can and cannot wire today.
-export const PLANNED_HOOK_NAMES = ["policy"];
+// Hooks that `status` lists as forward-looking but that are not wireable yet.
+// Empty now that the policy PreToolUse gate is wireable (#174 PR 3); the
+// constant stays so `status` keeps rendering the (currently empty) planned
+// section without a code change when the next planned hook is queued.
+export const PLANNED_HOOK_NAMES = [];
 
 const HELP = `npx @ozzylabs/skills hooks <add|remove|status> [<${HOOK_NAMES.join("|")}>] [options]
 
@@ -80,6 +97,8 @@ Actions:
 Hooks:
   usage-guard     PreToolUse ceiling (usage-guard-hook.mjs, matcher "*").
   observability   SessionEnd capture (obs-derive.mjs).
+  policy          PreToolUse autonomy-policy gate (policy-hook.mjs, matcher "*";
+                  narrow-gated to irreversible commands like gh pr merge).
 
 Options:
   --scope=<user|local>  Settings file to edit (add/remove): 'local' →

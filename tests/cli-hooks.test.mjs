@@ -15,6 +15,12 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  loadSchema,
+  mergePolicies,
+  parseYaml,
+  validatePolicy,
+} from "../.agents/skills/policy/policy-read.mjs";
+import {
   addHookEntry,
   addPermissionEntries,
   buildCommand,
@@ -26,12 +32,14 @@ import {
   resolveScriptPath,
   runHooks,
 } from "../bin/lib/hooks.mjs";
+import { POLICY_TEMPLATE, resolvePolicyPath } from "../bin/lib/policy-init.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(ROOT, "bin", "skills.mjs");
 
 const UG = HOOK_DEFS["usage-guard"];
 const OBS = HOOK_DEFS.observability;
+const POLICY = HOOK_DEFS.policy;
 
 function runCli(args, options = {}) {
   return spawnSync("node", [BIN, ...args], {
@@ -107,6 +115,32 @@ test("addHookEntry is idempotent — a second add (even with a different path) i
   const second = addHookEntry(first.settings, UG, "node /b/usage-guard-hook.mjs");
   assert.equal(second.changed, false);
   assert.strictEqual(second.settings, first.settings, "unchanged object returned as-is");
+});
+
+// ── policy hook definition (PR 3) ─────────────────────────────────────────────
+
+test("HOOK_DEFS.policy targets PreToolUse (matcher '*') with the policy-hook script", () => {
+  assert.deepEqual(POLICY, {
+    skill: "policy",
+    event: "PreToolUse",
+    matcher: "*",
+    script: "policy-hook.mjs",
+  });
+});
+
+test("addHookEntry wires policy alongside usage-guard as a sibling PreToolUse entry", () => {
+  // Both are PreToolUse/matcher "*" but carry DIFFERENT scripts, so they coexist
+  // (disambiguated by the script filename in the command) rather than dedup.
+  const withUg = addHookEntry({}, UG, "node /x/usage-guard-hook.mjs").settings;
+  const { settings, changed } = addHookEntry(withUg, POLICY, "node /x/policy-hook.mjs");
+  assert.equal(changed, true, "a different script is not an idempotent skip");
+  assert.equal(settings.hooks.PreToolUse.length, 2, "usage-guard + policy coexist");
+  const commands = settings.hooks.PreToolUse.flatMap((g) => g.hooks.map((h) => h.command));
+  assert.ok(commands.includes("node /x/usage-guard-hook.mjs"));
+  assert.ok(commands.includes("node /x/policy-hook.mjs"));
+  // adding policy a second time is idempotent
+  const again = addHookEntry(settings, POLICY, "node /y/policy-hook.mjs");
+  assert.equal(again.changed, false, "re-adding policy (any path) is a no-op");
 });
 
 test("removeHookEntry deletes only our entry, keeping foreign hooks and other events", () => {
@@ -590,11 +624,20 @@ test("e2e: hooks status reports per-hook wiring (unwired baseline)", async () =>
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /usage-guard.*not wired/, "usage-guard shows not wired");
     assert.match(r.stdout, /observability.*not wired/, "observability shows not wired");
-    assert.match(r.stdout, /policy.*planned/i, "planned policy hook is surfaced");
+    assert.match(
+      r.stdout,
+      /policy.*not wired/,
+      "policy is now a real (wireable) hook, shown unwired",
+    );
     const summary = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
     assert.equal(summary.action, "status");
     assert.equal(summary.hooks.find((h) => h.name === "usage-guard").wired, false);
-    assert.deepEqual(summary.planned, ["policy"]);
+    assert.equal(
+      summary.hooks.find((h) => h.name === "policy").wired,
+      false,
+      "policy listed as a real hook",
+    );
+    assert.deepEqual(summary.planned, [], "policy is no longer 'planned' — it is wireable now");
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -643,4 +686,160 @@ test("e2e: hooks status flags a degraded (fail-open) source with a warning", asy
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+});
+
+// ── hooks add policy end-to-end (PR 3) ────────────────────────────────────────
+
+test("e2e: hooks add policy wires the policy-hook PreToolUse entry (matcher '*')", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    const add = runCli(["add", "--adapter=claude-code", "--skills=policy", "--force"], { home });
+    assert.equal(add.status, 0, `install failed: ${add.stderr}`);
+
+    const r = runCli(["hooks", "add", "policy", "--yes"], { home });
+    assert.equal(r.status, 0, `hooks add policy failed: ${r.stderr}`);
+
+    const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.local.json"), "utf8"));
+    const entry = settings.hooks.PreToolUse.find((g) =>
+      g.hooks.some((h) => /policy-hook\.mjs$/.test(h.command)),
+    );
+    assert.ok(entry, "a PreToolUse entry referencing policy-hook.mjs is written");
+    assert.equal(entry.matcher, "*");
+    // policy is NOT adapter-gated, so it has a shared `.agents/skills` base that
+    // readInstalled scans before `.claude/skills`; the resolved path is that base
+    // (unlike usage-guard, which is claude-only and resolves to `.claude/skills`).
+    // Either is a valid absolute path to the same script — assert the shape.
+    const cmd = entry.hooks.find((h) => /policy-hook\.mjs$/.test(h.command)).command;
+    assert.match(cmd, /^node .*\/policy\/policy-hook\.mjs$/, "node-prefixed absolute path");
+    assert.ok(cmd.includes(home), "the resolved command is an absolute path under HOME");
+    assert.ok(
+      cmd.includes(join(home, ".agents", "skills", "policy")) ||
+        cmd.includes(join(home, ".claude", "skills", "policy")),
+      "resolved from an installed policy skill dir (.agents base or .claude wrapper)",
+    );
+    // policy is not usage-guard → no permissions allowlist suggestion is folded in.
+    assert.ok(!("permissions" in settings), "policy add writes no permissions allowlist");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: hooks remove policy leaves a sibling usage-guard PreToolUse hook intact", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    runCli(["add", "--adapter=claude-code", "--skills=usage-guard,policy", "--force"], { home });
+    runCli(["hooks", "add", "usage-guard", "--yes"], { home });
+    runCli(["hooks", "add", "policy", "--yes"], { home });
+
+    const settingsFile = join(home, ".claude", "settings.local.json");
+    let settings = JSON.parse(readFileSync(settingsFile, "utf8"));
+    assert.equal(settings.hooks.PreToolUse.length, 2, "both PreToolUse hooks wired");
+
+    const r = runCli(["hooks", "remove", "policy", "--yes"], { home });
+    assert.equal(r.status, 0, `remove policy failed: ${r.stderr}`);
+    settings = JSON.parse(readFileSync(settingsFile, "utf8"));
+    const remaining = settings.hooks.PreToolUse.flatMap((g) => g.hooks.map((h) => h.command));
+    assert.ok(
+      remaining.some((c) => /usage-guard-hook\.mjs$/.test(c)),
+      "usage-guard entry preserved",
+    );
+    assert.ok(!remaining.some((c) => /policy-hook\.mjs$/.test(c)), "policy entry removed");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+// ── policy init end-to-end (PR 3) ─────────────────────────────────────────────
+
+test("e2e: policy init writes ~/.agents/policy.yaml from the commented template", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-policy-e2e-"));
+  try {
+    const r = runCli(["policy", "init", "--yes"], { home });
+    assert.equal(r.status, 0, `policy init failed: ${r.stderr}`);
+    const file = join(home, ".agents", "policy.yaml");
+    assert.ok(existsSync(file), "policy.yaml written under ~/.agents/");
+    const body = readFileSync(file, "utf8");
+    assert.match(body, /schema_version: 1/);
+    assert.match(body, /reversible-local: proceed/);
+    assert.match(body, /externally-visible: batch-confirm/);
+    assert.match(body, /irreversible: ask/);
+    assert.match(r.stdout, /"created": true/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: policy init is non-destructive — an existing policy.yaml is never overwritten", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-policy-e2e-"));
+  try {
+    const file = join(home, ".agents", "policy.yaml");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "schema_version: 1\n# hand-edited — keep me\n");
+    const before = readFileSync(file, "utf8");
+
+    const r = runCli(["policy", "init", "--yes"], { home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /already exists|not overwriting|Nothing to do/i);
+    assert.equal(readFileSync(file, "utf8"), before, "existing policy.yaml left untouched");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: policy init --dry-run prints the template and writes nothing", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-policy-e2e-"));
+  try {
+    const r = runCli(["policy", "init", "--dry-run"], { home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /"dry_run": true/);
+    assert.match(r.stdout, /schema_version: 1/);
+    assert.ok(!existsSync(join(home, ".agents", "policy.yaml")), "dry-run wrote nothing");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: policy init refuses to write non-interactively without --yes", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-policy-e2e-"));
+  try {
+    const r = runCli(["policy", "init"], { home });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /--yes/);
+    assert.ok(!existsSync(join(home, ".agents", "policy.yaml")), "nothing written without --yes");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: policy init --scope=repo writes <repo>/.agents/policy.yaml", async () => {
+  const repo = await mkdtemp(join(tmpdir(), "skills-policy-repo-"));
+  try {
+    const r = runCli(["policy", "init", "--scope=repo", `--repo-root=${repo}`, "--yes"], {
+      home: repo,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(existsSync(join(repo, ".agents", "policy.yaml")), "repo-scope policy.yaml written");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+// ── policy init template ⇄ schema (no drift) ──────────────────────────────────
+
+test("POLICY_TEMPLATE parses + validates clean through policy-read (zero-config equivalent)", async () => {
+  const parsed = parseYaml(POLICY_TEMPLATE);
+  const schema = await loadSchema();
+  const { ok, errors } = validatePolicy(parsed, schema);
+  assert.ok(ok, `template must validate against policy.schema.json: ${errors.join("; ")}`);
+  // A merged effective policy from the template reproduces the zero-config defaults.
+  const eff = mergePolicies({ user: parsed });
+  assert.equal(eff.classes["reversible-local"], "proceed");
+  assert.equal(eff.classes["externally-visible"], "batch-confirm");
+  assert.equal(eff.classes.irreversible, "ask");
+  assert.deepEqual(eff.actions, {}, "the actions block is commented → no overrides");
+});
+
+test("resolvePolicyPath honors user vs repo scope", () => {
+  assert.equal(resolvePolicyPath("user", { home: "/h" }), join("/h", ".agents", "policy.yaml"));
+  assert.equal(resolvePolicyPath("repo", { repoRoot: "/r" }), join("/r", ".agents", "policy.yaml"));
 });

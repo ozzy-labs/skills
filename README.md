@@ -87,7 +87,8 @@ Supported adapters: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`. On an *
 | `remove` (alias `uninstall`) | Uninstall skills. Confirmation required (TTY prompt or `--yes`). `--skills` required. |
 | `fork <skill> <new-name>` | Copy an installed skill to a user-owned, unmanaged name (free to edit; never touched by update/remove). |
 | `diff <skill>` | Show a skill's local edits vs the current upstream. |
-| `hooks <add\|remove\|status> [<name>]` | Wire/unwire/inspect an optional Claude Code hook (`usage-guard`, `observability`). `add`/`remove` resolve the script's absolute path, preview a diff, and confirm (`--yes` non-interactively); `add usage-guard` also suggests the endpoint-path permissions allowlist (`--no-permissions` to skip). `status` reports each hook's wiring and, for a wired usage-guard, diagnoses whether the guard is effective or has degraded to a no-op. |
+| `hooks <add\|remove\|status> [<name>]` | Wire/unwire/inspect an optional Claude Code hook (`usage-guard`, `observability`, `policy`). `add`/`remove` resolve the script's absolute path, preview a diff, and confirm (`--yes` non-interactively); `add usage-guard` also suggests the endpoint-path permissions allowlist (`--no-permissions` to skip). `status` reports each hook's wiring and, for a wired usage-guard, diagnoses whether the guard is effective or has degraded to a no-op. |
+| `policy <init>` | Scaffold a commented `policy.yaml` for the central autonomy policy (`--scope=user` → `~/.agents/policy.yaml`, `--scope=repo` → `<repo>/.agents/policy.yaml`). Non-destructive: an existing file is never overwritten. `--dry-run` prints the template; `--yes` skips the confirm (required non-interactively). |
 
 ### State & editable skills
 
@@ -97,7 +98,7 @@ Project scope (`--target`) writes the committed payload (`.claude/skills/` wrapp
 
 ### Hook wiring
 
-Two skills ship an optional Claude Code hook as an extra file: usage-guard's PreToolUse ceiling (`usage-guard-hook.mjs`) and skill-observability's SessionEnd capture (`obs-derive.mjs`). Enabling one means adding a hook entry whose `command` is the **absolute** path to that script — and that path differs between a user-scope install (`~/.claude/skills/…`) and dogfooding inside this repo (`<repo>/.claude/skills/…`). `hooks add` resolves it for you:
+Three skills ship an optional Claude Code hook as an extra file: usage-guard's PreToolUse ceiling (`usage-guard-hook.mjs`), skill-observability's SessionEnd capture (`obs-derive.mjs`), and the central autonomy policy's PreToolUse enforcement gate (`policy-hook.mjs`). Enabling one means adding a hook entry whose `command` is the **absolute** path to that script — and that path differs between a user-scope install (`~/.claude/skills/…`) and dogfooding inside this repo (`<repo>/.claude/skills/…`). `hooks add` resolves it for you:
 
 ```bash
 # Wire usage-guard's PreToolUse ceiling into ~/.claude/settings.local.json
@@ -105,6 +106,10 @@ npx @ozzylabs/skills hooks add usage-guard
 
 # Wire skill-observability's SessionEnd capture; --scope=user targets settings.json
 npx @ozzylabs/skills hooks add observability --scope=user
+
+# Wire the central autonomy policy's PreToolUse gate (narrow-gated to irreversible
+# commands like gh pr merge / npm publish / git push --force)
+npx @ozzylabs/skills hooks add policy
 
 # Preview the settings diff without writing anything
 npx @ozzylabs/skills hooks add usage-guard --dry-run
@@ -124,6 +129,25 @@ npx @ozzylabs/skills hooks status
 `hooks add usage-guard` additionally proposes the **permissions allowlist** the endpoint path needs — a `Read(//…/.credentials.json)` and a `Bash(node …/usage-check.mjs:*)` entry (see the skill's §環境要件) — folded into the same diff. It is a non-destructive, idempotent append to `permissions.allow`; `--no-permissions` opts out and still wires the hook. Without those grants the guard silently falls back to `fail-open` (effectively OFF).
 
 `hooks status` is read-only: it scans both settings files and reports, per hook, whether it is wired. For a wired usage-guard it runs `usage-check.mjs` once and diagnoses the `source` — `endpoint`/`cache` mean the guard is effective, while `jsonl`/`fail-open` mean it has degraded to a no-op (with a pointer to the skill's §環境要件). This catches the failure mode where the hook is wired but the endpoint path is blocked, so the guard is quietly off.
+
+`hooks add policy` wires the **central autonomy policy's** PreToolUse enforcement gate. It is narrow-gated: it only inspects irreversible Bash commands (`gh pr merge`, `gh release create`, `git push --force`, `npm`/`pnpm`/`yarn publish`) and denies them when the resolved gate is `ask`; every other tool call passes through untouched. A caller that has already been granted autonomy for an action (e.g. `drive --merge`, which overrides `merge` to `proceed`) exports `POLICY_GUARD_PROCEED=merge` so its own pre-approved merge is not re-blocked by the gate. See the `policy` skill for the contract and the file kill-switch (`~/.claude/policy-guard/DISABLE`).
+
+### Autonomy policy template
+
+`policy init` scaffolds a commented `policy.yaml` for the central autonomy policy — the three class defaults (`reversible-local`/`externally-visible`/`irreversible`) spelled out, plus commented per-action override examples. The written file is a valid, zero-config-equivalent policy (it reproduces today's behavior until you edit it):
+
+```bash
+# Write ~/.agents/policy.yaml (user default)
+npx @ozzylabs/skills policy init
+
+# Write <repo>/.agents/policy.yaml (repo override, wins over user)
+npx @ozzylabs/skills policy init --scope=repo
+
+# Print the template without writing anything
+npx @ozzylabs/skills policy init --dry-run
+```
+
+It is non-destructive: an existing `policy.yaml` is never overwritten (it skips with a note). `--yes` skips the confirmation prompt (required on non-interactive / CI runs).
 
 ## Consumer setup
 
