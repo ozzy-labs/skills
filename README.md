@@ -12,6 +12,8 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 16 skills total: 11 generic workflow skills shared across all OzzyLabs repositories (including the reference-only `policy` companion), 2 Claude-Code-only skills (`usage-guard`, `skill-observability`), plus 3 internal-use skills (`health`, `topics`, `phase-issue`) bundled in the package. (The legacy `migrate` subcommand that cleaned up the old project-scoped layout has been removed — see [#151](https://github.com/ozzy-labs/skills/issues/151).)
 
+> **Breaking change (ADR-0028 R4):** the former `lint`, `test`, and `lint-rules` skills were removed and unified into **`verify`** (build + type + test + lint via a discovery engine). Replace any `/lint` or `/test` usage with `/verify`; existing installs drop the retired skills with `npx @ozzylabs/skills update --prune`. See [#182](https://github.com/ozzy-labs/skills/issues/182).
+
 | Skill | Description |
 | --- | --- |
 | `commit` | Stage changes and create a Conventional Commit |
