@@ -81,6 +81,26 @@ npx @ozzylabs/skills add --target=./my-repo
 
 旧 `sync-project` / `migrate` subcommand は撤去済み（project scope は `add --target`）。編集済み skill には `update --merge` で 3-way マージ（base=install 時スナップショット / mine=編集 / theirs=現上流。conflict は `<<<<<<<` マーカーで残す）。
 
+### Hook 配線
+
+2 つの skill は Claude Code hook を extra file として同梱する: usage-guard の PreToolUse ceiling（`usage-guard-hook.mjs`）と skill-observability の SessionEnd capture（`obs-derive.mjs`）。有効化には hook エントリの `command` に **絶対パス**を書く必要があり、そのパスは user-scope install（`~/.claude/skills/…`）と本リポでの dogfood（`<repo>/.claude/skills/…`）で異なる。`hooks add` がこのパスを自動解決する:
+
+```bash
+# usage-guard の PreToolUse ceiling を ~/.claude/settings.local.json に配線
+npx @ozzylabs/skills hooks add usage-guard
+
+# skill-observability の SessionEnd capture を配線（--scope=user で settings.json）
+npx @ozzylabs/skills hooks add observability --scope=user
+
+# 書き込まずに settings の diff を確認（非対話/CI では適用に --yes 必須）
+npx @ozzylabs/skills hooks add usage-guard --dry-run
+
+# CLI が書いたエントリのみ削除（他の hook はそのまま）
+npx @ozzylabs/skills hooks remove usage-guard
+```
+
+install 済み skill dir から script を解決し（無ければ先に `add --skills=usage-guard`）、settings の diff を提示してから確認する（非対話では `--yes` 必須）。既定は `settings.local.json`（`--scope=user` で `settings.json`）を編集し、再 add は冪等 no-op、自分が書いたエントリのみ操作し、壊れた JSON settings は上書きしない。リポは依然 settings/hooks を配信せず、要求時にローカル settings を書くだけ。
+
 ## Consumer セットアップ
 
 skills を **user skills** として 1 コマンドで install する:

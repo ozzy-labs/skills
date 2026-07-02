@@ -86,12 +86,33 @@ Supported adapters: `claude-code`, `codex-cli`, `gemini-cli`, `copilot`. On an *
 | `remove` (alias `uninstall`) | Uninstall skills. Confirmation required (TTY prompt or `--yes`). `--skills` required. |
 | `fork <skill> <new-name>` | Copy an installed skill to a user-owned, unmanaged name (free to edit; never touched by update/remove). |
 | `diff <skill>` | Show a skill's local edits vs the current upstream. |
+| `hooks <add\|remove> <name>` | Wire/unwire an optional Claude Code hook (`usage-guard`, `observability`) into your local settings. Resolves the script's absolute path, previews a diff, confirms (`--yes` non-interactively). |
 
 ### State & editable skills
 
 Installed skills are **editable** — edit them in place under their own name. The CLI tracks what it installed with **per-item provenance markers** (`.ozzylabs-skills.json` co-located in each skill dir; no central registry). The shared `.agents/skills/<name>` base is **reference-counted** across adapters (removing one adapter keeps the base while another needs it). `update` baselines each skill's content hash so it can detect — and refuse to clobber — your local edits.
 
 Project scope (`--target`) writes the committed payload (`.claude/skills/` wrappers + canonical `.agents/skills/` + `.claude/agents/`) with repo-root-relative refs preserved. The legacy `sync-project` and `migrate` subcommands have been removed — use `add --target <repo>`. For edited skills, `update --merge` does a 3-way merge (base = the install-time snapshot, mine = your edits, theirs = current upstream); conflicts are left with standard `<<<<<<<` markers.
+
+### Hook wiring
+
+Two skills ship an optional Claude Code hook as an extra file: usage-guard's PreToolUse ceiling (`usage-guard-hook.mjs`) and skill-observability's SessionEnd capture (`obs-derive.mjs`). Enabling one means adding a hook entry whose `command` is the **absolute** path to that script — and that path differs between a user-scope install (`~/.claude/skills/…`) and dogfooding inside this repo (`<repo>/.claude/skills/…`). `hooks add` resolves it for you:
+
+```bash
+# Wire usage-guard's PreToolUse ceiling into ~/.claude/settings.local.json
+npx @ozzylabs/skills hooks add usage-guard
+
+# Wire skill-observability's SessionEnd capture; --scope=user targets settings.json
+npx @ozzylabs/skills hooks add observability --scope=user
+
+# Preview the settings diff without writing anything
+npx @ozzylabs/skills hooks add usage-guard --dry-run
+
+# Remove only the entry this CLI wrote (other hooks stay untouched)
+npx @ozzylabs/skills hooks remove usage-guard
+```
+
+`hooks add` resolves the script from the installed skill dir (run `add --skills=usage-guard` first if it is missing), previews the settings diff, and asks before writing (`--yes` is required on non-interactive / CI runs). It edits `settings.local.json` by default (`--scope=user` for `settings.json`), is idempotent (a re-add is a no-op), only ever touches the entries it owns, and refuses to overwrite an unparseable settings file. The repo still ships no settings/hooks — this only writes your local settings on request.
 
 ## Consumer setup
 
