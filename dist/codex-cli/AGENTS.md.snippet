@@ -15,5 +15,6 @@
 - `ship` — lint・コミット・PR 作成を一括実行する。変更に対して lint → コミット → PR 作成を順に実行する統合パイプライン。
 - `skill-metrics` — ローカルの observability イベントログ（~/.agents/observability/events.jsonl）を集計し、skill 別の発火件数と注目イベント（fallback / HITL 却下 / loop 上限到達 / 中断）を read-only で提示する。「skill のメトリクスを見せて」「観測結果を集計して」「どの skill がよく使われてる?」で発火。送信はしない。
 - `test` — ビルド・テスト・型チェックを実行し、結果を報告する。
+- `verify` — ビルド・型・テスト・lint の複合検証を一発で実行する統合スキル。`verify.mjs` エンジンが検証コマンドを発見連鎖（AGENTS.md「検証」節 → package.json scripts → justfile/Makefile/lefthook → 言語 heuristic）で自動発見し、出典付きで直列実行して結果サマリを返す。上位段でヒットすればその段のみ実行（段跨ぎ禁止）。
 
 <!-- end: @ozzylabs/skills -->
