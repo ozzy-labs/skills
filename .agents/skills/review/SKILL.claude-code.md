@@ -46,7 +46,7 @@ return { findings: results.filter(Boolean) }
 ```
 
 - `agentType: 'code-reviewer'` で既存の subagent 定義を流用する
-- 集約（重複統合・観点間衝突・グルーピング）は canonical の手順どおり **workflow の return 後に呼び出し元で**行う。workflow 内に集約 agent を追加しない
+- 集約（重複統合・観点間衝突・グルーピング）は workflow 内で行わず、return 後に呼び出し元で findings を `review.mjs render` に渡してエンジンに任せる（canonical 手順 3）。workflow 内に集約 agent を追加しない
 - diff は `args` で渡す（worker に取得させない）
 
 #### Agent tool 方式（fallback）
@@ -59,7 +59,7 @@ Agent({
 ```
 
 - 同一 wave 内の独立 subagent は **1 メッセージ複数 tool call** で並列起動する
-- 集約は呼び出し元（review skill 内の純スクリプト処理）で行う。LLM 呼び出しを追加しない
+- 集約は呼び出し元で `review.mjs render` に findings を渡して行う（LLM 呼び出しを追加しない）
 - subagent の戻り値（JSON）をマージし、`findings[]` に投入する
 
 ### 完了報告後
