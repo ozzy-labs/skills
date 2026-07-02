@@ -108,7 +108,7 @@ gate 語彙は 3 値のみ: `proceed`（確認なしで実行 + audit trail）/ 
 
 | 項目 | 除外理由 |
 |---|---|
-| lockfile drift | correctness 問題。lint/test/CI が拾う領域。言語特化 |
+| lockfile drift | correctness 問題。verify / CI が拾う領域。言語特化 |
 | gitignored-but-tracked file | rare すぎてノイズ源 |
 | GitHub Actions caches / artifacts | ストレージ管理の領域、leftover 状態とは別概念 |
 

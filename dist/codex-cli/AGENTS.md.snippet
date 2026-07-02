@@ -7,14 +7,11 @@
 - `drive` — Issue または指示から実装・PR 作成・セルフレビュー・修正を自動で回し、merge-ready な PR を出す。単一/複数の Issue/PR と明示依存記法に対応。オプションでマージまで実行可能。オーケストレーションではマージ前に cross-cutting を検出・自己解消し、1 run で follow-up を残さない。
 - `implement` — Issue または指示をもとに、ブランチ作成・実装計画・コード変更を行う。Issue 番号またはテキスト指示を受け取る。
 - `lessons-triage` — セッション教訓 queue（~/.agents/lessons/queue.jsonl）を消化し、transcript から User Skills に関する教訓を抽出して、承認された分のみ ozzy-labs/skills へ issue 起票する。「教訓を整理して」「lessons を消化して」「セッションの振り返り」で発火。
-- `lint` — 全リンターを自動修正付きで実行し、結果を報告する。コード品質チェック、フォーマット、型チェック、セキュリティスキャンを含む。
-- `lint-rules` — 拡張子別リンター・フォーマッターのコマンド対応表と型チェックルール。他スキルから参照される。
 - `policy` — 中央 autonomy policy の契約（policy.schema.json）と読取 substrate（policy-read.mjs）の定義。アクション 3 クラス・gate 語彙・policy.yaml 階層・ゼロコンフィグ既定の SSOT。他スキル・hook から参照される。
 - `pr` — コミット済みの変更をリモートにプッシュし、PR を作成・更新する。
 - `review` — コード変更や PR を 11 観点（perspectives）でレビューし、JSON 構造化出力 + 人間可読レポートで報告する。quick / deep モードを切替可能。PR 番号またはワーキングツリー差分を入力に取る。
-- `ship` — lint・コミット・PR 作成を一括実行する。変更に対して lint → コミット → PR 作成を順に実行する統合パイプライン。
+- `ship` — 検証・コミット・PR 作成を一括実行する。変更に対して verify（ビルド + 型 + テスト + lint）→ コミット → PR 作成を順に実行する統合パイプライン。
 - `skill-metrics` — ローカルの observability イベントログ（~/.agents/observability/events.jsonl）を集計し、skill 別の発火件数と注目イベント（fallback / HITL 却下 / loop 上限到達 / 中断）を read-only で提示する。「skill のメトリクスを見せて」「観測結果を集計して」「どの skill がよく使われてる?」で発火。送信はしない。
-- `test` — ビルド・テスト・型チェックを実行し、結果を報告する。
 - `verify` — ビルド・型・テスト・lint の複合検証を一発で実行する統合スキル。`verify.mjs` エンジンが検証コマンドを発見連鎖（AGENTS.md「検証」節 → package.json scripts → justfile/Makefile/lefthook → 言語 heuristic）で自動発見し、出典付きで直列実行して結果サマリを返す。上位段でヒットすればその段のみ実行（段跨ぎ禁止）。
 
 <!-- end: @ozzylabs/skills -->

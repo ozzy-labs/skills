@@ -9,7 +9,7 @@
 //      skills. Referenced companions are exempt: a skill whose canonical
 //      SKILL.md or Claude Code companion (SKILL.claude-code.md) declares
 //      `user-invocable: false` is reference-only and never surfaced as a
-//      slash command (today: commit-conventions, lint-rules, policy,
+//      slash command (today: commit-conventions, policy,
 //      skill-observability). They may still appear; they are just not
 //      required.
 //   4. The "N skills total" / 「合計 N 件」 count sentences must match the
@@ -164,12 +164,7 @@ test("reference-only exemption covers the known companions", async () => {
   for (const name of skills) {
     if (await isReferenceOnly(name)) referenceOnly.push(name);
   }
-  assert.deepEqual(referenceOnly, [
-    "commit-conventions",
-    "lint-rules",
-    "policy",
-    "skill-observability",
-  ]);
+  assert.deepEqual(referenceOnly, ["commit-conventions", "policy", "skill-observability"]);
 });
 
 test("skill-count sentences in both READMEs match the SSOT skill count", async () => {

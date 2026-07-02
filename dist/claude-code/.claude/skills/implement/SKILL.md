@@ -35,6 +35,6 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 実装完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
 
-- **「lint・コミット・PR まで一括実行する」** → `~/.claude/skills/ship/SKILL.md` を Read し、その手順に従う
-- **「個別に lint を実行する」** → `~/.claude/skills/lint/SKILL.md` を Read し、その手順に従う
+- **「検証・コミット・PR まで一括実行する」** → `~/.claude/skills/ship/SKILL.md` を Read し、その手順に従う
+- **「検証（verify）を実行する」** → `~/.claude/skills/verify/SKILL.md` を Read し、その手順に従う
 - **「追加の変更を行う」** → 終了する

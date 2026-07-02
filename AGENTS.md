@@ -44,7 +44,7 @@ npx @ozzylabs/skills remove --skills=topics --yes
 project-scope（Claude mobile / web cloud 用）は `--target` で対象 repo に相対 ref 保持の payload（`.claude/skills/` + canonical `.agents/skills/` + `.claude/agents/`）をコピーする（commit する）:
 
 ```bash
-npx @ozzylabs/skills add --target=./my-repo --skills=drive,implement,ship,review,commit,pr,lint,test,commit-conventions,lint-rules
+npx @ozzylabs/skills add --target=./my-repo --skills=drive,implement,ship,review,verify,commit,pr,commit-conventions
 ```
 
 旧 `sync-project` / `migrate` subcommand は撤去済み（[#151](https://github.com/ozzy-labs/skills/issues/151)）。
