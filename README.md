@@ -22,6 +22,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 | `lint` | Run all linters with auto-fix |
 | `lessons-triage` | Triage the session-lessons queue (`~/.agents/lessons/queue.jsonl`, filled by the dotfiles `lesson-capture.sh` hook): extract User-Skills improvement lessons from session transcripts and file approved ones as issues on ozzy-labs/skills. HITL — every issue requires per-item approval; no repo edits, no auto-apply |
 | `lint-rules` | Lint configuration reference |
+| `phase-issue` | Generate a Phase-N tracking issue: assembles a structured body (cross-session handoff context, decision table, per-PR tasks, DoD, Phase N+1 outlook) and files it via `gh issue create`. Non-interactive by default — all sections passed as arguments; the Claude Code companion adds an interactive mode that collects missing ones. `--draft` prints the body to stdout instead of filing |
 | `pr` | Push changes and open or update a PR |
 | `review` | Review code changes or PRs across 11 perspectives (correctness / security / conventions / architecture / compatibility / maintainability / testing / performance / observability / usability / documentation). Emits a JSON-structured payload alongside the human-readable comment so `drive` can terminate its loop deterministically. `--axes` overrides the auto-selection; `--deep` fans out per-axis subagents (Claude Code only) |
 | `ship` | Lint + commit + PR creation in one go |
