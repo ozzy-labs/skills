@@ -14,7 +14,7 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 ### 入力解析
 
-`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`, `--review=<mode>`, `--no-usage-guard`）を特定する。
+`$ARGUMENTS` を解析し、target リスト（Issue/PR/指示）と依存記法、オプション（`--merge`, `--concurrency N`, `--review=<mode>`, `--no-usage-guard`）を特定する。決定論的な展開・DAG/wave 構築・モード分岐は canonical と同じく `drive-plan.mjs`（`~/.claude/skills/drive/drive-plan.mjs`、dogfood は `<repo>/.claude/skills/drive/drive-plan.mjs`）に委譲し、集約レポート整形は `drive-report.mjs` に委譲する。
 
 - target が 1 件かつ依存記法（`->`）なし → 単一モード
 - target が 2 件以上、または依存記法あり → オーケストレーションモード
