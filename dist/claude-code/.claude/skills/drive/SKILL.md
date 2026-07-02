@@ -31,7 +31,7 @@ usage-guard の取り扱い:
 - **既定で有効（opt-out）**。明示的に `--no-usage-guard` を付けたときのみ checkpoint を挟まない素の drive を実行する。
 - `--no-usage-guard` 未指定なら、後述「usage-guard 配線（既定 ON・`--no-usage-guard` で無効化）」の checkpoint で usage-guard エンジンを呼び、Usage Limit 超過時は枠回復まで待機してから自己再入する。
 - `--usage-guard` は後方互換の **deprecated no-op エイリアス**として受理する（既定 ON のため明示は不要・挙動は既定と同一）。継続コマンドには強制付与しない。
-- 解析時に**元の引数列を保存**する（継続コマンド `/drive <元の引数>` の組み立てに使う）。`--no-usage-guard` がユーザー指定されていた場合のみ保存対象に含めて継続コマンドにも引き継ぐ。`--usage-guard` は no-op エイリアスなので保存・付与しない。
+- 解析時に**元の引数列を保存**する（継続コマンド `/drive <元の引数>` と、失敗時レポートの再開行 `再開: /drive <元の引数>` — canonical の Phase 5 / Phase Final-6、`failed` / `merge-ready` 残置 / `skipped` があるときのみ — の組み立てに使う）。`--no-usage-guard` がユーザー指定されていた場合のみ保存対象に含めて継続コマンドにも引き継ぐ。`--usage-guard` は no-op エイリアスなので保存・付与しない。
 
 ### 自律実行
 

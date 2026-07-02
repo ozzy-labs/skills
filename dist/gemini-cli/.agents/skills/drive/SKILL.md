@@ -48,6 +48,14 @@ Issue または指示を受け取り、実装 → ship → セルフレビュー
   - 超過時は枠リセットまで待機してから継続コマンド `/drive <元の引数>` を自己再入する（drive 冪等 resume で続行）。`--no-usage-guard` がユーザー指定されていた場合のみ継続コマンドにも引き継ぐ（`--usage-guard` を強制付与しない）。
   - usage-guard skill / `usage-check.mjs` が未インストールの環境でもエラーで drive を止めない。skill 不在を検出したら 1 行警告を出し、そのまま通常進行する（fail-open 扱い）。
 
+### 引数復元（再開コマンド）
+
+解析時に**元の引数列を保存**する。失敗時レポートの再開行（単一モード Phase 5 / オーケストレーション Phase Final-6）と usage-guard の継続コマンドは、この保存済み引数から `/drive <元の引数>` を組み立てる。復元規約は usage-guard の継続コマンド規約と同一:
+
+- 元の引数をそのまま再掲する。drive の冪等 resume（既存 PR / ブランチ / merged 済み PR の検出）が続きから再開する
+- `--no-usage-guard` はユーザー指定されていた場合のみ引き継ぐ
+- `--usage-guard` は deprecated no-op エイリアスのため保存・付与しない（強制付与もしない）
+
 ### モード分岐
 
 - target が 1 件かつ依存記法なし → **単一モード**
@@ -130,7 +138,10 @@ drive 完了:
             総計 Critical: 0, Warning: 0, Info: N
             by_axis: correctness:C0W0I0 security:C0W0I0 ...
   状態:     <merged | merge-ready | auto-merge enabled | failed>
+  再開:     /drive <元の引数>
 ```
+
+`再開:` 行は状態が `failed` または `merge-ready` のとき**必ず**出力する（発見可能性のため。resume が効くことを SKILL.md を読まずに知れるようにする）。引数は「引数復元（再開コマンド）」の規約に従って復元し、`再開: /drive <元の引数>` の 1 行で示す。再実行すると冪等 resume が既存 PR / ブランチを検出し、Phase 3 から続きを再開する。状態が `merged` / `auto-merge enabled` で完結した場合は表示しない。
 
 ## オーケストレーションモード
 
@@ -370,9 +381,13 @@ drive 完了 (4/5 merged, 1 skipped):
   総レビュー反復:    5 回
   cross-cutting:    2 gaps resolved (folded into PR #100, #102)
   cleanup:          3/5 removed (2 preserved: 1 failed, 1 skipped)
+
+再開: /drive <元の引数>
 ```
 
 `cross-cutting:` 行は Phase Final-3 で reconciliation により解消した gap 数と畳み込み先 PR を `<N> gaps resolved (folded into ...)` 形式で表示する。専用 reconciliation PR を作成・マージした場合はそれも merged リストの 1 行として現れ、`folded into` にその PR 番号を含める。gap が 0 件なら `cross-cutting: none`。fail-soft で残った gap があれば `<N> resolved, <M> unresolved (warning)` とし、warning ブロックに未解決分と手動対応の推奨を出す。
+
+`再開:` 行は `failed` / `merge-ready` 残置 / `skipped` が 1 件以上あるとき、集計ブロック直後に `再開: /drive <元の引数>` の 1 行を**必ず**出力する（「引数復元（再開コマンド）」の規約に従う）。再実行すると冪等 resume が merged 済み PR / 既存 PR を検出して完了済み target をスキップし、残りの target から続行する。全 target が merged で完結した場合は表示しない。
 
 ## 失敗 semantics
 
@@ -383,6 +398,8 @@ drive 完了 (4/5 merged, 1 skipped):
 | implement / ship 中断（テスト失敗等） | failed | skipped |
 | reconciliation の畳み込み失敗 | fail-soft（gap を warning 残置） | 影響なし（PR 自体は merge-ready） |
 | 独立 task の失敗 | 他並列 task に影響させない | - |
+
+いずれの失敗・残置も再開手段は共通で、レポート末尾の `再開: /drive <元の引数>` を再実行すればよい（Phase 5 / Phase Final-6 参照）。冪等 resume が既存 PR / ブランチ / merged 済み PR を検出し、完了済み target をスキップして続きから再開する。
 
 ## 注意事項
 
