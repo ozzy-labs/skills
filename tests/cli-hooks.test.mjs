@@ -1,4 +1,5 @@
-// Tests for `skills hooks add|remove` (ozzy-labs/skills#174 PR 1).
+// Tests for `skills hooks add|remove|status` (ozzy-labs/skills#174 PR 1 = add/
+// remove, PR 2 = status + permissions suggestion).
 //
 // Split like the rest of the CLI suite: the pure settings transforms + path
 // resolution are unit-tested directly, and the end-to-end wiring runs the actual
@@ -15,7 +16,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   addHookEntry,
+  addPermissionEntries,
   buildCommand,
+  buildUsagePermissionRules,
+  classifyUsageSource,
+  diagnoseUsageSource,
   HOOK_DEFS,
   removeHookEntry,
   resolveScriptPath,
@@ -31,7 +36,11 @@ const OBS = HOOK_DEFS.observability;
 function runCli(args, options = {}) {
   return spawnSync("node", [BIN, ...args], {
     cwd: options.cwd ?? ROOT,
-    env: { ...process.env, ...(options.home ? { OZZYLABS_SKILLS_HOME: options.home } : {}) },
+    env: {
+      ...process.env,
+      ...(options.home ? { OZZYLABS_SKILLS_HOME: options.home } : {}),
+      ...(options.env ?? {}),
+    },
     encoding: "utf8",
   });
 }
@@ -142,6 +151,118 @@ test("removeHookEntry on absent hook is a no-op", () => {
   const settings = { hooks: { PreToolUse: [] } };
   const { changed } = removeHookEntry(settings, UG);
   assert.equal(changed, false);
+});
+
+// ── permissions suggestion (PR 2) ────────────────────────────────────────────
+
+test("buildUsagePermissionRules emits a double-slash Read + a node Bash rule", () => {
+  const rules = buildUsagePermissionRules({
+    credentialsPath: "/home/alice/.claude/.credentials.json",
+    usageCheckPath: "/home/alice/.claude/skills/usage-guard/usage-check.mjs",
+  });
+  assert.deepEqual(rules, [
+    "Read(//home/alice/.claude/.credentials.json)",
+    "Bash(node /home/alice/.claude/skills/usage-guard/usage-check.mjs:*)",
+  ]);
+});
+
+test("addPermissionEntries seeds permissions.allow on empty settings", () => {
+  const rules = ["Read(//x/.credentials.json)", "Bash(node /x/usage-check.mjs:*)"];
+  const { settings, changed, added } = addPermissionEntries({}, rules);
+  assert.equal(changed, true);
+  assert.deepEqual(settings.permissions.allow, rules);
+  assert.deepEqual(added, rules);
+});
+
+test("addPermissionEntries preserves existing allow/deny and appends only new rules", () => {
+  const existing = {
+    permissions: { allow: ["Read(//keep/me)"], deny: ["Bash(rm:*)"] },
+    other: { untouched: true },
+  };
+  const rules = ["Read(//keep/me)", "Bash(node /x/usage-check.mjs:*)"];
+  const { settings, changed, added } = addPermissionEntries(existing, rules);
+  assert.equal(changed, true);
+  assert.deepEqual(settings.permissions.allow, [
+    "Read(//keep/me)",
+    "Bash(node /x/usage-check.mjs:*)",
+  ]);
+  assert.deepEqual(added, ["Bash(node /x/usage-check.mjs:*)"], "only the missing rule is added");
+  assert.deepEqual(settings.permissions.deny, ["Bash(rm:*)"], "deny is preserved");
+  assert.deepEqual(settings.other, { untouched: true }, "unrelated keys preserved");
+  assert.equal(existing.permissions.allow.length, 1, "input settings not mutated");
+});
+
+test("addPermissionEntries is idempotent when all rules already present", () => {
+  const rules = ["Read(//x/.credentials.json)", "Bash(node /x/usage-check.mjs:*)"];
+  const first = addPermissionEntries({}, rules);
+  const second = addPermissionEntries(first.settings, rules);
+  assert.equal(second.changed, false);
+  assert.deepEqual(second.added, []);
+  assert.strictEqual(second.settings, first.settings, "unchanged object returned as-is");
+});
+
+// ── usage-check source classification / diagnosis (PR 2) ──────────────────────
+
+test("classifyUsageSource: endpoint/cache are effective, jsonl/fail-open degraded", () => {
+  for (const s of ["endpoint", "cache"]) {
+    const c = classifyUsageSource(s);
+    assert.equal(c.effective, true, `${s} → effective`);
+    assert.equal(c.symbol, "✅");
+  }
+  for (const s of ["jsonl", "fail-open"]) {
+    const c = classifyUsageSource(s);
+    assert.equal(c.effective, false, `${s} → degraded`);
+    assert.equal(c.symbol, "⚠️");
+    assert.match(c.label, /環境要件/, "degraded label points to §環境要件");
+  }
+  const unknown = classifyUsageSource(null);
+  assert.equal(unknown.effective, null);
+  assert.equal(unknown.symbol, "?");
+});
+
+test("diagnoseUsageSource honors the env fixture over spawning", () => {
+  let spawned = false;
+  const d = diagnoseUsageSource({
+    scriptPath: "/should/not/run.mjs",
+    env: { OZZYLABS_SKILLS_USAGE_CHECK_JSON: '{"source":"endpoint","ok":true}' },
+    spawnImpl: () => {
+      spawned = true;
+      return {};
+    },
+  });
+  assert.equal(d.source, "endpoint");
+  assert.equal(spawned, false, "fixture bypasses the spawn");
+});
+
+test("diagnoseUsageSource spawns node and parses the last JSON line's source", () => {
+  const d = diagnoseUsageSource({
+    scriptPath: "/x/usage-check.mjs",
+    env: {},
+    spawnImpl: (cmd, args) => {
+      assert.equal(cmd, "node");
+      assert.deepEqual(args, ["/x/usage-check.mjs"]);
+      return { stdout: 'warning line\n{"source":"fail-open","ok":true}\n' };
+    },
+  });
+  assert.equal(d.source, "fail-open");
+});
+
+test("diagnoseUsageSource fails soft: null path, bad fixture, spawn error → { source: null }", () => {
+  assert.equal(diagnoseUsageSource({ scriptPath: null, env: {} }).source, null);
+  assert.equal(
+    diagnoseUsageSource({
+      scriptPath: "/x.mjs",
+      env: { OZZYLABS_SKILLS_USAGE_CHECK_JSON: "not json" },
+    }).source,
+    null,
+  );
+  const errRes = diagnoseUsageSource({
+    scriptPath: "/x.mjs",
+    env: {},
+    spawnImpl: () => ({ error: new Error("ENOENT") }),
+  });
+  assert.equal(errRes.source, null);
+  assert.match(errRes.error, /ENOENT/);
 });
 
 // ── path resolution ─────────────────────────────────────────────────────────
@@ -386,6 +507,139 @@ test("e2e: an unknown hook name is rejected with a suggestion", async () => {
     const r = runCli(["hooks", "add", "usage-gaurd", "--yes"], { home });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /unknown hook 'usage-gaurd'/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+// ── permissions suggestion end-to-end (PR 2) ─────────────────────────────────
+
+test("e2e: hooks add usage-guard also writes the permissions allowlist", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    runCli(["add", "--adapter=claude-code", "--skills=usage-guard", "--force"], { home });
+    const r = runCli(["hooks", "add", "usage-guard", "--yes"], { home });
+    assert.equal(r.status, 0, `hooks add failed: ${r.stderr}`);
+
+    const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.local.json"), "utf8"));
+    const allow = settings.permissions.allow;
+    const creds = join(home, ".claude", ".credentials.json");
+    const usageCheck = join(home, ".claude", "skills", "usage-guard", "usage-check.mjs");
+    assert.ok(allow.includes(`Read(/${creds})`), "credentials Read rule added (double-slash)");
+    assert.ok(allow.includes(`Bash(node ${usageCheck}:*)`), "node exec Bash rule added");
+    // hook wiring is still intact alongside the permissions.
+    assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /usage-guard-hook\.mjs$/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: --no-permissions wires the hook only (no permissions written)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    runCli(["add", "--adapter=claude-code", "--skills=usage-guard", "--force"], { home });
+    const r = runCli(["hooks", "add", "usage-guard", "--no-permissions", "--yes"], { home });
+    assert.equal(r.status, 0, r.stderr);
+    const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.local.json"), "utf8"));
+    assert.ok(settings.hooks.PreToolUse, "hook still wired");
+    assert.ok(!("permissions" in settings), "no permissions key written under --no-permissions");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: permissions allowlist is idempotent (second add is a no-op)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    runCli(["add", "--adapter=claude-code", "--skills=usage-guard", "--force"], { home });
+    runCli(["hooks", "add", "usage-guard", "--yes"], { home });
+    const settingsFile = join(home, ".claude", "settings.local.json");
+    const before = readFileSync(settingsFile, "utf8");
+    const r = runCli(["hooks", "add", "usage-guard", "--yes"], { home });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /already wired|Nothing to do/i);
+    assert.equal(readFileSync(settingsFile, "utf8"), before, "no duplicate permission entries");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: a hook wired with --no-permissions gains permissions on a later plain add", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    runCli(["add", "--adapter=claude-code", "--skills=usage-guard", "--force"], { home });
+    runCli(["hooks", "add", "usage-guard", "--no-permissions", "--yes"], { home });
+    // Hook is wired but permissions are absent; a plain re-add must add just the
+    // permissions (changed) rather than report "already wired".
+    const r = runCli(["hooks", "add", "usage-guard", "--yes"], { home });
+    assert.equal(r.status, 0, r.stderr);
+    const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.local.json"), "utf8"));
+    assert.ok(Array.isArray(settings.permissions.allow), "permissions added on the second add");
+    assert.equal(settings.hooks.PreToolUse.length, 1, "hook not duplicated");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+// ── hooks status end-to-end (PR 2) ────────────────────────────────────────────
+
+test("e2e: hooks status reports per-hook wiring (unwired baseline)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    const r = runCli(["hooks", "status"], { home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /usage-guard.*not wired/, "usage-guard shows not wired");
+    assert.match(r.stdout, /observability.*not wired/, "observability shows not wired");
+    assert.match(r.stdout, /policy.*planned/i, "planned policy hook is surfaced");
+    const summary = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+    assert.equal(summary.action, "status");
+    assert.equal(summary.hooks.find((h) => h.name === "usage-guard").wired, false);
+    assert.deepEqual(summary.planned, ["policy"]);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: hooks status shows a wired hook + endpoint source → guard effective", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    runCli(["add", "--adapter=claude-code", "--skills=usage-guard", "--force"], { home });
+    runCli(["hooks", "add", "usage-guard", "--yes"], { home });
+    const r = runCli(["hooks", "status"], {
+      home,
+      env: { OZZYLABS_SKILLS_USAGE_CHECK_JSON: '{"source":"endpoint","ok":true}' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /usage-guard.*wired/);
+    assert.match(r.stdout, /source=endpoint/);
+    assert.match(r.stdout, /effective/);
+    const summary = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+    const ug = summary.hooks.find((h) => h.name === "usage-guard");
+    assert.equal(ug.wired, true);
+    assert.equal(ug.usage_source, "endpoint");
+    assert.equal(ug.usage_effective, true);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("e2e: hooks status flags a degraded (fail-open) source with a warning", async () => {
+  const home = await mkdtemp(join(tmpdir(), "skills-hooks-e2e-"));
+  try {
+    runCli(["add", "--adapter=claude-code", "--skills=usage-guard", "--force"], { home });
+    runCli(["hooks", "add", "usage-guard", "--yes"], { home });
+    const r = runCli(["hooks", "status"], {
+      home,
+      env: { OZZYLABS_SKILLS_USAGE_CHECK_JSON: '{"source":"fail-open","ok":true}' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /DEGRADED/);
+    assert.match(r.stdout, /source=fail-open/);
+    assert.match(r.stdout, /環境要件/, "points to usage-guard §環境要件");
+    const summary = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+    const ug = summary.hooks.find((h) => h.name === "usage-guard");
+    assert.equal(ug.usage_source, "fail-open");
+    assert.equal(ug.usage_effective, false);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

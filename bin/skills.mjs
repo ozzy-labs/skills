@@ -8,7 +8,7 @@
 //   remove  Uninstall skills (with confirmation).
 //   fork    Copy a skill to a user-owned, unmanaged name.
 //   diff    Show a skill's local diff against upstream.
-//   hooks   Wire/unwire optional Claude Code hooks shipped with a skill (#174).
+//   hooks   Wire/unwire/inspect optional Claude Code hooks shipped with a skill (#174).
 //
 // `install`/`uninstall` are accepted as aliases for `add`/`remove`. Scope is
 // expressed by `--target` (absent = user, present = project repo). See #151 for
@@ -36,8 +36,9 @@ Verbs:
   remove     Uninstall skills (confirmation required). Alias: uninstall.
   fork       Copy a skill to a user-owned name.
   diff       Show a skill's diff against upstream.
-  hooks      Wire/unwire an optional Claude Code hook shipped with a skill
-             (usage-guard, observability) into your local settings.
+  hooks      Wire/unwire/inspect an optional Claude Code hook shipped with a
+             skill (usage-guard, observability). 'status' also diagnoses whether
+             a wired usage-guard is effective or has degraded to a no-op.
 
 Run 'npx @ozzylabs/skills <verb> --help' for verb-specific options.
 `;

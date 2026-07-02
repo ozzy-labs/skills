@@ -116,6 +116,14 @@ See the skill's `SKILL.md` §環境要件 for why the endpoint path can be block
 (api.anthropic.com egress + `~/.claude/.credentials.json` read) and how to
 restore it so `source` is `endpoint` rather than a degraded fallback.
 
+To check this in one command against your live install, run
+`npx @ozzylabs/skills hooks status`: for a wired usage-guard it runs
+`usage-check.mjs` once and reports whether the `source` is `endpoint`/`cache`
+(guard effective) or `jsonl`/`fail-open` (degraded — the endpoint path is still
+blocked; fix per §環境要件). Wiring the hook with
+`npx @ozzylabs/skills hooks add usage-guard` also proposes the permissions
+allowlist those grants need.
+
 ## B. `/usage-guard` standalone pause→resume (manual)
 
 Uses `scripts/usage-guard-smoke.mjs` against the REAL
