@@ -326,15 +326,62 @@ export function rationale(issue) {
 // ---------------------------------------------------------------------------
 
 /**
- * Render an ordered ref list + dep map into a drive argument string, using the
- * drive engine's own topological wave split. Waves render as `w1 -> w2 -> …`;
- * within a wave the priority order is preserved (topoWaves keeps input order).
- * Cross-wave edges are conservatively serialized (drive-compatible: at worst it
- * over-serializes, never breaks correctness). A cycle falls back to a flat
- * comma list.
+ * Transitive dependency set of a ref within a (acyclic) dep map.
+ * @param {string} ref
+ * @param {Record<string, string[]>} deps
+ * @param {Map<string, Set<string>>} [memo]
+ * @param {Set<string>} [seen]  cycle guard (defensive; callers pass acyclic)
+ * @returns {Set<string>}
+ */
+function transitiveDeps(ref, deps, memo = new Map(), seen = new Set()) {
+  if (memo.has(ref)) return memo.get(ref);
+  if (seen.has(ref)) return new Set();
+  seen.add(ref);
+  const out = new Set();
+  for (const d of deps[ref] ?? []) {
+    out.add(d);
+    for (const t of transitiveDeps(d, deps, memo, seen)) out.add(t);
+  }
+  memo.set(ref, out);
+  return out;
+}
+
+/**
+ * A wave rendering (`w1 -> w2 -> …`) is FAITHFUL only when every node in wave k
+ * transitively depends on every node in all earlier waves — because drive reads
+ * `A,B -> C` as "C depends on BOTH A and B". If an independent node were bundled
+ * into an earlier wave, the rendering would fabricate a dependency edge, which
+ * drive would honor (over-serializing and — worse — falsely skipping a
+ * downstream target when an unrelated wave-mate fails). When not faithful we
+ * fall back to a flat list instead.
+ * @param {string[][]} waves
+ * @param {Record<string, string[]>} deps
+ * @returns {boolean}
+ */
+function isFaithfulWaves(waves, deps) {
+  const memo = new Map();
+  for (let k = 1; k < waves.length; k += 1) {
+    const earlier = waves.slice(0, k).flat();
+    for (const node of waves[k]) {
+      const tdeps = transitiveDeps(node, deps, memo);
+      if (earlier.some((e) => !tdeps.has(e))) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Render an ordered ref list + dep map into a drive argument string. The
+ * dependency-notation is drive's own: waves render as `w1 -> w2 -> …` (within a
+ * wave the priority order is preserved, since topoWaves keeps input order), but
+ * ONLY when that rendering is faithful (see isFaithfulWaves). Otherwise — mixed
+ * independent + dependent nodes, or a cycle — it emits a flat priority-ordered
+ * comma list; drive then re-derives the real DAG from the issue bodies with the
+ * same `detectBodyDeps` (drive-plan.mjs buildDag), so no false edge is ever
+ * fabricated. `faithful` records which form was emitted.
  * @param {string[]} orderedRefs  refs in priority order
  * @param {Record<string, string[]>} deps
- * @returns {{ drive_args: string, waves: string[][], cycle: string[]|null }}
+ * @returns {{ drive_args: string, waves: string[][], cycle: string[]|null, faithful: boolean }}
  */
 export function emitDriveArgs(orderedRefs, deps) {
   const set = new Set(orderedRefs);
@@ -344,10 +391,12 @@ export function emitDriveArgs(orderedRefs, deps) {
   }
   const { waves, cycle } = topoWaves(orderedRefs, subDeps);
   if (cycle) {
-    return { drive_args: orderedRefs.join(","), waves: [], cycle };
+    return { drive_args: orderedRefs.join(","), waves: [], cycle, faithful: false };
   }
-  const drive_args = waves.map((w) => w.join(",")).join(" -> ");
-  return { drive_args, waves, cycle: null };
+  if (waves.length > 1 && isFaithfulWaves(waves, subDeps)) {
+    return { drive_args: waves.map((w) => w.join(",")).join(" -> "), waves, cycle: null, faithful: true };
+  }
+  return { drive_args: orderedRefs.join(","), waves, cycle: null, faithful: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +535,7 @@ export function run(argv = [], depsIn = {}) {
       drive_args: emitted.drive_args,
       waves: emitted.waves,
       cycle: emitted.cycle,
+      faithful: emitted.faithful,
     };
     if (sel.selected.length === 0) {
       result.warnings.push(`--auto: no \`${AUTO_OK_LABEL}\`-labelled issue to hand off (HATL gate)`);
@@ -507,6 +557,7 @@ export function run(argv = [], depsIn = {}) {
       drive_args: emitted.drive_args,
       waves: emitted.waves,
       cycle: emitted.cycle,
+      faithful: emitted.faithful,
     };
   } else {
     const emitted = emitDriveArgs(orderedRefs, deps);
@@ -516,6 +567,7 @@ export function run(argv = [], depsIn = {}) {
       drive_args: emitted.drive_args,
       waves: emitted.waves,
       cycle: emitted.cycle,
+      faithful: emitted.faithful,
     };
   }
 

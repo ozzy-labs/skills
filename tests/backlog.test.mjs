@@ -345,25 +345,56 @@ test("prioritize is a pure sort (does not mutate input order)", () => {
 // ---------------------------------------------------------------------------
 
 test("emitDriveArgs: no deps -> flat comma list", () => {
-  const { drive_args, cycle } = emitDriveArgs(["#1", "#2", "#3"], { "#1": [], "#2": [], "#3": [] });
+  const { drive_args, cycle, faithful } = emitDriveArgs(["#1", "#2", "#3"], {
+    "#1": [],
+    "#2": [],
+    "#3": [],
+  });
   assert.equal(drive_args, "#1,#2,#3");
   assert.equal(cycle, null);
+  assert.equal(faithful, false);
 });
 
-test("emitDriveArgs: deps -> wave `->` notation (drive-ready)", () => {
-  const { drive_args, waves } = emitDriveArgs(["#11", "#10", "#20", "#21"], {
-    "#20": ["#10"],
-    "#21": ["#11"],
-    "#10": [],
-    "#11": [],
+test("emitDriveArgs: FAITHFUL deps -> wave `->` notation (single downstream on both)", () => {
+  const { drive_args, waves, faithful } = emitDriveArgs(["#12", "#15", "#18"], {
+    "#12": [],
+    "#15": [],
+    "#18": ["#12", "#15"],
   });
   assert.equal(waves.length, 2);
-  assert.equal(drive_args, "#11,#10 -> #20,#21");
+  assert.equal(faithful, true);
+  assert.equal(drive_args, "#12,#15 -> #18");
+});
+
+test("emitDriveArgs: FAITHFUL linear chain -> `->` between each stage", () => {
+  const { drive_args, faithful } = emitDriveArgs(["#1", "#2", "#3"], {
+    "#1": [],
+    "#2": ["#1"],
+    "#3": ["#2"],
+  });
+  assert.equal(faithful, true);
+  assert.equal(drive_args, "#1 -> #2 -> #3");
+});
+
+test("emitDriveArgs: mixed independent + dependent -> flat list (no fabricated edge)", () => {
+  // #21 depends only on #11; #10 is independent. A wave rendering would put
+  // {#11,#10} in wave1 and imply #21 depends on #10 too — false. So: flat.
+  const { drive_args, faithful } = emitDriveArgs(["#11", "#10", "#21"], {
+    "#11": [],
+    "#10": [],
+    "#21": ["#11"],
+  });
+  assert.equal(faithful, false);
+  assert.equal(drive_args, "#11,#10,#21");
 });
 
 test("emitDriveArgs: cycle falls back to a flat list + reports the cycle", () => {
-  const { drive_args, cycle } = emitDriveArgs(["#1", "#2"], { "#1": ["#2"], "#2": ["#1"] });
+  const { drive_args, cycle, faithful } = emitDriveArgs(["#1", "#2"], {
+    "#1": ["#2"],
+    "#2": ["#1"],
+  });
   assert.equal(drive_args, "#1,#2");
+  assert.equal(faithful, false);
   assert.deepEqual(cycle.sort(), ["#1", "#2"]);
 });
 
@@ -415,16 +446,33 @@ test("run: present mode (default) prioritizes all, emits drive_args, launches no
     ["#11", "#10", "#20", "#21", "#22", "#23"],
   );
   assert.deepEqual(r.blockers.sort(), ["#10", "#11"]);
-  assert.equal(r.handoff.drive_args, "#11,#10,#22,#23 -> #20,#21");
+  // Mixed independent (#22,#23) + dependent (#20<-#10, #21<-#11): a wave
+  // rendering would fabricate edges, so the engine emits a flat priority list
+  // and drive re-derives the real DAG from the issue bodies.
+  assert.equal(r.handoff.faithful, false);
+  assert.equal(r.handoff.drive_args, "#11,#10,#20,#21,#22,#23");
 });
 
 test("run: --drive=3 selects top-3 + dependency closure", () => {
   const gh = mockGh({ issues: PIPE_FIXTURE });
   const r = run(["--drive=3"], { ghRun: gh, gitRun: mockGit() });
   assert.equal(r.mode, "drive");
-  // top-3 by priority = #11,#10,#20; #20's dep #10 already in the set.
+  // top-3 by priority = #11,#10,#20; #20's dep #10 already in the set. #11 is
+  // independent within this subset, so the rendering is a flat list.
   assert.deepEqual(r.handoff.selected, ["#11", "#10", "#20"]);
-  assert.equal(r.handoff.drive_args, "#11,#10 -> #20");
+  assert.equal(r.handoff.faithful, false);
+  assert.equal(r.handoff.drive_args, "#11,#10,#20");
+});
+
+test("run: --drive faithful chain emits the `->` notation end-to-end", () => {
+  const fixture = [
+    iss(1, {}),
+    iss(2, { body: "depends on #1" }),
+    iss(3, { body: "depends on #2" }),
+  ];
+  const r = run(["--drive"], { ghRun: mockGh({ issues: fixture }), gitRun: mockGit() });
+  assert.equal(r.handoff.faithful, true);
+  assert.equal(r.handoff.drive_args, "#1 -> #2 -> #3");
 });
 
 test("run: --auto restricts the handoff to auto-ok issues (gating enforced by the engine)", () => {

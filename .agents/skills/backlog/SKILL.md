@@ -63,9 +63,9 @@ backlog
 エンジンは選定結果を drive がそのまま解釈できる引数文字列で返す（`handoff.drive_args`）:
 
 - 依存のない候補群 → カンマ列 `#1,#2,#3`
-- 依存がある → drive の依存記法 `->` で wave 表現 `#12,#15 -> #18`（#18 は #12,#15 の完了後）
+- クリーンな依存構造（各 wave のノードが直前までの全ノードに（推移的に）依存する）→ drive の依存記法 `->` で wave 表現 `#12,#15 -> #18`（#18 は #12,#15 の完了後）
 
-wave 分割は drive の `topoWaves` を再利用するため、そのまま `/drive <drive_args>` に渡せる。cross-wave の辺は保守的に直列化される（drive 互換。最悪でも過剰直列化に留まり、正しさは壊れない）。
+wave 分割は drive の `topoWaves` を再利用する。ただし独立ノードと依存ノードが混在し、wave 表現が**偽の依存辺を捏造してしまう**場合（drive は `A,B -> C` を「C は A と B 両方に依存」と解釈するため、無関係な wave-mate の失敗で C が誤って skip され得る）は、`->` を使わず**優先度順のフラットなカンマ列**にフォールバックする。この場合 drive 側の Phase 0 が同じ `detectBodyDeps`（`drive-plan.mjs`）で issue 本文から実 DAG を再構築するため、偽の辺は生まれない。いずれの形式もそのまま `/drive <drive_args>` に渡せる（`handoff.faithful` がどちらを出力したか示す）。
 
 ## drive への接続（モード分岐）
 
