@@ -9,6 +9,7 @@
 //   fork    Copy a skill to a user-owned, unmanaged name.
 //   diff    Show a skill's local diff against upstream.
 //   hooks   Wire/unwire/inspect optional Claude Code hooks shipped with a skill (#174).
+//   policy  Scaffold a policy.yaml for the central autonomy policy (#174).
 //
 // `install`/`uninstall` are accepted as aliases for `add`/`remove`. Scope is
 // expressed by `--target` (absent = user, present = project repo). See #151 for
@@ -20,10 +21,11 @@ import { runDiff } from "./lib/diff.mjs";
 import { runFork } from "./lib/fork.mjs";
 import { runHooks } from "./lib/hooks.mjs";
 import { runList } from "./lib/list.mjs";
+import { runPolicy } from "./lib/policy-init.mjs";
 import { runRemove } from "./lib/remove.mjs";
 import { runUpdate } from "./lib/update.mjs";
 
-const VERBS = ["add", "update", "list", "remove", "fork", "diff", "hooks"];
+const VERBS = ["add", "update", "list", "remove", "fork", "diff", "hooks", "policy"];
 const VERB_ALIASES = { install: "add", uninstall: "remove" };
 
 const TOP_LEVEL_HELP = `npx @ozzylabs/skills <verb> [options]
@@ -37,8 +39,10 @@ Verbs:
   fork       Copy a skill to a user-owned name.
   diff       Show a skill's diff against upstream.
   hooks      Wire/unwire/inspect an optional Claude Code hook shipped with a
-             skill (usage-guard, observability). 'status' also diagnoses whether
-             a wired usage-guard is effective or has degraded to a no-op.
+             skill (usage-guard, observability, policy). 'status' also diagnoses
+             whether a wired usage-guard is effective or has degraded to a no-op.
+  policy     Scaffold a policy.yaml template for the central autonomy policy
+             ('policy init'; non-destructive — never overwrites an existing one).
 
 Run 'npx @ozzylabs/skills <verb> --help' for verb-specific options.
 `;
@@ -74,6 +78,9 @@ async function main(argv) {
   }
   if (verb === "hooks") {
     return await runHooks(rest);
+  }
+  if (verb === "policy") {
+    return await runPolicy(rest);
   }
 
   process.stderr.write(
