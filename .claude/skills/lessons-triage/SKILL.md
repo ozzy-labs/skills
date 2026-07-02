@@ -25,10 +25,8 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 
 いずれかが transcript に含まれるセッションは `outcome: self` として破棄候補にする（Grep で判定できる）。
 
-### HITL 承認
+### HITL 承認（policy の `externally-visible` gate = batch-confirm）
 
-手順 4 の承認は AskUserQuestion で 1 件ずつ行う（`answers` パラメータは設定しない）:
+手順 4 の一括確認は AskUserQuestion で行う（`answers` パラメータは設定しない）。gate=`batch-confirm`（既定）では、全教訓を 1 つの question の options として提示し、`multiSelect: true` で起票する教訓をまとめて選ばせる。教訓数が 1 question の option 上限を超える場合は複数回に分割してよいが、いずれも「1 回の一括確認ラウンド」として扱い、1 件ずつの逐次承認には戻さない。選択された教訓のみ `gh issue create` を実行し、非選択は破棄する。
 
-- **「起票する」** → そのまま `gh issue create` を実行する
-- **「修正して起票する」** → ユーザーの修正内容を反映してから起票する
-- **「破棄する」** → 起票せず次の教訓へ進む
+gate=`ask`（policy で厳格化された場合）のときのみ 1 件ずつ確認にフォールバックする（起票する / 修正して起票する / 破棄する）。

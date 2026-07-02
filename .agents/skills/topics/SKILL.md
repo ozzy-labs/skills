@@ -98,11 +98,28 @@ Popularity:
 Final 16 topics: ai, ai-agents, agentic, multi-agent, cli, claude, claude-code, codex, gemini, copilot, rss, web-scraping, news, release-notes, research, markdown
 ```
 
-#### 適用
+#### 適用（policy の `externally-visible` gate に従う）
 
-- `--dry-run` 指定時: 出力のみ、API 呼び出しなし
-- `--apply` 指定時: 確認なしで `gh repo edit <owner/repo> --add-topic <topic1>,<topic2>,...` を実行
-- どちらも未指定時: ホストの確認 UI で適用可否を確認する（テキスト出力で `Apply? [Y/n]` のような選択肢を列挙しない。Claude Code では AskUserQuestion — `SKILL.claude-code.md` 参照）
+`gh repo edit --add-topic` の適用は **外部可視アクション**。個別の承認ゲートを prose にハードコードせず、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙の SSOT）に従う。分類とゼロコンフィグ既定:
+
+| 本 skill のアクション | クラス | policy 参照 | ゼロコンフィグ既定 gate |
+| --- | --- | --- | --- |
+| topics 適用（`gh repo edit --add-topic`） | `externally-visible` | `--action=topics-apply` | `batch-confirm`（最終リストを 1 回提示して一括確認） |
+
+有効 gate は sibling の `policy` skill の `policy-read.mjs` で引く（user-scope では `~/.claude/skills/policy/policy-read.mjs`、dogfood は `<repo>/.claude/skills/policy/policy-read.mjs`、Codex/Gemini は `.agents/skills/policy/policy-read.mjs`）:
+
+```bash
+node <policy skill のディレクトリ>/policy-read.mjs --action=topics-apply --repo-root="$PWD"
+# => .resolved.gate（既定 batch-confirm）
+```
+
+flag は policy と整合させる:
+
+- `--dry-run` 指定時: 出力のみ、適用も確認もしない（API 呼び出しなし）
+- `--apply` 指定時: **`batch-confirm` の明示 opt-out**。確認なしで `gh repo edit <owner/repo> --add-topic <topic1>,<topic2>,...` を実行する
+- どちらも未指定時: policy の gate に従う。gate=`batch-confirm`（既定）では最終 topics リストを 1 回まとめて提示して一括確認する（ホストの確認 UI で適用可否を確認。テキスト出力で `Apply? [Y/n]` のような選択肢を列挙しない。Claude Code では AskUserQuestion — `SKILL.claude-code.md` 参照）。gate=`proceed` なら確認なしで適用、gate=`ask` なら 1 topic ずつ確認する
+
+**policy 不在でも壊れない:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は厳しい側（`ask`）へ倒す。`policy` skill 未配置の環境では上表のゼロコンフィグ既定 gate（`externally-visible`=`batch-confirm`）を直接適用する。
 
 適用後、結果を確認する:
 
@@ -135,4 +152,5 @@ gh repo view <owner/repo> --json repositoryTopics
 - `.env` ファイルは読み取り・ステージングしない
 - `gh` CLI が未認証の場合はエラーメッセージを表示して中断する
 - ハードコードされた ozzy-labs 慣行（Step 5）は機械判定より優先する。例外を増やす場合は本スキル MD の改訂で行う（Claude の自由判断で慣行拡張しない）
-- `--apply` は確認をスキップするため、必ず `--dry-run` で内容を確認した後に使う運用を推奨する
+- topics 適用は policy の `externally-visible` gate（既定 `batch-confirm`）に従う。個別の承認ゲートを prose にハードコードしない
+- `--apply` は `batch-confirm` の明示 opt-out として確認をスキップするため、必ず `--dry-run` で内容を確認した後に使う運用を推奨する

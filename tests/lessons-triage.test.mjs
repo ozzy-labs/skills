@@ -73,6 +73,7 @@ test("lessons-triage canonical SKILL.md keeps the workflow skeleton in order", a
 
   const expectedSections = [
     "前提と原則",
+    "アクション分類と policy 参照",
     "入力",
     "未処理セッションの特定",
     "プレフィルタ",
@@ -94,11 +95,33 @@ test("lessons-triage canonical SKILL.md keeps the workflow skeleton in order", a
 test("lessons-triage canonical SKILL.md documents the HITL contract", async () => {
   const { body } = await loadCanonical();
   assert.match(body, /auto-apply 経路なし/, "no-auto-apply contract must be documented");
-  assert.match(body, /1 件ずつユーザー承認/, "per-item approval must be documented");
   assert.match(
     body,
     /issue 起票以外の外部反映を行わない/,
     "issue filing must be declared as the only external output",
+  );
+});
+
+test("lessons-triage canonical SKILL.md references the central policy (not a hardcoded gate)", async () => {
+  const { body } = await loadCanonical();
+  // The HITL gate is now expressed as an action class + policy reference,
+  // not as a per-item prose gate.
+  assert.match(body, /externally-visible/, "issue filing must be classed as externally-visible");
+  assert.match(body, /batch-confirm/, "zero-config gate for issue filing must be batch-confirm");
+  assert.match(body, /policy-read\.mjs/, "must point at the policy read substrate");
+  assert.match(body, /一括確認/, "batch confirmation of extracted lessons must be documented");
+  // Negative assertions: the old per-item-default prose must be gone (superseded
+  // by the batch-confirm gate). The word "1 件ずつ" may still appear only as the
+  // strict `ask` fallback, but the old default sentences must not.
+  assert.doesNotMatch(
+    body,
+    /抽出した教訓を 1 件ずつユーザーに提示し/,
+    "old per-item default approval prose must be removed",
+  );
+  assert.doesNotMatch(
+    body,
+    /issue 起票は 1 件ずつユーザー承認を得てから行う/,
+    "old per-item auto-apply principle prose must be removed",
   );
 });
 
@@ -164,5 +187,11 @@ test("lessons-triage keeps Claude-Code-only behaviors in the companion", async (
     companionBody,
     /SessionEnd 未発火のため queue に存在しない/,
     "companion must explain why the live session never appears in the queue",
+  );
+  // batch-confirm gate: the companion must use a single multiSelect round.
+  assert.match(
+    companionBody,
+    /multiSelect/,
+    "companion must use multiSelect for the batch-confirm approval round",
   );
 });

@@ -131,6 +131,28 @@ test("SKILL.md documents --dry-run and --apply flags (#63 AC7)", async () => {
   assert.match(raw, /--apply/, "must document --apply flag");
 });
 
+test("SKILL.md classes topics apply as externally-visible and references policy (#181 PR2)", async () => {
+  const raw = await readFile(SKILL_MD, "utf8");
+  // Application is now expressed as an action class + central policy reference,
+  // not a bespoke confirmation prose.
+  assert.match(raw, /externally-visible/, "topics apply must be classed as externally-visible");
+  assert.match(raw, /batch-confirm/, "zero-config gate for topics apply must be batch-confirm");
+  assert.match(raw, /policy-read\.mjs/, "must point at the policy read substrate");
+  assert.match(raw, /topics-apply/, "must name the policy action for `gh repo edit --add-topic`");
+  // --apply is reframed as the explicit batch-confirm opt-out.
+  assert.match(
+    raw,
+    /--apply[^\n]*opt-out|opt-out[^\n]*--apply|明示 opt-out/,
+    "--apply must be documented as the explicit batch-confirm opt-out",
+  );
+});
+
+test("SKILL.claude-code.md gates apply confirmation on the policy batch-confirm gate (#181 PR2)", async () => {
+  const raw = await readFile(SKILL_CLAUDE_MD, "utf8");
+  assert.match(raw, /batch-confirm/, "companion must reference the batch-confirm gate");
+  assert.match(raw, /AskUserQuestion/, "companion must keep the AskUserQuestion confirmation flow");
+});
+
 test("SKILL.md documents scope (ozzy-labs only) and exclusions", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
   assert.match(raw, /ozzy-labs/i, "must declare ozzy-labs scope");
