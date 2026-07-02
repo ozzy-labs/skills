@@ -335,3 +335,53 @@ test("claude-code adapter emits drive's discovered extra files verbatim", async 
   );
   assert.ok(wt, "claude-code adapter emits the discovered worktree-safety extra file");
 });
+
+// --- #181 PR3: merge follows the central autonomy policy (irreversible gate) --
+//
+// drive is a prose judgment-layer skill, so the merge gate is expressed as an
+// action classification that consults the central policy (the `policy` skill),
+// not a hardcoded prose gate. These assert the neutral SKILL.md documents it.
+
+test("neutral drive SKILL.md classes merge as irreversible and references the central policy", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  assert.match(raw, /irreversible/, "merge must be classed as irreversible");
+  assert.match(raw, /policy-read\.mjs/, "must point at the policy read substrate");
+  assert.match(raw, /--action=merge/, "must name the policy action for gh pr merge");
+  // zero-config default gate for merge is ask (documented in the resolve comment)
+  assert.ok(
+    raw.includes("既定 ask"),
+    "zero-config gate for merge must be documented as ask (既定 ask)",
+  );
+});
+
+test("neutral drive SKILL.md: --merge is the explicit opt-in overriding the gate to proceed", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  // The dedicated policy subsection ties --merge to a proceed override.
+  assert.match(
+    raw,
+    /マージと autonomy policy/,
+    "must carry the dedicated merge ⇄ autonomy-policy subsection",
+  );
+  assert.ok(
+    /`--merge`[\s\S]{0,120}(opt-in|明示 opt-in)[\s\S]{0,120}proceed|`--merge`[\s\S]{0,120}proceed[\s\S]{0,120}opt-in/.test(
+      raw,
+    ),
+    "--merge must be documented as the explicit opt-in overriding the gate to proceed",
+  );
+  // both merge sites (single Phase 4 + orchestration Final-4) reference the gate
+  const gateRefs = (raw.match(/`irreversible` gate に従う/g) ?? []).length;
+  assert.ok(
+    gateRefs >= 2,
+    `both merge sites (Phase 4 + Phase Final-4) must reference the irreversible gate (found ${gateRefs})`,
+  );
+});
+
+test("neutral drive SKILL.md documents policy-absence fail-safe for merge", async () => {
+  const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
+  assert.match(
+    raw,
+    /policy 不在でも壊れない/,
+    "must document policy-absence safety (fail-safe to ask)",
+  );
+  assert.match(raw, /fail-safe/, "must reference the fail-safe design");
+});

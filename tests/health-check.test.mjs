@@ -15,16 +15,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import {
+  buildPolicyGateResolver,
   collectFixPlan,
   extractCiErrorKey,
   extractFrontmatterMap,
+  FIX_LABEL_POLICY,
+  loadPolicyResolver,
   makeRunner,
+  POLICY_FAIL_SAFE_GATE,
   parseArgs,
   parseWorktrees,
   render,
+  resolveFixGates,
   run,
   validatePerspective,
 } from "../.agents/skills/health/health-check.mjs";
+// The central-policy read substrate the engine consults for --fix gates
+// (ADR-0028 R3, #181 PR3). Imported here to build real resolveGate-backed
+// resolvers so the integration tests exercise the actual policy logic, not a
+// re-implementation.
+import { mergePolicies, resolveGate } from "../.agents/skills/policy/policy-read.mjs";
+
+// Zero-config policy resolver: reversible-local → proceed, irreversible → ask
+// (today's defaults). Built from the REAL policy-read logic, no file reads.
+const ZERO_CONFIG = mergePolicies({});
+const zeroConfigResolver = (q) => resolveGate(ZERO_CONFIG, q);
+// A repo that tightens reversible-local to ask (nothing auto-executes).
+const strictResolver = (q) =>
+  resolveGate(mergePolicies({ repo: { classes: { "reversible-local": "ask" } } }), q);
 
 const NOW = "2026-07-02T00:00:00Z";
 const nowFn = () => new Date(NOW);
@@ -456,6 +474,190 @@ test("no --fix: default run mutates nothing on a repo full of actionable items",
     `read-only invariant violated: ${JSON.stringify(calls.filter(isMutator))}`,
   );
   assert.match(git(dir, ["branch", "--list", "merged-feat"]), /merged-feat/);
+});
+
+// ---------------------------------------------------------------------------
+// --fix ⇄ central policy gate (ADR-0028 R3, #181 PR3)
+// ---------------------------------------------------------------------------
+
+/** Fixture whose ONLY fixable item is a --deep-upgraded (irreversible) stash
+ *  drop. `main`'s tip is kept recent (< 14d) so it stays a non-eligible `push`,
+ *  not a stale-branch `delete`, isolating the irreversible-gate assertion. */
+function stashDropFixture() {
+  const dir = mkRepo();
+  initRepo(dir);
+  spawnSync("bash", ["-c", "printf 'stashed line\\n' > README.md"], { cwd: dir });
+  git(dir, ["stash", "push", "-m", "conflicting"], {
+    GIT_AUTHOR_DATE: "2026-06-12T00:00:00Z", // stale stash (20d before NOW)
+    GIT_COMMITTER_DATE: "2026-06-12T00:00:00Z",
+  });
+  // Move HEAD (so the stash no longer applies cleanly) with a RECENT commit
+  // (7d before NOW) → main is not a stale branch → no reversible `delete` item.
+  commit(dir, "README.md", "totally different content\n", "2026-06-25T00:00:00Z");
+  return dir;
+}
+
+test("FIX_LABEL_POLICY: prune/delete/fetch are reversible-local, drop is irreversible", () => {
+  assert.equal(FIX_LABEL_POLICY.prune.class, "reversible-local");
+  assert.equal(FIX_LABEL_POLICY.delete.class, "reversible-local");
+  assert.equal(FIX_LABEL_POLICY.fetch.class, "reversible-local");
+  assert.equal(FIX_LABEL_POLICY.drop.class, "irreversible");
+  // delete/drop name a policy action so a policy.yaml override can target them.
+  assert.equal(FIX_LABEL_POLICY.delete.action, "branch-delete");
+  assert.equal(FIX_LABEL_POLICY.drop.action, "stash-drop");
+});
+
+test("resolveFixGates: resolver present → per-class gate; absent → fail-safe ask", () => {
+  const plan = [
+    { label: "delete", policy: FIX_LABEL_POLICY.delete },
+    { label: "drop", policy: FIX_LABEL_POLICY.drop },
+  ];
+  resolveFixGates(plan, zeroConfigResolver);
+  assert.equal(plan[0].gate, "proceed"); // reversible-local
+  assert.equal(plan[1].gate, "ask"); // irreversible
+
+  // No resolver (policy skill absent) → every action degrades to the strict gate.
+  const plan2 = [{ label: "delete", policy: FIX_LABEL_POLICY.delete }];
+  resolveFixGates(plan2, undefined);
+  assert.equal(plan2[0].gate, POLICY_FAIL_SAFE_GATE);
+  assert.equal(plan2[0].gate, "ask");
+  assert.equal(plan2[0].gate_source, "policy-absent");
+
+  // A resolver that THROWS is a fail-safe: the item degrades to ask, never a
+  // looser gate, and the engine does not crash.
+  const plan3 = [{ label: "delete", policy: FIX_LABEL_POLICY.delete }];
+  resolveFixGates(plan3, () => {
+    throw new Error("boom");
+  });
+  assert.equal(plan3[0].gate, "ask");
+});
+
+test("loadPolicyResolver: resolves the real sibling policy-read.mjs; import failure → null", async () => {
+  const mod = await loadPolicyResolver();
+  assert.ok(
+    mod && typeof mod.resolveGate === "function" && typeof mod.run === "function",
+    "health-check dynamically imports the sibling policy skill (relative path intact)",
+  );
+  const absent = await loadPolicyResolver({
+    importImpl: () => {
+      throw new Error("ERR_MODULE_NOT_FOUND");
+    },
+  });
+  assert.equal(absent, null, "an absent policy skill degrades to null (→ fail-safe ask)");
+});
+
+test("buildPolicyGateResolver: wires the merged effective policy into resolveGate; null when absent", async () => {
+  const fakeMod = {
+    run: async () => ({
+      classes: { "reversible-local": "proceed", irreversible: "ask" },
+      actions: {},
+    }),
+    resolveGate: (eff, q) => ({
+      gate: eff.classes[q.class] ?? "ask",
+      class: q.class,
+      source: "class-default",
+    }),
+  };
+  const resolver = await buildPolicyGateResolver("/x", { importImpl: async () => fakeMod });
+  assert.equal(resolver({ class: "reversible-local" }).gate, "proceed");
+  assert.equal(resolver({ class: "irreversible" }).gate, "ask");
+
+  const none = await buildPolicyGateResolver("/x", { importImpl: async () => null });
+  assert.equal(none, null, "absent policy skill → null resolver → run fails safe to ask");
+});
+
+test("--fix: reversible-local (proceed) actions execute now with an audit trail", () => {
+  const dir = fixFixture();
+  const result = run(["--fix"], {
+    cwd: dir,
+    ghRun: fakeGh(FIX_PR),
+    now: nowFn,
+    resolvePolicy: zeroConfigResolver,
+  });
+  assert.equal(result.policy_consulted, true);
+  // proceed items ran (+ audit trail), tagged with their resolved gate.
+  const executed = result.fix_results.map((r) => r.label).sort();
+  assert.deepEqual(executed, ["delete", "prune"]);
+  assert.ok(result.fix_results.every((r) => r.ok && r.gate === "proceed"));
+  // nothing left pending, and the unsafe (push) branch is never touched.
+  assert.equal(result.fix_pending, false);
+  assert.deepEqual(result.fix_pending_items, []);
+  assert.equal(git(dir, ["branch", "--list", "merged-feat"]).trim(), "");
+  assert.equal(git(dir, ["branch", "--list", "worktree-agent-deadbeef"]).trim(), "");
+  assert.match(git(dir, ["branch", "--list", "wip-new"]), /wip-new/);
+});
+
+test("--fix: irreversible (ask) stash drop is NOT executed without --yes; stash preserved", () => {
+  const dir = stashDropFixture();
+  const result = run(["--deep", "--fix"], {
+    cwd: dir,
+    ghRun: fakeGh(),
+    now: nowFn,
+    resolvePolicy: zeroConfigResolver,
+  });
+  // the --deep-upgraded drop is irreversible → ask → pending, not executed.
+  assert.equal(result.fix_results, undefined);
+  assert.equal(result.fix_pending, true);
+  assert.deepEqual(
+    result.fix_pending_items.map((p) => [p.label, p.gate, p.class]),
+    [["drop", "ask", "irreversible"]],
+  );
+  // stash still present (read-only invariant held for the ask gate).
+  assert.match(git(dir, ["stash", "list"]), /stash@\{0\}/);
+});
+
+test("--fix without a resolver (policy absent): every action fails safe to ask, executes nothing", () => {
+  const dir = fixFixture();
+  const calls = [];
+  const realGit = makeRunner("git", dir);
+  const spyGit = (args, opts) => {
+    calls.push(args);
+    return realGit(args, opts);
+  };
+  // No resolvePolicy injected → policy-absent → all gates fail safe to ask.
+  const result = run(["--fix"], { cwd: dir, gitRun: spyGit, ghRun: fakeGh(FIX_PR), now: nowFn });
+  assert.equal(result.policy_consulted, false);
+  assert.equal(result.fix_results, undefined);
+  assert.equal(result.fix_pending, true);
+  assert.ok(result.fix_pending_items.every((p) => p.gate === "ask"));
+  assert.ok(!calls.some(isMutator), "nothing executed when the policy cannot be consulted");
+  assert.match(git(dir, ["branch", "--list", "merged-feat"]), /merged-feat/);
+});
+
+test("--fix: repo policy tightening reversible-local to ask suppresses auto-execution", () => {
+  const dir = fixFixture();
+  const calls = [];
+  const realGit = makeRunner("git", dir);
+  const spyGit = (args, opts) => {
+    calls.push(args);
+    return realGit(args, opts);
+  };
+  const result = run(["--fix"], {
+    cwd: dir,
+    gitRun: spyGit,
+    ghRun: fakeGh(FIX_PR),
+    now: nowFn,
+    resolvePolicy: strictResolver,
+  });
+  assert.equal(result.fix_results, undefined);
+  assert.ok(result.fix_pending_items.every((p) => p.gate === "ask"));
+  assert.ok(!calls.some(isMutator), "reversible-local=ask blocks auto-execution");
+});
+
+test("--fix --yes: explicit opt-out overrides the policy and executes ALL safe actions", () => {
+  const dir = stashDropFixture();
+  const result = run(["--deep", "--fix", "--yes"], {
+    cwd: dir,
+    ghRun: fakeGh(),
+    now: nowFn,
+    resolvePolicy: zeroConfigResolver, // even with ask on the drop, --yes overrides
+  });
+  assert.equal(result.policy_override, true);
+  const executed = result.fix_results.map((r) => r.label);
+  assert.deepEqual(executed, ["drop"]);
+  assert.ok(result.fix_results.every((r) => r.ok));
+  // stash actually dropped under --yes.
+  assert.equal(git(dir, ["stash", "list"]).trim(), "");
 });
 
 // ---------------------------------------------------------------------------
