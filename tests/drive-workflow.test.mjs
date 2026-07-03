@@ -104,13 +104,11 @@ test("workflow script uses the Workflow primitives with worktree isolation + sch
   assert.match(script, /agent\(/, "must spawn workers via agent()");
   assert.match(script, /isolation:\s*'worktree'/, "workers must run isolation:'worktree'");
   assert.match(script, /schema:\s*WORKER_SCHEMA/, "agent() must validate the return with a schema");
-  // wave = parallel() barrier (within-wave), wave sequence = the dependency for-await
+  // wave = parallel() barrier (within-wave), wave sequence = the dependency for-await.
+  // Assert the contract (iterate the wave plan), not exact identifier names, so a
+  // harmless rename doesn't fail the guard.
   assert.match(script, /parallel\(/, "within-wave workers run under a parallel() barrier");
-  assert.match(
-    script,
-    /for\s*\(const\s*\[i,\s*wave\]\s*of\s*args\.waves\.entries\(\)\)/,
-    "iterates args.waves",
-  );
+  assert.match(script, /\bfor\b[\s\S]*?args\.waves\.entries\(\)/, "iterates args.waves.entries()");
   // 1-line progress
   assert.match(script, /\blog\(/, "must surface progress via log()");
 });
