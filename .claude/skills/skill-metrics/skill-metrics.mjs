@@ -15,9 +15,9 @@
 // rewrite intact.
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const EVENTS_PATH = join(homedir(), ".agents", "observability", "events.jsonl");
@@ -189,6 +189,114 @@ export function isoYearWeek(d) {
   return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
+// Snapshot filenames are exactly `<ISO year-week>.json` (e.g. "2026-W27.json").
+// ISO year-week strings sort chronologically under plain string comparison
+// (fixed-width year + zero-padded week), so no date parsing is needed to order
+// them — a lexicographic max below the current week is "last week's" baseline.
+const SNAPSHOT_RE = /^(\d{4}-W\d{2})\.json$/;
+
+/**
+ * Extract the ISO year-week key from a snapshot basename, or null if the name
+ * is not a `<YYYY-Www>.json` snapshot file.
+ * @param {string} name
+ * @returns {string|null}
+ */
+export function snapshotWeek(name) {
+  const m = SNAPSHOT_RE.exec(basename(String(name)));
+  return m ? m[1] : null;
+}
+
+/**
+ * Pick the most recent snapshot strictly older than `currentWeek` — the
+ * previous-generation baseline for a trend diff. Non-snapshot names and the
+ * current week itself are ignored. Pure (no I/O) for unit-testability.
+ * @param {string[]} files snapshot dir entries (basenames)
+ * @param {string} currentWeek ISO year-week of the run (e.g. "2026-W27")
+ * @returns {{ week: string, file: string }|null}
+ */
+export function pickPreviousSnapshot(files, currentWeek) {
+  let best = null;
+  for (const name of files ?? []) {
+    const week = snapshotWeek(name);
+    if (!week) continue;
+    if (currentWeek && week >= currentWeek) continue; // skip current + future
+    if (!best || week > best.week) best = { week, file: basename(String(name)) };
+  }
+  return best;
+}
+
+/**
+ * Diff the current rollup against a previous-generation snapshot rollup
+ * (week-over-week). COUNT deltas (invocations, signals) are always emitted;
+ * RATE deltas (abort_rate) inherit skill-metrics' min-n guard — a rate delta is
+ * emitted only when BOTH generations cleared the guard (a non-null, un-suppressed
+ * abort_rate on each side). Otherwise the delta is null + `*_suppressed: true`.
+ * Pure (no I/O) so it is fully unit-testable.
+ * @param {Record<string, any>} current current rollup
+ * @param {Record<string, any>} previous previous-generation rollup (from a snapshot file)
+ * @param {{ minN?: number }} [opts]
+ * @returns {Record<string, any>|null}
+ */
+export function computeTrend(current, previous, { minN = DEFAULT_MIN_N } = {}) {
+  if (!previous || typeof previous !== "object") return null;
+  const curSkills = current?.skills ?? {};
+  const prevSkills = previous?.skills ?? {};
+  const skills = {};
+  for (const name of new Set([...Object.keys(curSkills), ...Object.keys(prevSkills)])) {
+    const cur = curSkills[name] ?? {};
+    const prev = prevSkills[name] ?? {};
+    const entry = { invocations_delta: (cur.invocations ?? 0) - (prev.invocations ?? 0) };
+    // Rate delta only when BOTH sides have a min-n-cleared (non-null) rate.
+    const curRate = typeof cur.abort_rate === "number" ? cur.abort_rate : null;
+    const prevRate = typeof prev.abort_rate === "number" ? prev.abort_rate : null;
+    if (curRate !== null && prevRate !== null) {
+      entry.abort_rate_delta = Math.round((curRate - prevRate) * 1000) / 1000;
+      entry.abort_rate_delta_suppressed = false;
+    } else {
+      entry.abort_rate_delta = null;
+      entry.abort_rate_delta_suppressed = true; // n<min_n on ≥1 side → counts only
+    }
+    skills[name] = entry;
+  }
+
+  const curSignals = current?.signals ?? {};
+  const prevSignals = previous?.signals ?? {};
+  const signals = {};
+  for (const name of new Set([...Object.keys(curSignals), ...Object.keys(prevSignals)])) {
+    signals[name] = (curSignals[name] ?? 0) - (prevSignals[name] ?? 0);
+  }
+
+  return {
+    min_n: minN,
+    baseline_window: previous?.window
+      ? { since: previous.window.since ?? null, until: previous.window.until ?? null }
+      : null,
+    skills,
+    signals,
+  };
+}
+
+/**
+ * Load the previous-generation snapshot rollup for trend comparison (fail-open:
+ * a missing dir / unreadable or malformed snapshot yields null, never throws).
+ * @returns {Promise<{ week: string, file: string, rollup: Record<string, any> }|null>}
+ */
+async function loadPreviousSnapshot({ snapshotsDir, currentWeek, existsImpl, readdirImpl, readImpl, warn }) {
+  try {
+    if (!existsImpl(snapshotsDir)) return null;
+    const entries = await readdirImpl(snapshotsDir);
+    const pick = pickPreviousSnapshot(entries, currentWeek);
+    if (!pick) return null;
+    const file = join(snapshotsDir, pick.file);
+    const rollup = JSON.parse(await readImpl(file));
+    if (!rollup || typeof rollup !== "object") return null;
+    return { week: pick.week, file, rollup };
+  } catch (err) {
+    warn(`skill-metrics: previous snapshot unreadable (${err?.message ?? err}); no trend`);
+    return null;
+  }
+}
+
 /**
  * Load + aggregate (fail-open: a missing/unreadable log yields an empty rollup,
  * never an error). Returns the rollup; optionally writes a weekly snapshot.
@@ -202,6 +310,7 @@ export async function run(
     readImpl = (p) => readFile(p, "utf8"),
     existsImpl = existsSync,
     writeImpl = writeFile,
+    readdirImpl = (d) => readdir(d),
     mkdirImpl = (d) => mkdir(d, { recursive: true }),
     eventsPath = EVENTS_PATH,
     snapshotsDir = SNAPSHOTS_DIR,
@@ -211,6 +320,7 @@ export async function run(
   } = {},
 ) {
   const args = parseArgs(argv);
+  const minN = resolveMinN(env);
   let text = "";
   try {
     if (existsImpl(eventsPath)) text = await readImpl(eventsPath);
@@ -218,16 +328,44 @@ export async function run(
     warn(`skill-metrics: events log unreadable (${err?.message ?? err}); empty rollup`);
   }
   const rollup = aggregate(parseEvents(text), {
-    minN: resolveMinN(env),
+    minN,
     since: typeof args.since === "string" ? args.since : undefined,
     skill: typeof args.skill === "string" ? args.skill : undefined,
   });
 
+  // Trend vs. the previous-generation snapshot (week-over-week). Computed on
+  // every run: a prior snapshot must already exist (written by a past
+  // `--snapshot`), and the current week's file — if just being written — is
+  // excluded by the strictly-older pick. Absent baseline → trend: null.
+  const currentWeek = isoYearWeek(now());
+  const prev = await loadPreviousSnapshot({
+    snapshotsDir,
+    currentWeek,
+    existsImpl,
+    readdirImpl,
+    readImpl,
+    warn,
+  });
+  if (prev) {
+    rollup.trend = computeTrend(rollup, prev.rollup, { minN });
+    if (rollup.trend) {
+      rollup.trend.baseline_week = prev.week;
+      rollup.trend.baseline_file = prev.file;
+    }
+  } else {
+    rollup.trend = null;
+  }
+
   if (args.snapshot) {
     try {
       await mkdirImpl(snapshotsDir);
-      const file = join(snapshotsDir, `${isoYearWeek(now())}.json`);
-      await writeImpl(file, `${JSON.stringify(rollup, null, 2)}\n`);
+      const file = join(snapshotsDir, `${currentWeek}.json`);
+      // Persist a clean baseline: strip the derived `trend`/`snapshot` fields so
+      // a future week diffs against pure counts, not a self-referential nesting.
+      const baseline = { ...rollup };
+      delete baseline.trend;
+      delete baseline.snapshot;
+      await writeImpl(file, `${JSON.stringify(baseline, null, 2)}\n`);
       rollup.snapshot = file;
     } catch (err) {
       warn(`skill-metrics: snapshot write failed (${err?.message ?? err})`);

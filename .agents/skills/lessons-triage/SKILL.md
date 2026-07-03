@@ -150,9 +150,22 @@ lessons-triage 完了:
   残 queue:      L 件（次回 --limit で消化）
 ```
 
+## backlog への接続（`auto-ok` ラベル運用・HATL 第 2 点）
+
+起票した `[lessons]` issue は backlog ポインタ（優先 index）であり、`/backlog --auto`（[#175](https://github.com/ozzy-labs/skills/issues/175)）の消化対象に接続することで改善ループの反映（reflect）→ 消化（consume）が閉じる。接続は `auto-ok` ラベルで境界制御する（HATL）。
+
+- **`auto-ok` は人間のみが付与する。** これは backlog のラベル規約と一致する（backlog SKILL.md「`--auto` の HATL ゲーティング」= `auto-ok` は人間のみ付与・自動付与経路を作らない）。**lessons-triage は起票時に `auto-ok` を付けない**（`gh issue create` に `--label auto-ok` を渡さない）。自動付与経路を本 skill に作らないことが HATL の要。
+- **人間の境界制御は 2 点に収束する（HATL）:**
+  1. **起票承認** — 手順 4 の `externally-visible` gate（既定 batch-confirm）。どの教訓を issue 化するかを人間が選ぶ。
+  2. **`auto-ok` ラベル付与** — 起票済み `[lessons]` issue を人間が見て、無確認で drive に流してよいものだけに `auto-ok` を付ける（standing 承認 = 境界条件の設定）。
+- **接続の流れ:** `auto-ok` 付与後、`/backlog --auto`（cron routine や `/loop` から起動可）が `auto-ok` issue のみを無確認で `drive` に流し fix-PR を生む。`auto-ok` の無い `[lessons]` issue は `--auto` の消化対象にならず、通常の backlog 提示（既定モード）で人間が着手を選ぶ。
+- ラベルを付けない限りループは自動で回らない（**ゲーティングなしの自動消化は存在しない**）。auto-ok を付けるか否かが、自己改善ループを自動で回すかの唯一の意思決定点になる。
+
+週次 routine（`skill-metrics --snapshot` → metrics-primed lessons-triage → `/backlog --auto`）でループ全体を定期起動する構成は README「Observability」の routine recipe を参照する。
+
 ## 注意事項
 
 - `.env` ファイルは読み取らない
 - `gh` CLI が未認証の場合はエラーメッセージを表示して中断する
-- `skill-metrics` の rollup は read-only な**優先付け起点**にすぎない。auto-ok ラベル運用・rollup のトレンド比較・週次 routine 化は本 skill のスコープ外（[#184](https://github.com/ozzy-labs/skills/issues/184) で扱う）
+- `skill-metrics` の rollup は read-only な**優先付け起点**にすぎない（原因の断定には使わず、診断・修正は transcript のあるローカルで行う）。rollup のトレンド比較（前週比）は `skill-metrics` の責務、週次 routine 化は README「Observability」の routine recipe の責務。本 skill は起票（reflect）と `auto-ok` ラベル運用による backlog 接続を担う（[#184](https://github.com/ozzy-labs/skills/issues/184)）
 - 将来拡張（メモリ / AGENTS.md / CLAUDE.md への反映ルート）は本 skill のスコープ外。手順 4 の分類ロジックに反映先ルートを後付けできる設計とする
