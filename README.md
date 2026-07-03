@@ -73,7 +73,7 @@ skill-observability  →  skill-metrics  →  lessons-triage  →  backlog  → 
 
 **Driving the loop weekly (R5 loop closure).** A weekly routine turns the loop: `skill-metrics --snapshot` (aggregate + trend) → if notable friction, a metrics-primed `lessons-triage` pass files `[lessons]` pointers under **one batch confirmation** (the R3 policy's `externally-visible` class) → a human applies `auto-ok` to the issues worth auto-driving → `backlog --auto` consumes only those into `drive`. A human sets exactly **two boundary conditions** (HATL): **(1) approving which lessons are filed** and **(2) applying `auto-ok`** — nothing is filed without the batch confirm and nothing is auto-consumed without the label (`auto-ok` is human-only; no skill applies it). The scheduled-prompt recipe, the consume pass, and the HATL boundary table live in [`docs/observability-routine.md`](docs/observability-routine.md).
 
-Still a follow-up on top of this contract (tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): outcome derivation (`gh`/`git` merge ground truth + session→PR linkage) that folds merge/abort status into the rollup.
+The full measurement design — the artifact-derived-primary altitude, the counts-with-min-n guard, the metadata-only privacy and fail-open guarantees, and the deferred items (chiefly outcome derivation: `gh`/`git` merge ground truth + session→PR linkage folded into the rollup) — is recorded in [project ADR-0001](docs/adr/0001-observability-measurement-design.md) (this repo's first project ADR; see [`docs/adr/`](docs/adr/)).
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 

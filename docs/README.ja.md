@@ -71,7 +71,7 @@ skill-observability  →  skill-metrics  →  lessons-triage  →  backlog  → 
 
 **週次でループを回す（R5 ループ閉包）。** 週次 routine がループを駆動する: `skill-metrics --snapshot`（集計 + トレンド）→ 注目摩擦があれば metrics-primed な `lessons-triage` が `[lessons]` ポインタを **1 回の batch confirm**（R3 policy の `externally-visible` クラス）で起票 → 人間が auto-drive したい issue に `auto-ok` を付与 → `backlog --auto` が `auto-ok` issue のみを `drive` に流す。人間の境界条件は **2 点だけ**（HATL）: **(1) どの教訓を起票するかの承認** と **(2) `auto-ok` ラベル付与** — batch confirm なしに起票はされず、ラベルなしに自動消化はされない（`auto-ok` は人間のみ付与・自動付与経路なし）。schedule プロンプト recipe・consume pass・HATL 境界表は [`docs/observability-routine.md`](observability-routine.md) を参照。
 
-この契約の上に残る別 PR（[#162](https://github.com/ozzy-labs/skills/issues/162) で追跡）: outcome 導出（`gh`/`git` の merge ground truth + session→PR linkage）で merge/abort 状態を rollup に畳み込む。
+計測設計の全体（痕跡導出主軸の altitude・件数 + 小 n ガード・metadata のみの privacy と fail-open 保証・保留項目 — 主に outcome 導出: `gh`/`git` の merge ground truth + session→PR linkage を rollup に畳み込む）は [project ADR-0001](adr/0001-observability-measurement-design.md)（本リポ初の project ADR。[`docs/adr/`](adr/) を参照）に記録している。
 
 リポ固有スキル（例: `road` の `improve-loop` / `road-repo-context`）は本パッケージには含まない。
 
