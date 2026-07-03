@@ -12,6 +12,7 @@
 - `lessons-triage` — セッション教訓 queue（~/.agents/lessons/queue.jsonl）を消化し、transcript から User Skills に関する教訓を抽出して、承認された分のみ ozzy-labs/skills へ issue 起票する。「教訓を整理して」「lessons を消化して」「セッションの振り返り」で発火。
 - `policy` — 中央 autonomy policy の契約（policy.schema.json）と読取 substrate（policy-read.mjs）の定義。アクション 3 クラス・gate 語彙・policy.yaml 階層・ゼロコンフィグ既定の SSOT。他スキル・hook から参照される。
 - `pr` — コミット済みの変更をリモートにプッシュし、PR を作成・更新する。
+- `release` — release-please PR を検出（`gh pr list --author app/release-please --state open`）し、固定チェックリスト（version bump と含有 commit type の SemVer 整合 feat→minor / fix→patch / `!` or BREAKING CHANGE→major、CHANGELOG 整合、CI 全 green）で検証してから、既定は承認ゲート（外部可視・実質不可逆）を通して `gh pr merge --squash` する。マージ後は publish workflow を polling（30s 間隔・上限 20 分）で監視し `npm view <pkg> version` で反映確認する（npm 配布リポのみ）。`--auto` は全検証 pass 時のみゲートを skip（fail 時は停止）。npm publish は OIDC Trusted Publishers 前提（`NPM_TOKEN` 不使用）。
 - `review` — コード変更や PR を 11 観点（perspectives）でレビューし、JSON 構造化出力 + 人間可読レポートで報告する。quick / deep モードを切替可能。PR 番号またはワーキングツリー差分を入力に取る。
 - `ship` — 検証・コミット・PR 作成を一括実行する。変更に対して verify（ビルド + 型 + テスト + lint）→ コミット → PR 作成を順に実行する統合パイプライン。
 - `skill-metrics` — ローカルの observability イベントログ（~/.agents/observability/events.jsonl）を集計し、skill 別の発火件数と注目イベント（fallback / HITL 却下 / loop 上限到達 / 中断）を read-only で提示する。「skill のメトリクスを見せて」「観測結果を集計して」「どの skill がよく使われてる?」で発火。送信はしない。
