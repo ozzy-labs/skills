@@ -28,7 +28,7 @@ description: ローカルの observability イベントログ（~/.agents/observ
 
 - **件数 delta は常に提示**する: skill 別 `invocations_delta`（発火数の増減）、`signals[<name>]`（摩擦シグナルの増減）。増減はプラス/マイナスで示す。
 - **率 delta は小 n ガードを継承**する: `abort_rate_delta` は**両世代とも**分母が `min_n` 以上（各 rollup の `abort_rate` が非 null）のときのみ数値を出す。片側でも n<`min_n` なら `abort_rate_delta: null` + `abort_rate_delta_suppressed: true`（率は出さず件数 delta のみ）。
-- `trend.baseline_week` / `trend.baseline_file` が比較対象のスナップショット（ISO 年週・パス）、`trend.baseline_window` が前世代の集計 window を示す。
+- `trend.baseline_week` / `trend.baseline_file` が比較対象のスナップショット（ISO 年週・**ファイル名のみ**・HOME 絶対パスは載せない = privacy 継承）、`trend.baseline_window` が前世代の集計 window を示す。
 - スナップショットが 1 世代しか無い・snapshots dir が無い・読めない場合は `trend: null`（fail-open、通常の rollup 提示は続行）。
 
 ## 手順

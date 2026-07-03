@@ -264,7 +264,10 @@ test("run: computes week-over-week trend against the previous snapshot", async (
   });
   assert.ok(r.trend, "trend present when a prior snapshot exists");
   assert.equal(r.trend.baseline_week, "2026-W24");
-  assert.ok(r.trend.baseline_file.endsWith("2026-W24.json"));
+  assert.equal(r.trend.baseline_file, "2026-W24.json");
+  // Privacy: the rollup (quoted by lessons-triage into issues) must carry no
+  // HOME-anchored absolute path — baseline_file is a basename only.
+  assert.ok(!r.trend.baseline_file.includes("/"), "baseline_file must be a basename, not a path");
   // Current drive invocations (2 in LOG) minus previous (1) = +1.
   assert.equal(r.trend.skills.drive.invocations_delta, 1);
 });

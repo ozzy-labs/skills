@@ -350,7 +350,10 @@ export async function run(
     rollup.trend = computeTrend(rollup, prev.rollup, { minN });
     if (rollup.trend) {
       rollup.trend.baseline_week = prev.week;
-      rollup.trend.baseline_file = prev.file;
+      // Basename only — never the HOME-anchored absolute path. This rollup is
+      // quoted by lessons-triage into externally-visible issues under a
+      // "metadata only, no raw path" rule; baseline_week identifies the file.
+      rollup.trend.baseline_file = basename(prev.file);
     }
   } else {
     rollup.trend = null;

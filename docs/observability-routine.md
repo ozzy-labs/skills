@@ -22,7 +22,7 @@ skill-observability  →  skill-metrics  →  lessons-triage  →  backlog  → 
 
 ## Schedule prompt (weekly)
 
-Register the following prompt as a weekly scheduled agent (a `schedule` / cron routine, or a manual `/loop 1w`). It is idempotent per run and never files or merges anything without the two HATL boundaries below.
+Register the following prompt as a **weekly scheduled (cron) agent** — the mechanism built for a weekly cadence (a polling `/loop` would have to keep a session alive for the whole week, so it is not the right tool here). It is idempotent per run and never files or merges anything without the two HATL boundaries below.
 
 ```text
 Weekly skill-observability loop pass:
