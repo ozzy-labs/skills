@@ -140,6 +140,57 @@ test("lessons-triage canonical SKILL.md documents the privacy contract", async (
   );
 });
 
+test("lessons-triage canonical SKILL.md documents the metrics-primed reflection channel", async () => {
+  const { body } = await loadCanonical();
+  // (a) The rollup is a documented input and prioritization starting point.
+  assert.match(body, /metrics-primed/, "metrics-primed reflection channel must be documented");
+  assert.match(body, /skill-metrics/, "must reference the skill-metrics rollup as input");
+  assert.match(body, /--snapshot/, "must reference the /skill-metrics --snapshot rollup command");
+  // The filed issue is a backlog pointer, not a fix carrier, and cites the rollup.
+  assert.match(
+    body,
+    /backlog ポインタ/,
+    "issue must be framed as a backlog pointer (priority index), not a fix carrier",
+  );
+  assert.match(
+    body,
+    /定量ベースライン/,
+    "issue-body template must include the rollup as quantitative evidence",
+  );
+  assert.match(
+    body,
+    /診断・修正は transcript のあるローカルで行い/,
+    "diagnosis/fix must be deferred to the local transcript, not carried in the issue",
+  );
+});
+
+test("lessons-triage canonical SKILL.md keeps rollup quotes free of verbatim logs (privacy extension)", async () => {
+  const { body } = await loadCanonical();
+  // Privacy assertion extended to the metrics-primed rollup: no verbatim
+  // transcript / payload / secret / raw identifiers may leak through a quote.
+  assert.match(
+    body,
+    /rollup 引用にも逐語トランスクリプト・payload・secret・raw repo 名\/cwd\/PR 生値を含めない/,
+    "rollup-quote privacy rule must be documented",
+  );
+  assert.match(
+    body,
+    /rollup を引用する場合も \*\*metadata（件数・window）のみ\*\*/,
+    "issue-body rule must restrict rollup quotes to metadata only",
+  );
+});
+
+test("lessons-triage canonical SKILL.md documents reflection as opt-in HITL", async () => {
+  const { body } = await loadCanonical();
+  // (c) Reflection (sending) stays an explicit opt-in HITL action; local
+  // aggregation/prioritization may be automatic but issue-filing is not.
+  assert.match(
+    body,
+    /反映（送信）は常に明示 opt-in・HITL/,
+    "reflection (sending) must be documented as always opt-in HITL",
+  );
+});
+
 test("lessons-triage canonical SKILL.md matches the lesson-capture.sh queue contract", async () => {
   const { body } = await loadCanonical();
 
