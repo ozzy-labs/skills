@@ -2,6 +2,15 @@
 
 `SKILL.claude-code.md` の Phase Final-1（親 worktree 整合性チェック）と Phase Final-5（subagent worktree cleanup）の**実行詳細**を切り出したリファレンス。overlay 本体はここへリンクするだけに留め、記述量を抑える。Claude Code の worktree 機構（`.claude/worktrees/agent-<id>/`・共有 git directory・harness lock）に固有の手順。
 
+## 実行機構との整合（Workflow 方式 / Agent tool 方式）
+
+本リファレンスの汚染検出・recovery・cleanup は **Workflow 方式（canonical）と Agent tool 方式（fallback）の両方**に適用する。worker の起動機構は異なるが、いずれも同じ worktree path 規約（`.claude/worktrees/agent-<id>/`）と共有 git directory を使うため、機構は共通:
+
+- **Workflow 方式 `agent({ isolation: 'worktree' })`**: ランタイムが worktree を provision する。ただし **worker が commit を残した worktree（drive worker は全て commit する）は「変更あり」としてランタイムの自動削除対象にならず残存**する。したがって (a) worker の git 操作は依然として共有 git directory 経由で親を汚染し得る（→ Phase Final-1 の汚染検出 7 軸は省略不可）、(b) 残存 worktree の cleanup は Phase Final-5 の手順で親（会話側・workflow return 後）が実行する。ランタイムが cleanup を肩代わりするのは「無変更で終わった agent の worktree」のみ。
+- **Agent tool 方式 `Agent({ isolation: "worktree" })`**: worktree の provision も cleanup も会話側で行う。検出・recovery・cleanup 手順は下記のまま。
+
+いずれの方式でも Phase Final-1〜Final-5 は worker（workflow / Agent）の**完了後に会話側で**実行する。
+
 ## 汚染検出 7 軸（Phase Final-1）
 
 subagent が共有 git directory 経由で親の `HEAD` / `index` / `refs/heads/main` を汚染するケースに備える fail-safe（[#66](https://github.com/ozzy-labs/skills/issues/66) / [#77](https://github.com/ozzy-labs/skills/issues/77) / [#89](https://github.com/ozzy-labs/skills/issues/89) 由来）。Phase 20 (opshub) 実行で「prompt 禁止だけでは subagent 4 並列のうち 3 件で汚染再発」、`/sync-consumers` epic 実行で「subagent 戻り値の自己申告と実態が乖離（worktree が `refs/heads/main` を握っていた）」が観察された。検出は 7 軸 + subagent 戻り値の `final_head_state` 交差確認で構成する。

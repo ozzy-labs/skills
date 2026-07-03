@@ -259,11 +259,12 @@ wave を順に実行する。
 
 `final_head_state` は worker 完了時点の自作業コピーの git HEAD 状態を必ず申告するフィールド。自己申告と実態が乖離した観察例があるため、戻り値で実測値を提出させて親側 Phase Final-1 で交差確認する。フィールドが欠落している場合は後方互換のため `null` 扱いとし、交差確認を skip する（乖離の判定基準はホスト固有の手順を参照）。
 
-#### 観測性
+#### 観測性・中断再開
 
-- worker の実行中はストリーム的な中間報告ができない場合があるため、親は wave 起動時刻 `<T>` を ISO 8601 で記録し、30 秒間隔で `gh pr list --author @me --state open --search "created:>=<T>" --json number,url,headRefName,title` を polling する
-- 既知 PR との差分から新規作成 PR を検出し、URL を即時表示する
-- 全 worker 完了時に最終 JSON 戻り値で状態を確定する
+進捗観測と中断再開の**実行機構はホスト依存**（並列実行機構に一体化するため）。canonical はセマンティクスのみを定め、機構の how（進捗表示・resume の具体手順）はホスト固有の手順に委譲する（Claude Code: `SKILL.claude-code.md` の「観測性・中断再開」）:
+
+- worker は実行中にストリーム的な中間報告ができない場合がある。親は進捗を可視化しつつ、**全 worker 完了時に最終 JSON 戻り値で状態を確定する**（確定は戻り値が SSOT。中間表示は補助）
+- 中断しても drive は冪等 resume で続きから再開できる（完了済み worker / 既存 PR / merged 済み PR を検出）。**再開機構の how はホスト依存**（Claude Code は Workflow の journal resume `resumeFromRunId`、Agent tool fallback は `gh pr list` polling + 手動再実行）
 
 #### wave 完了待ち
 
