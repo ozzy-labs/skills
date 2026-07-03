@@ -41,7 +41,7 @@ This package backs the [OzzyLabs handbook ADR-0016](https://github.com/ozzy-labs
 
 ### Observability (skill-improvement loop)
 
-`skill-observability` lays the measurement foundation for a data-driven skill-improvement loop (capture → aggregate → reflect). It ships three artifacts as a referenced companion:
+`skill-observability` lays the measurement foundation for a data-driven skill-improvement loop (capture → aggregate → reflect → consume). It ships three artifacts as a referenced companion:
 
 - **`event.schema.json`** — the single SSOT for the event contract. Both `obs-emit.mjs` and the test suite consume this exact file, so the event shape has no doc/code drift. Field names follow the OpenTelemetry GenAI semantic-convention *shape* (`skill`≈`gen_ai.agent.name`, `operation`≈`gen_ai.operation.name`) without hard-coupling to the still-experimental spec. `additionalProperties:false` is the mechanical privacy guard: any unknown field (payload, diff, token, path) fails validation and is never written.
 - **`obs-emit.mjs`** — the fail-open append+validate write substrate. It records one validated event per call to `~/.agents/observability/events.jsonl` (HOME-anchored, append-only, OTel-independent). It captures nothing on its own and never throws: a rejected or failed emit warns and exits 0 so observability can never break the skill being observed. Repo identifiers passed via `--repo` are hashed (never stored raw).
@@ -55,7 +55,23 @@ node obs-emit.mjs --skill=drive  --event=heartbeat
 
 The **`skill-metrics`** skill (shipped, all-adapter) aggregates this log read-only into per-skill invocation counts + notable friction events, applying a min-n guard so a misleading "1/1 = 100%" rate is never shown for low-frequency data.
 
-Built on top of this contract (separate follow-ups, tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): outcome derivation (`gh`/`git` merge ground truth + session→PR linkage) and a reflection channel that folds privacy-scrubbed rollups into `lessons-triage` issues (HITL, opt-in).
+The loop closes through two more skills:
+
+- **`lessons-triage`** (reflect) reads the `skill-metrics` rollup (`/skill-metrics --snapshot`) as a *metrics-primed* starting point: it reads the high-friction skills' transcripts first, then files a privacy-scrubbed **backlog-pointer** `[lessons]` issue that cites the rollup counts as evidence. The issue points at *where to look*, not the fix — diagnosis and the fix-PR happen locally where the transcript lives. Reflection (issue filing) is always opt-in HITL (the central autonomy policy's `externally-visible` gate). Rollup quotes carry metadata only (counts / window) — never verbatim transcripts, payloads, secrets, or raw repo/cwd/PR values.
+- **`backlog`** (consume) collects those open issues, orders them by its fixed priority rules, and hands them to `drive` — turning the priority index into fix-PRs.
+
+Full loop (each stage feeds the next; the shipped fix re-measures in the next window):
+
+```text
+skill-observability  →  skill-metrics  →  lessons-triage  →  backlog  →  (drive → fix-PR)
+     capture               aggregate         reflect          consume
+   events.jsonl        counts + notable    backlog-pointer   priority index
+ (obs-derive hook)       (--snapshot)       issue (HITL)        → /drive
+        ▲                                                              │
+        └───────────── fix ships, next window re-measures ────────────┘
+```
+
+Still a follow-up on top of this contract (tracked in [#162](https://github.com/ozzy-labs/skills/issues/162)): outcome derivation (`gh`/`git` merge ground truth + session→PR linkage) that folds merge/abort status into the rollup.
 
 Repo-specific skills (e.g. `road`'s `improve-loop` / `road-repo-context`) are intentionally not included in this package.
 
