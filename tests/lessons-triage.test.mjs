@@ -180,6 +180,28 @@ test("lessons-triage canonical SKILL.md keeps rollup quotes free of verbatim log
   );
 });
 
+test("lessons-triage canonical SKILL.md documents the auto-ok label convention + backlog connection", async () => {
+  const { body } = await loadCanonical();
+  // (R5) The filed issue connects to `/backlog --auto` via a human-applied
+  // auto-ok label — closing the reflect → consume half of the loop.
+  assert.match(body, /auto-ok/, "auto-ok label convention must be documented");
+  assert.match(body, /\/backlog --auto/, "must connect the filed issue to backlog --auto");
+  assert.match(body, /consume/, "reflect → consume framing must be documented");
+
+  // HATL: auto-ok is human-only and this skill must NOT apply it (no auto path).
+  assert.match(body, /人間のみが付与/, "auto-ok must be documented as human-only to apply");
+  assert.match(
+    body,
+    /起票時に .*を付けない/,
+    "the skill must be documented as never applying auto-ok itself",
+  );
+
+  // The two human boundary conditions (HATL): filing approval + label.
+  assert.match(body, /HATL/, "the HATL boundary must be named");
+  assert.match(body, /起票承認/, "boundary 1 (issue-filing approval) must be documented");
+  assert.match(body, /ラベル付与/, "boundary 2 (auto-ok label application) must be documented");
+});
+
 test("lessons-triage canonical SKILL.md documents reflection as opt-in HITL", async () => {
   const { body } = await loadCanonical();
   // (c) Reflection (sending) stays an explicit opt-in HITL action; local

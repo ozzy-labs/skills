@@ -20,7 +20,16 @@ description: ローカルの observability イベントログ（~/.agents/observ
 
 - `--since=<ISO 8601>`: 指定時刻以降のイベントのみ集計
 - `--skill=<name>`: 特定 skill のみ集計
-- `--snapshot`: rollup を `~/.agents/observability/snapshots/<YYYY-Www>.json` に書き出す（将来のトレンド比較用）
+- `--snapshot`: rollup を `~/.agents/observability/snapshots/<YYYY-Www>.json` に書き出す（トレンド比較の baseline を作る。書き出す内容は導出フィールド `trend` を除いた素の集計 = 純粋な baseline）
+
+## トレンド比較（前週比）
+
+エンジンは実行のたびに、`~/.agents/observability/snapshots/` にある **今週より前の最新スナップショット**（過去の `--snapshot` が書き出した前世代 baseline）を読み、現 rollup との差分を `trend` フィールドに載せる（前世代が無ければ `trend: null`）。`--snapshot` は今週分の baseline を書き出し、**次回の実行がそれを前週として比較**する。
+
+- **件数 delta は常に提示**する: skill 別 `invocations_delta`（発火数の増減）、`signals[<name>]`（摩擦シグナルの増減）。増減はプラス/マイナスで示す。
+- **率 delta は小 n ガードを継承**する: `abort_rate_delta` は**両世代とも**分母が `min_n` 以上（各 rollup の `abort_rate` が非 null）のときのみ数値を出す。片側でも n<`min_n` なら `abort_rate_delta: null` + `abort_rate_delta_suppressed: true`（率は出さず件数 delta のみ）。
+- `trend.baseline_week` / `trend.baseline_file` が比較対象のスナップショット（ISO 年週・**ファイル名のみ**・HOME 絶対パスは載せない = privacy 継承）、`trend.baseline_window` が前世代の集計 window を示す。
+- スナップショットが 1 世代しか無い・snapshots dir が無い・読めない場合は `trend: null`（fail-open、通常の rollup 提示は続行）。
 
 ## 手順
 
@@ -35,6 +44,7 @@ description: ローカルの observability イベントログ（~/.agents/observ
    - **skill 別**: 発火件数（`invocations`）と channel 内訳（`by_operation`: `invoke_agent` / `slash_command`）。outcome があれば completed / aborted / fallback の件数。中断率（`abort_rate`）は `abort_rate_suppressed: true` のとき「n<min_n のため非表示（件数のみ）」と明記する
    - **signals**: 注目シグナルの件数（`review.deep_to_quick_fallback` / `usage_guard.fail_open` / `hitl.rejected` / `loop.hit_cap` 等）
    - **notable**: 摩擦イベント（fallback / HITL 却下 / loop 上限 / 中断）の一覧
+   - **trend**（`trend` が非 null のとき）: 前週比（`baseline_week` と比較）の発火数増減（`invocations_delta`）と摩擦シグナル増減（`signals`）。`abort_rate_delta_suppressed: true` のときは「n<min_n のため率 delta 非表示（件数 delta のみ）」と明記する。`trend: null`（1 世代目・baseline 無し）のときは「前週スナップショットなし（次回から比較可能）」と案内する
 3. データが空（`events: 0`）の場合は「イベント未蓄積。`skill-observability` の SessionEnd hook が未配線の可能性」と案内する（hook 配線は `skill-observability` の SKILL.md「SessionEnd hook を有効化」を参照）。
 
 ## 提示フォーマット例
@@ -54,6 +64,11 @@ skill 別発火:
 notable:
   [signal] review / review.deep_to_quick_fallback (2026-06-28T...)
   [signal] drive  / usage_guard.fail_open          (2026-06-27T...)
+
+トレンド（前週比 / baseline: 2026-W25）:
+  drive    発火 +4    abort 率 delta: n<5 のため非表示（件数 delta のみ）
+  review   発火 -1    abort 率 delta: -0.10
+  signals: usage_guard.fail_open +2 / review.deep_to_quick_fallback +1
 ```
 
 ## 注意事項
