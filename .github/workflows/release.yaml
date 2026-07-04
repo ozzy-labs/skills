@@ -23,11 +23,12 @@ jobs:
           # (GitHub suppresses workflow events raised by GITHUB_TOKEN), so the
           # required `lint-and-build` status check never appears and the
           # `main-protection` ruleset keeps every release PR permanently BLOCKED.
-          # Passing a non-default token (a GitHub App token or fine-grained PAT
-          # stored as RELEASE_PLEASE_TOKEN) makes the release PR trigger CI so it
-          # can satisfy the required check. Falls back to GITHUB_TOKEN when the
-          # secret is absent (unchanged behaviour — first release is manual).
-          # See docs/releasing.md.
+          # Passing a non-default token makes the release PR trigger CI so it can
+          # satisfy the required check: set RELEASE_PLEASE_TOKEN to a fine-grained
+          # PAT, or mint a GitHub App token in-workflow and reference it here (App
+          # tokens are per-run and cannot be stored as a static secret — see
+          # docs/releasing.md). Falls back to GITHUB_TOKEN when the secret is
+          # absent (unchanged behaviour — first release is manual).
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
