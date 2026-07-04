@@ -19,6 +19,17 @@ jobs:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
+          # A release PR opened by the default GITHUB_TOKEN does NOT trigger CI
+          # (GitHub suppresses workflow events raised by GITHUB_TOKEN), so the
+          # required `lint-and-build` status check never appears and the
+          # `main-protection` ruleset keeps every release PR permanently BLOCKED.
+          # Passing a non-default token makes the release PR trigger CI so it can
+          # satisfy the required check: set RELEASE_PLEASE_TOKEN to a fine-grained
+          # PAT, or mint a GitHub App token in-workflow and reference it here (App
+          # tokens are per-run and cannot be stored as a static secret — see
+          # docs/releasing.md). Falls back to GITHUB_TOKEN when the secret is
+          # absent (unchanged behaviour — first release is manual).
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 

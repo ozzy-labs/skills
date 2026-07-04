@@ -259,6 +259,8 @@ pnpm lint:all
 3. **Tag + GitHub Release**: release PR の merge で `v<x.y.z>` tag と GitHub Release が作られる。
 4. **`npm publish --provenance`**: `publish` job が `pnpm install --frozen-lockfile` → `pnpm build` → `npm publish --provenance --access public` を実行する。認証は OIDC のみ (`NPM_TOKEN` secret は使わない)。`permissions: { id-token: write, contents: read }` で GitHub Actions の OIDC token を npm 側の trusted publisher 設定 (<https://www.npmjs.com/package/@ozzylabs/skills/access>) と突き合わせて検証する。
 
+> **Release PR には既定でない token が必要。** 既定の `GITHUB_TOKEN` で開かれた Release PR は CI をトリガしないため、必須 check `lint-and-build` が付かず `main-protection` ruleset に恒久的に `BLOCKED` される。`release.yaml` は `token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}` を渡す — `RELEASE_PLEASE_TOKEN` に fine-grained PAT を設定するか、GitHub App token を in-workflow で発行して渡す（推奨）と Release PR が check を通せる。初回リリースは手動（npm 上にパッケージが無く Trusted Publisher を事前設定できないため）。詳細な runbook は [`docs/releasing.md`](releasing.md)。
+
 ### npm payload の中身
 
 payload は `package.json#files` で宣言し、`tests/npm-pack-payload.test.mjs` で検証する:
