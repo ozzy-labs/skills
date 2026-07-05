@@ -6,40 +6,40 @@ allowed-tools: Bash, Read, AskUserQuestion
 
 # deps
 
-`.agents/skills/deps/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/deps/SKILL.md` and follow its workflow steps.
 
-**重要:** 決定論（automation PR 列挙 / author 判定 / semver 区分 / CI 判定 / lockfile 整合 / peer・engines 検出 / 固定語彙の判定表 / merge 実行）はすべて同梱の **`deps.mjs` エンジン**が担う。SKILL は「エンジンを呼び、出力をそのまま提示し、policy gate で merge 確認する」判断層に徹する。「安全そう」という Claude の自由判断で merge しない（判定はエンジンの固定語彙が決める）。
+**Important:** All determinism (automation PR enumeration / author determination / semver classification / CI judgment / lockfile consistency / peer & engines detection / the fixed-vocabulary judgment table / merge execution) is handled by the bundled **`deps.mjs` engine**. The SKILL confines itself to the judgment layer: "call the engine, present its output as-is, and confirm merges via the policy gate." Claude does not merge based on its own judgment that it "looks safe" (the judgment is determined by the engine's fixed vocabulary).
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### エンジン実行
+### Running the engine
 
 ```bash
 node ~/.claude/skills/deps/deps.mjs [--repo owner/repo] [--limit N] [--dry-run | --auto]
 ```
 
-dogfood（本リポ内）では `<repo>/.claude/skills/deps/deps.mjs`。出力は整形済みテキスト（`--json` で構造化 JSON）。引数はユーザー入力をそのまま渡す。
+For dogfooding (within this repo), it's `<repo>/.claude/skills/deps/deps.mjs`. Output is formatted text (structured JSON with `--json`). Pass the user's input through as the arguments.
 
-- `--repo owner/repo`: 省略時はエンジンが `git remote get-url origin` から抽出
-- `--limit N`: 列挙上限（既定 50）
-- `--dry-run`: 判定のみ。merge も確認もしない
-- `--auto`: 確認なしで merge（irreversible gate の明示 opt-out）
-- `--dry-run` と `--auto` 同時指定時はエンジンが `--dry-run` を優先する（誤 merge 防止）
+- `--repo owner/repo`: if omitted, the engine extracts it from `git remote get-url origin`
+- `--limit N`: enumeration limit (default 50)
+- `--dry-run`: judge only. No merge, no confirmation
+- `--auto`: merge without confirmation (an explicit opt-out of the irreversible gate)
+- If `--dry-run` and `--auto` are both specified, the engine prioritizes `--dry-run` (to prevent accidental merges)
 
-### merge 確認（policy の `irreversible` gate = ask）
+### Merge confirmation (policy's `irreversible` gate = ask)
 
-`--dry-run` / `--auto` どちらも未指定（`plan` モード）の場合、エンジンは merge せず `merge_plan`（実行予定の `gh pr merge <N> --squash`）と auto-merge 候補を返す。merge は不可逆アクションなので policy の gate に従う。`policy-read.mjs --action=merge --repo-root="$PWD"` で gate を引く（user-scope では `~/.claude/skills/policy/policy-read.mjs`、dogfood は `<repo>/.claude/skills/policy/policy-read.mjs`）。
+When neither `--dry-run` nor `--auto` is specified (`plan` mode), the engine does not merge and instead returns a `merge_plan` (the scheduled `gh pr merge <N> --squash`) and the auto-merge candidates. Since merging is an irreversible action, it follows the policy's gate. Look up the gate with `policy-read.mjs --action=merge --repo-root="$PWD"` (user-scope: `~/.claude/skills/policy/policy-read.mjs`; dogfood: `<repo>/.claude/skills/policy/policy-read.mjs`).
 
-- gate=`ask`（ゼロコンフィグ既定）: auto-merge 候補を **1 件ずつ** AskUserQuestion で確認する（テキストで `Y/n` を列挙しない）。承認された PR のみ `gh pr merge <N> --squash` を実行する（`merge_plan` の該当コマンド）。`要確認` 群は merge せず、理由付きで提示するのみ
-- gate=`batch-confirm` に緩めている場合: auto-merge 候補を 1 回まとめて提示し AskUserQuestion で一括確認 → 承認されたら同じ引数に `--auto` を付けて `deps.mjs` を再実行する
-- gate=`proceed`: 確認なしで `--auto` 付き再実行
+- gate=`ask` (zero-config default): confirm auto-merge candidates **one at a time** via AskUserQuestion (do not enumerate `Y/n` as text). Only approved PRs get `gh pr merge <N> --squash` executed (the corresponding command from `merge_plan`). The `要確認` group is not merged; it is only presented with reasons
+- If loosened to gate=`batch-confirm`: present auto-merge candidates together once and confirm them all via AskUserQuestion → if approved, re-run `deps.mjs` with `--auto` appended to the same arguments
+- gate=`proceed`: re-run with `--auto` without confirmation
 
-`--auto` 指定時は **AskUserQuestion を挟まない**（irreversible gate の明示 opt-out）。エンジンが直列 merge し、結果（`merge_results`）を各行に併記する。
+When `--auto` is specified, **AskUserQuestion is not inserted** (an explicit opt-out of the irreversible gate). The engine merges serially, noting the result (`merge_results`) alongside each row.
 
-### 定期実行との連携
+### Integration with scheduled execution
 
-`schedule`（cron routine）や `/loop` から `/deps --auto` の形で起動すると、「毎朝 automation PR を消化する」ループが閉じる（ADR-0028 R5）。定期実行の中では AskUserQuestion を挟めないため、エンジンの保守的な判定表（迷ったら `要確認`）と policy gate が唯一の境界になる。
+Launching in the form `/deps --auto` from `schedule` (cron routine) or `/loop` closes the loop of "consume automation PRs every morning" (ADR-0028 R5). Since AskUserQuestion cannot be inserted during scheduled execution, the engine's conservative judgment table (`要確認` when in doubt) and the policy gate become the sole boundary.
 
-### 完了報告・次のアクション提案
+### Completion report and next-action suggestions
 
-triage 表 / merge した PR / `要確認` の内訳を表示したら終了する。次のアクション提案は行わない。
+End once the triage table / merged PRs / `要確認` breakdown have been displayed. Do not suggest next actions.

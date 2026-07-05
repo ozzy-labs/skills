@@ -1,32 +1,32 @@
 ---
-description: セッション教訓 queue（~/.agents/lessons/queue.jsonl）を消化し、transcript から User Skills に関する教訓を抽出して、承認された分のみ ozzy-labs/skills へ issue 起票する。「教訓を整理して」「lessons を消化して」「セッションの振り返り」で発火。
+description: Consumes the session lessons queue (~/.agents/lessons/queue.jsonl), extracts lessons about User Skills from the transcript, and files only the approved ones as issues to ozzy-labs/skills. Fires on "organize the lessons," "consume the lessons," "session retrospective."
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
 
 # lessons-triage
 
-`.agents/skills/lessons-triage/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/lessons-triage/SKILL.md` and follow the workflow steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### transcript の読み方
+### How to read the transcript
 
-- Claude Code の transcript は `~/.claude/projects/<project-slug>/<session_id>.jsonl`（1 行 = 1 イベントの JSONL）
-- skill 呼び出しの痕跡は `Skill` tool の tool_use イベント、または `<command-name>` タグで判定できる
-- 巨大な transcript は Grep で skill 関連イベントの行を絞ってから前後を Read する
+- Claude Code's transcript is at `~/.claude/projects/<project-slug>/<session_id>.jsonl` (1 line = 1 event, JSONL)
+- Traces of skill invocations can be identified via the `Skill` tool's tool_use events, or the `<command-name>` tag
+- For a large transcript, use Grep to narrow down to skill-related event lines, then Read the surrounding context
 
-### 過去の triage セッション判定（outcome: self）
+### Determining past triage sessions (outcome: self)
 
-実行中の自セッションは SessionEnd 未発火のため queue に存在しない。プレフィルタの `self` 判定対象は**過去に lessons-triage を実行したセッション**であり、transcript 内の実行マーカーで判定する:
+Since the currently running session hasn't fired SessionEnd yet, it doesn't exist in the queue. The prefilter's `self` determination target is **a session in which lessons-triage was run in the past**, identified via an execution marker in the transcript:
 
-- `<command-name>lessons-triage</command-name>` タグ（`/lessons-triage` 起動の痕跡）
-- `Skill` tool の `lessons-triage` 呼び出しイベント
+- The `<command-name>lessons-triage</command-name>` tag (a trace of `/lessons-triage` being invoked)
+- A `Skill` tool invocation event for `lessons-triage`
 
-いずれかが transcript に含まれるセッションは `outcome: self` として破棄候補にする（Grep で判定できる）。
+Any session whose transcript contains either of these is treated as `outcome: self` and made a discard candidate (identifiable via Grep).
 
-### HITL 承認（policy の `externally-visible` gate = batch-confirm）
+### HITL approval (policy's `externally-visible` gate = batch-confirm)
 
-手順 4 の一括確認は AskUserQuestion で行う（`answers` パラメータは設定しない）。gate=`batch-confirm`（既定）では、全教訓を 1 つの question の options として提示し、`multiSelect: true` で起票する教訓をまとめて選ばせる。教訓数が 1 question の option 上限を超える場合は複数回に分割してよいが、いずれも「1 回の一括確認ラウンド」として扱い、1 件ずつの逐次承認には戻さない。選択された教訓のみ `gh issue create` を実行し、非選択は破棄する。
+The batch confirmation in step 4 is done via AskUserQuestion (do not set the `answers` parameter). With gate=`batch-confirm` (default), present all lessons as the options of a single question, and use `multiSelect: true` to have the user select as a batch which lessons to file. If the number of lessons exceeds the option limit for a single question, it's fine to split across multiple rounds, but treat all of them as "one batch-confirmation round" — do not revert to per-lesson sequential approval. Only run `gh issue create` for the selected lessons; discard the unselected ones.
 
-gate=`ask`（policy で厳格化された場合）のときのみ 1 件ずつ確認にフォールバックする（起票する / 修正して起票する / 破棄する）。
+Only fall back to per-lesson confirmation (file / file with edits / discard) when gate=`ask` (tightened by policy).

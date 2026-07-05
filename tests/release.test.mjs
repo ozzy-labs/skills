@@ -4,7 +4,7 @@
 // canonical SKILL.md and executes it. So these tests assert on the document's
 // *structure* — the contract the skill pins down — plus a fixture reimplementation
 // of the deterministic SemVer-consistency rule (the one verification the skill
-// describes as "fixture 化可能"):
+// describes as "fixture-able"):
 //   1. canonical / companion frontmatter are well-formed
 //   2. detection command, fixed verification checklist, and the SemVer rule are
 //      documented
@@ -109,7 +109,7 @@ test("release SKILL.md documents release-please detection", async () => {
 
 test("release SKILL.md documents the fixed verification checklist", async () => {
   const { body } = await loadCanonical();
-  assert.match(body, /SemVer 整合/, "checklist must include SemVer consistency");
+  assert.match(body, /SemVer consistency/, "checklist must include SemVer consistency");
   assert.match(body, /CHANGELOG/, "checklist must include CHANGELOG consistency");
   assert.match(body, /CI/, "checklist must include CI state");
   assert.match(body, /gh pr checks/, "CI check must use gh pr checks");
@@ -144,12 +144,12 @@ test("release SKILL.md gates --auto on all verifications passing (fail → stop)
   // verification passes; on any failure it still stops.
   assert.match(
     body,
-    /全検証 pass 時のみ|全検証 pass/,
+    /only when all validations pass/,
     "--auto must skip the gate only when all verifications pass",
   );
   assert.match(
     body,
-    /検証 fail 時.*停止|--auto でも停止/s,
+    /stops when validation fails|stops even with `?--auto`?/is,
     "on verification failure the skill must stop even with --auto",
   );
 });
@@ -160,8 +160,8 @@ test("release SKILL.md gates --auto on all verifications passing (fail → stop)
 
 test("release SKILL.md documents publish polling interval + cap and npm reflection", async () => {
   const { body } = await loadCanonical();
-  assert.match(body, /30\s*秒|30s/, "must document the 30s polling interval");
-  assert.match(body, /20\s*分/, "must document the 20-minute polling cap");
+  assert.match(body, /30-second|30s/, "must document the 30s polling interval");
+  assert.match(body, /20-minute/, "must document the 20-minute polling cap");
   assert.match(body, /npm view/, "must confirm the npm-published version via npm view");
 });
 
@@ -169,7 +169,7 @@ test("release SKILL.md documents the publish-workflow-less repo branch", async (
   const { body } = await loadCanonical();
   assert.match(
     body,
-    /publish workflow なし|配布物を持たない/,
+    /without a publish workflow|no npm publish workflow/,
     "must document the no-publish-workflow branch",
   );
   assert.match(body, /tag \/ (GitHub )?Release/, "publish-less branch completes on tag / Release");
@@ -199,7 +199,11 @@ test("release keeps AskUserQuestion in the companion, not the canonical body", a
   assert.match(companionBody, /gate=`?ask`?/, "companion must gate the prompt on ask");
   assert.match(companionBody, /gate=`?proceed`?/, "companion must document the proceed branch");
   // Approval presents the verification summary.
-  assert.match(companionBody, /検証結果サマリ/, "companion must present the verification summary");
+  assert.match(
+    companionBody,
+    /validation result summary/,
+    "companion must present the verification summary",
+  );
 });
 
 // ---------------------------------------------------------------------------

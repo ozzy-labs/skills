@@ -1,5 +1,5 @@
 ---
-description: 失敗した CI run のログを収集してコンテキストを整形し `/drive` へ接続する薄い wrapper。入力解決（明示 run id > 明示 branch の最新 failure > 現在ブランチの最新 failure）→ flaky 判定（`gh run rerun --failed` 1 回 + polling、`--no-rerun` で skip）→ ログ抽出（`gh run view --log-failed`、ANSI 除去 + エラー行抽出 regex は health の same-error 判定と同一）→ 指示テキスト組み立て → `/drive` 起動。`--dry-run` は指示テキストのみ出力（rerun も drive 起動もしない）。main ブランチの failure は優先度高としてレポート冒頭で明示。
+description: A thin wrapper that collects logs from a failed CI run, formats the context, and connects to `/drive`. Input resolution (explicit run id > latest failure on an explicit branch > latest failure on the current branch) → flaky determination (one `gh run rerun --failed` + polling; skipped with `--no-rerun`) → log extraction (`gh run view --log-failed`; the ANSI-stripping + error-line extraction regex is the same as health's same-error determination) → assembling the instruction text → launching `/drive`. `--dry-run` outputs only the instruction text (no rerun, no drive launch). A failure on the main branch is called out as high priority at the top of the report.
 argument-hint: "[<run-id> | --branch <name>] [--no-rerun] [--dry-run] [--auto]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, AskUserQuestion, SlashCommand
@@ -7,54 +7,54 @@ allowed-tools: Bash, Read, AskUserQuestion, SlashCommand
 
 # ci-fix
 
-`.agents/skills/ci-fix/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/ci-fix/SKILL.md` and follow its workflow steps.
 
-**重要:** 入力解決の優先順位 / flaky 判定フロー / エラー抽出 regex は SKILL.md の固定契約。regex は health（`health-check.mjs` の `extractCiErrorKey`）と同一で、テストが一致を強制する。Claude が順序や regex を勝手に変えない。
+**Important:** the input resolution priority / flaky determination flow / error extraction regex are a fixed contract in SKILL.md. The regex is identical to health (`health-check.mjs`'s `extractCiErrorKey`), and tests enforce the match. Claude does not change the order or regex on its own.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### コマンド実行
+### Running commands
 
-`gh` CLI（Bash）で run を解決・再実行・ログ取得する。SKILL.md「入力解決の優先順位」「flaky 判定」「ログ抽出」の順に実行する:
+Use the `gh` CLI (Bash) to resolve, rerun, and fetch logs for the run. Execute in the order of SKILL.md's "Input resolution priority" → "Flaky determination" → "Log extraction":
 
 ```bash
-# 入力解決（明示 run id がなければ branch から最新 failure を引く）
+# Input resolution (if there's no explicit run id, pull the latest failure from the branch)
 gh run list --branch <name> --status failure --limit 1 --json databaseId,workflowName,headBranch,conclusion
 
-# flaky 判定（--no-rerun 指定時は skip）
+# Flaky determination (skipped when --no-rerun is specified)
 gh run rerun <id> --failed
-# 30 秒間隔・上限 15 分で completed を待つ
+# Wait for completed at a 30-second interval, capped at 15 minutes
 gh run view <id> --json status,conclusion
 
-# 再現する失敗のログ抽出
+# Log extraction for a reproducing failure
 gh run view <id> --log-failed | tail -200
 ```
 
-ANSI 除去（`/\[[0-9;]*m/g`）とエラー行抽出（`/(error|Error|failed)[\s:].*$/` の最終マッチ）は SKILL.md の regex に厳密に従う。
+ANSI stripping (`/\[[0-9;]*m/g`) and error-line extraction (the last match of `/(error|Error|failed)[\s:].*$/`) strictly follow the regex in SKILL.md.
 
-### drive 起動前の確認（AskUserQuestion 配線・既定）
+### Confirmation before launching drive (AskUserQuestion wiring, default)
 
-drive 起動は PR 作成という**外部可視アクション**。既定では組み立てた指示テキストを提示し、`AskUserQuestion` で起動可否を確認する（テキストで選択肢を列挙しない）:
+Launching drive is an **externally-visible action** — PR creation. By default, present the assembled instruction text and confirm whether to launch via `AskUserQuestion` (do not enumerate options as text):
 
-1. 整形した指示テキストと、対象 run の要約（workflow / job / step / エラー要約 / main branch failure なら優先度高の明示）を提示する。
-2. `AskUserQuestion` で確認する:
-   - **「drive を起動する」** → `SlashCommand` で `/drive "<指示テキスト>"` を単一モードで起動する。
-   - **「やめる」** → 指示テキストを表示して終了する。
+1. Present the formatted instruction text and a summary of the target run (workflow / job / step / error summary / a high-priority callout if it's a main branch failure).
+2. Confirm via `AskUserQuestion`:
+   - **"Launch drive"** → launch `/drive "<instruction text>"` in single mode via `SlashCommand`.
+   - **"Cancel"** → display the instruction text and end.
 
-### `--auto`（確認 skip）
+### `--auto` (skip confirmation)
 
-`--auto` 指定時は上記 `AskUserQuestion` を**挟まず**、直接 `SlashCommand` で `/drive "<指示テキスト>"` を起動する（外部可視アクションの明示 opt-out）。routine / `/loop` / `schedule` 経由の無人実行を想定する。
+When `--auto` is specified, the above `AskUserQuestion` is **not inserted**, and `/drive "<instruction text>"` is launched directly via `SlashCommand` (an explicit opt-out of the externally-visible action). This is intended for unattended execution via routine / `/loop` / `schedule`.
 
-### `--dry-run`（副作用なし）
+### `--dry-run` (no side effects)
 
-`--dry-run` 指定時は **rerun も drive 起動も行わず**、指示テキストのみを出力して終了する。`AskUserQuestion` も `SlashCommand` も呼ばない。`--dry-run` と他フラグが同時指定された場合も「出力のみ」が優先される。
+When `--dry-run` is specified, **neither the rerun nor the drive launch is performed**; only the instruction text is output before ending. Neither `AskUserQuestion` nor `SlashCommand` is called. Even when `--dry-run` is specified together with other flags, "output only" takes priority.
 
-### flaky / failed-run なしの終了
+### Ending on flaky / no failed run
 
-- flaky（rerun が success）→ 「flaky（修正不要）」と報告して終了。drive は起動しない。
-- failed run なし → 「failed run なし」と報告して終了。
-- polling 上限（15 分）到達 → `要確認`（判定不能）として終了。drive は起動しない。
+- flaky (rerun succeeds) → report "flaky (no fix needed)" and end. drive is not launched.
+- No failed run → report "no failed run" and end.
+- Polling cap (15 minutes) reached → end as `要確認` (undeterminable). drive is not launched.
 
-### 完了報告・次のアクション提案
+### Completion report and next-action suggestions
 
-指示テキストの提示 / 起動した drive / flaky・failed-run なしの報告を表示したら終了する。drive を起動した場合はその報告に委ねる。次のアクション提案は行わない。
+End once the instruction text presentation / launched drive / flaky or no-failed-run report have been displayed. If drive was launched, defer to its own report. Do not suggest next actions.

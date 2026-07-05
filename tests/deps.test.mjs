@@ -201,7 +201,7 @@ test("SKILL.md points at the deps.mjs engine (ADR-0028 R1)", async () => {
 
 test("SKILL.md hardcodes the fixed judgment table (patch/minor->merge, major/red/pending/peer/engines->要確認)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /判定表/, "must have a judgment-table section");
+  assert.match(raw, /Judgment table/i, "must have a judgment-table section");
   assert.match(raw, /patch/, "table names patch");
   assert.match(raw, /minor/, "table names minor");
   assert.match(raw, /major/, "table names major");
@@ -211,13 +211,13 @@ test("SKILL.md hardcodes the fixed judgment table (patch/minor->merge, major/red
   assert.match(raw, /peer/, "peer dependency change documented");
   assert.match(raw, /engines/, "engines change documented");
   assert.match(raw, /lockfile/i, "lockfile integrity documented");
-  assert.match(raw, /最大 bump|最大の bump|max bump/i, "grouped = max bump documented");
+  assert.match(raw, /max(?:imum)? bump/i, "grouped = max bump documented");
 });
 
 test("SKILL.md documents the release-please exclusion (/release's responsibility)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
   assert.match(raw, /release-please/, "must name release-please");
-  assert.match(raw, /除外/, "must state it is excluded");
+  assert.match(raw, /excluded|exclusion/i, "must state it is excluded");
   assert.match(raw, /\/release/, "must attribute release PRs to /release");
 });
 
@@ -225,7 +225,11 @@ test("SKILL.md documents the --dry-run precedence over --auto (misapplication pr
   const raw = await readFile(SKILL_MD, "utf8");
   assert.match(raw, /--dry-run/, "must document --dry-run");
   assert.match(raw, /--auto/, "must document --auto");
-  assert.match(raw, /--dry-run.*優先|--dry-run.*先|優先.*--dry-run/, "must state --dry-run wins");
+  assert.match(
+    raw,
+    /--dry-run.*(?:takes priority|wins|priority)|priority.*--dry-run/i,
+    "must state --dry-run wins",
+  );
 });
 
 test("SKILL.md classes merge as irreversible and references the policy substrate (R3), --auto = override", async () => {
@@ -265,7 +269,7 @@ test("companion wires AskUserQuestion merge confirm + skips it under --auto", as
   assert.match(raw, /--action=merge/, "companion must name the merge policy action");
   assert.match(
     raw,
-    /--auto.*AskUserQuestion.*挟まない|AskUserQuestion.*挟まない|--auto.*(skip|スキップ|挟ま)/,
+    /--auto.*AskUserQuestion.*not inserted|AskUserQuestion is not inserted|--auto.*(?:skip|not inserted)/i,
     "companion must skip AskUserQuestion under --auto",
   );
 });

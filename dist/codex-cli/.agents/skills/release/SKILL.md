@@ -1,183 +1,183 @@
 ---
 name: release
-description: release-please PR を検出（`gh pr list --author app/release-please --state open`）し、固定チェックリスト（version bump と含有 commit type の SemVer 整合 feat→minor / fix→patch / `!` or BREAKING CHANGE→major、CHANGELOG 整合、CI 全 green）で検証してから、既定は承認ゲート（外部可視・実質不可逆）を通して `gh pr merge --squash` する。マージ後は publish workflow を polling（30s 間隔・上限 20 分）で監視し `npm view <pkg> version` で反映確認する（npm 配布リポのみ）。`--auto` は全検証 pass 時のみゲートを skip（fail 時は停止）。npm publish は OIDC Trusted Publishers 前提（`NPM_TOKEN` 不使用）。
+description: Detects release-please PRs (`gh pr list --author app/release-please --state open`), validates them against a fixed checklist (SemVer consistency between version bump and included commit types — feat→minor / fix→patch / `!` or BREAKING CHANGE→major —, CHANGELOG consistency, CI all green), then merges via `gh pr merge --squash` through an approval gate by default (externally visible / effectively irreversible). After merging, it monitors the publish workflow via polling (30s interval, 20-minute cap) and confirms rollout with `npm view <pkg> version` (npm-distributed repos only). `--auto` skips the gate only when all validations pass (stops if any fail). npm publish assumes OIDC Trusted Publishers (no `NPM_TOKEN` used).
 ---
 
-# release - release-please PR の検証 → ゲート付きマージ → publish 監視
+# release - Validate release-please PR → gated merge → publish monitoring
 
-merged 以降〜配布（release-please PR の処理、npm OIDC publish の監視）は skill 化されておらず、リリース時だけ手作業に戻っていた。health の draft release `要対応`（領域 14）を閉じる経路もなかった。本スキルはその一連を一本化する: release-please PR を検出し、固定チェックリストで検証し、**既定は承認ゲート**を通してマージし、publish workflow を監視して npm への反映まで見届ける。
+The stage from merged onward to distribution (handling release-please PRs, monitoring npm OIDC publish) had not been turned into a skill, so it reverted to manual work every time at release. There was also no path to close health's draft release `要対応` (area 14). This skill unifies that whole sequence: it detects release-please PRs, validates them against a fixed checklist, merges them through an **approval gate by default**, and monitors the publish workflow through to confirming the npm rollout.
 
-リリースは **外部可視かつ実質不可逆**（公開済みバージョンは撤回できない）なので、判定は固定チェックリスト（決定論）に閉じ、Claude が「良さそう」で勝手にマージしない。承認ゲートは中央 autonomy policy（`policy` skill の `irreversible` gate）に従う。
+Releases are **externally visible and effectively irreversible** (a published version cannot be withdrawn), so the judgment is confined to a fixed checklist (deterministic) — Claude does not merge on its own just because it "looks good". The approval gate follows the central autonomy policy (the `policy` skill's `irreversible` gate).
 
-**スコープ**: 単一リポジトリの release-please PR の検証・マージ・publish 監視。automation dependency PR（renovate / dependabot）は `/deps` の責務、release-please 以外の PR は対象外。cross-repo は将来検討。
+**Scope**: Validating, merging, and monitoring publish for release-please PRs in a single repository. automation dependency PRs (renovate / dependabot) are the responsibility of `/deps`; PRs other than release-please are out of scope. cross-repo is a future consideration.
 
-## 入力
+## Input
 
 ```text
 release
-  --repo owner/repo   (省略時は cwd の origin から解決)
-  --auto              (全検証 pass 時のみ承認ゲートを skip。検証 fail 時は --auto でも停止)
+  --repo owner/repo   (resolved from cwd's origin if omitted)
+  --auto              (skips the approval gate only when all validations pass. Even with --auto, stops when validation fails)
 ```
 
-- `--auto` は routine / `/loop` / `schedule` 連携用の opt-in。無人実行では対話できないため、**固定チェックリスト**（下記）と policy gate が唯一の境界になる。
-- `--auto` を付けても **検証が 1 つでも fail したらマージしない**（後述「承認ゲート」）。リリースは不可逆なので、`--auto` は「人の確認を省く」だけで「検証を省く」ものではない。
+- `--auto` is an opt-in for routine / `/loop` / `schedule` integration. Since unattended runs can't be interactive, the **fixed checklist** (below) and the policy gate are the only boundary.
+- Even with `--auto`, **if even one validation fails, it will not merge** (see "Approval gate" below). Since releases are irreversible, `--auto` only "skips human confirmation" — it does not "skip validation".
 
-## 手順
+## Procedure
 
-### 1. 検出
+### 1. Detection
 
 ```bash
 gh pr list --author app/release-please --state open --json number,title,url,headRefName
 ```
 
-- **0 件の場合**: 「リリース対象なし」と提示し、あわせて **draft release の有無を併記**して終了する（health 領域 14 相当の可視化）:
+- **If 0 results**: present "No releases pending" and also **note whether any draft release exists** (equivalent to visualizing health area 14):
 
   ```bash
-  gh release list --limit 10   # draft 列が true のものを併記
+  gh release list --limit 10   # note any entries where the draft column is true
   ```
 
-  draft release が残っていれば「未 publish の draft release があります」と案内する（release-please PR が無いのに draft がある場合は手動 release / workflow 失敗の可能性）。
+  If a draft release remains, report "There is an unpublished draft release" (if there's a draft but no release-please PR, this may indicate a manual release or a workflow failure).
 
-- **1 件以上**: 各 PR について 2. の検証に進む。通常 release-please PR は 1 リポにつき 1 本。複数あれば 1 本ずつ扱う。
-- **フォールバック**: `app/release-please` author で 0 件だが、`github-actions[bot]` が release-please-action を代理投稿している構成もある。その場合はタイトル（`chore(main): release <version>` 等）と `changelog-path` の差分で release-please PR かを確認する。
+- **If 1 or more**: proceed to the validation in step 2 for each PR. Normally there is one release-please PR per repo. If there are multiple, handle them one at a time.
+- **Fallback**: There are also configurations where, with 0 results for `app/release-please` as author, `github-actions[bot]` posts on behalf of the release-please-action. In that case, check whether it's a release-please PR by the title (e.g. `chore(main): release <version>`) and the `changelog-path` diff.
 
-### 2. 検証チェックリスト（固定・決定論）
+### 2. Validation checklist (fixed, deterministic)
 
-下表を**全項目**確認する。1 つでも fail なら「検証 fail」としてマージに進まず、失敗項目を提示して停止する（`--auto` でも停止）。
+Check **every item** in the table below. If even one fails, treat it as "validation failed", do not proceed to merge, and present the failing item(s) and stop (stops even with `--auto`).
 
-| # | 項目 | 合格条件 |
+| # | Item | Pass condition |
 | --- | --- | --- |
-| 1 | **SemVer 整合** | PR の version bump が、含有 commit type から導かれる期待 bump と一致（下記「SemVer 整合規則」） |
-| 2 | **CHANGELOG 整合** | CHANGELOG エントリが含有 commit を過不足なく反映（追加 commit が漏れていない／存在しない項目が無い） |
-| 3 | **CI 全 green** | PR の全 check が green（`gh pr checks <N>`。fail / cancel → red、running / queued → pending。いずれも fail 扱い） |
+| 1 | **SemVer consistency** | The PR's version bump matches the expected bump derived from the included commit types (see "SemVer consistency rules" below) |
+| 2 | **CHANGELOG consistency** | The CHANGELOG entry reflects the included commits without excess or omission (no added commits are missing / no nonexistent entries) |
+| 3 | **CI all green** | All checks on the PR are green (`gh pr checks <N>`. fail / cancel → red, running / queued → pending. Either is treated as a failure) |
 
-材料の取り方:
+How to obtain the material:
 
-- **含有 commit**: `gh pr view <N> --json commits`、または `git log origin/main..<headRefName>`。各 commit の Conventional Commits type（`feat` / `fix` / `perf` / …）と `!` / body の `BREAKING CHANGE` を抽出する。
-- **version bump**: PR タイトル（`chore(main): release <version>`）と `.release-please-manifest.json` の from→to、`package.json` の version diff から確定する。
-- **CHANGELOG**: PR の `CHANGELOG.md` diff に、含有 commit（release をトリガする type）が過不足なく載っているかを突き合わせる。
-- **CI**: `gh pr checks <N>`。1 つでも green 以外なら fail。
+- **Included commits**: `gh pr view <N> --json commits`, or `git log origin/main..<headRefName>`. Extract each commit's Conventional Commits type (`feat` / `fix` / `perf` / …) and any `!` / `BREAKING CHANGE` in the body.
+- **Version bump**: Determine from the PR title (`chore(main): release <version>`), the from→to in `.release-please-manifest.json`, and the version diff in `package.json`.
+- **CHANGELOG**: Cross-check the PR's `CHANGELOG.md` diff against the included commits (of types that trigger a release) for excess or omission.
+- **CI**: `gh pr checks <N>`. If even one is not green, it's a failure.
 
-#### SemVer 整合規則（fixture 化可能な決定論規則）
+#### SemVer consistency rules (deterministic rules that can be turned into fixtures)
 
-含有 commit の type 集合から**期待 bump** を次の優先順（major > minor > patch > none）で決める:
+Determine the **expected bump** from the set of included commit types, in the following priority order (major > minor > patch > none):
 
-| 含有 commit の条件 | 期待 bump |
+| Condition of included commits | Expected bump |
 | --- | --- |
-| いずれかに `!`（例 `feat!:`）または body に `BREAKING CHANGE` | **major** |
-| （breaking 無し）いずれかに `feat` | **minor** |
-| （breaking / feat 無し）いずれかに `fix` または `perf` | **patch** |
-| release をトリガする type が 1 つも無い（`docs` / `chore` / `refactor` / `test` / `style` / `ci` / `build` のみ） | **none**（release PR 自体が立たない） |
+| Any has `!` (e.g. `feat!:`) or `BREAKING CHANGE` in the body | **major** |
+| (no breaking) any has `feat` | **minor** |
+| (no breaking / feat) any has `fix` or `perf` | **patch** |
+| No type that triggers a release exists at all (only `docs` / `chore` / `refactor` / `test` / `style` / `ci` / `build`) | **none** (no release PR is raised at all) |
 
-この規則は決定論であり、`tests/release.test.mjs` が fixture（commit type リスト → 期待 bump、`!` / BREAKING CHANGE 含む）で再実装して固定する。規則を増減する場合は本表と test を同時改訂する（Claude の自由判断で条件を足さない）。
+This rule is deterministic, and `tests/release.test.mjs` reimplements and pins it with fixtures (commit type list → expected bump, including `!` / BREAKING CHANGE). If the rules are added to or reduced, revise this table and the test together (do not add conditions on Claude's own judgment).
 
-> **pre-1.0 の注意（この repo 固有）:** release-please-config.json に `bump-minor-pre-major: true` / `bump-patch-for-minor-pre-major: true` が設定された 0.x パッケージでは、`0.y.z` の間だけ breaking→minor / feat→patch に**降格**される（1.0.0 未満は破壊的変更を minor で扱う SemVer 慣行）。検証時は対象パッケージの現行 major が 0 かを確認し、0 なら降格後の期待 bump と突き合わせる。上表の標準規則は major ≥ 1 に適用する。
+> **Note on pre-1.0 (specific to this repo):** For 0.x packages where `release-please-config.json` sets `bump-minor-pre-major: true` / `bump-patch-for-minor-pre-major: true`, breaking→minor / feat→patch is **downgraded** while at `0.y.z` (the SemVer convention of treating breaking changes as minor before 1.0.0). When validating, check whether the target package's current major is 0, and if so, cross-check against the downgraded expected bump. The standard rules in the table above apply to major ≥ 1.
 
-### 3. 承認ゲート（中央 autonomy policy に従う）
+### 3. Approval gate (follows the central autonomy policy)
 
-`gh pr merge --squash` は **不可逆アクション**（irreversible）。個別ゲートを prose にハードコードせず、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙の SSOT）に従う。分類とゼロコンフィグ既定:
+`gh pr merge --squash` is an **irreversible action**. Rather than hardcoding an individual gate in prose, it follows the central autonomy policy (the SSOT of the 3 classes / gate vocabulary defined by the `policy` skill). Classification and zero-config default:
 
-| 本 skill のアクション | クラス | policy 参照 | ゼロコンフィグ既定 gate |
+| This skill's action | Class | policy reference | Zero-config default gate |
 | --- | --- | --- | --- |
-| release PR merge（`gh pr merge --squash`） | `irreversible` | `--action=merge` | `ask`（承認 Gate を維持） |
+| release PR merge (`gh pr merge --squash`) | `irreversible` | `--action=merge` | `ask` (maintain the approval gate) |
 
-有効 gate は sibling の `policy` skill の `policy-read.mjs` で引く（user-scope では `~/.claude/skills/policy/policy-read.mjs`、dogfood は `<repo>/.claude/skills/policy/policy-read.mjs`、Codex/Gemini は `~/.agents/skills/policy/policy-read.mjs`）:
+The effective gate is looked up via the sibling `policy` skill's `policy-read.mjs` (user-scope: `~/.claude/skills/policy/policy-read.mjs`, dogfood: `<repo>/.claude/skills/policy/policy-read.mjs`, Codex/Gemini: `~/.agents/skills/policy/policy-read.mjs`):
 
 ```bash
-node <policy skill のディレクトリ>/policy-read.mjs --action=merge --repo-root="$PWD"
-# => .resolved.gate（既定 ask）
+node <policy skill directory>/policy-read.mjs --action=merge --repo-root="$PWD"
+# => .resolved.gate (default ask)
 ```
 
-検証結果と `--auto` の組み合わせで挙動が決まる:
+The behavior is determined by the combination of the validation result and `--auto`:
 
-- **検証 fail（1 項目でも）**: マージしない。失敗項目を提示して停止する。`--auto` でも同じ（リリースは不可逆のため検証は省略不可）。
-- **全検証 pass + `--auto` 未指定**（既定）: 検証結果サマリ（version / 主要変更 / チェックリストの pass 状況）を提示し、policy gate に従う:
-  - gate=`ask`（ゼロコンフィグ既定）: 承認を求め、承認された場合のみ `gh pr merge <N> --squash` を実行する。
-  - gate=`batch-confirm`: サマリを 1 回提示して一括確認 → 承認で merge。
-  - gate=`proceed`: 確認なしで merge。
-- **全検証 pass + `--auto` 指定**: **承認ゲートを skip** して `gh pr merge <N> --squash` を直列実行する（irreversible gate の明示 opt-out）。
+- **Validation failed (even one item)**: does not merge. Presents the failing item(s) and stops. Same with `--auto` (since releases are irreversible, validation cannot be skipped).
+- **All validations pass + `--auto` not specified** (default): presents a validation result summary (version / key changes / checklist pass status) and follows the policy gate:
+  - gate=`ask` (zero-config default): requests approval, and only executes `gh pr merge <N> --squash` if approved.
+  - gate=`batch-confirm`: presents the summary once for a single batch confirmation → merge on approval.
+  - gate=`proceed`: merges without confirmation.
+- **All validations pass + `--auto` specified**: **skips the approval gate** and executes `gh pr merge <N> --squash` directly (explicit opt-out of the irreversible gate).
 
-**policy 不在でも壊れない:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は厳しい側（`ask`）へ倒す。`policy` skill 未配置の環境では上表のゼロコンフィグ既定 gate（`irreversible`=`ask`）を直接適用する。
+**Does not break even without policy present:** `policy-read.mjs` is fail-safe by design — if it can't be read, or the value is invalid, it defaults to the stricter side (`ask`). In environments where the `policy` skill is not installed, apply the zero-config default gate in the table above directly (`irreversible`=`ask`).
 
-### 4. publish workflow の監視
+### 4. Monitoring the publish workflow
 
-マージ後、対応する release workflow run を特定して polling する（**npm 配布リポのみ**。publish workflow が無いリポは 6. へ）:
+After merging, identify and poll the corresponding release workflow run (**npm-distributed repos only**. For repos without a publish workflow, go to step 6):
 
 ```bash
-# merge 後に発火した release workflow run を特定（例: name=Release）
+# Identify the release workflow run triggered after the merge (e.g. name=Release)
 gh run list --workflow release.yaml --branch main --limit 5 --json databaseId,status,conclusion,headSha,createdAt
 
-# 特定した run を green（success）まで polling
+# Poll the identified run until it's green (success)
 gh run view <run-id> --json status,conclusion,jobs
 ```
 
-- **polling 間隔 30 秒・上限 20 分**（最大 40 回）。上限到達時は「workflow 監視タイムアウト」として run の URL を提示し、後続の手動確認を促す。
-- workflow が `success` になったら `npm view <pkg> version` で npm への反映を確認する（`<pkg>` は `package.json` の `name`。例 `npm view @ozzylabs/skills version`）。PR の version と一致すれば **配布完了**。
-- workflow が `failure` になったら 5. の失敗案内に進む。
+- **30-second polling interval, 20-minute cap** (max 40 iterations). If the cap is reached, present it as a "workflow monitoring timeout" with the run URL and prompt for a subsequent manual check.
+- Once the workflow becomes `success`, confirm the rollout to npm with `npm view <pkg> version` (`<pkg>` is the `name` in `package.json`, e.g. `npm view @ozzylabs/skills version`). If it matches the PR's version, **distribution is complete**.
+- If the workflow becomes `failure`, proceed to the failure guidance in step 5.
 
-このリポの publish は OIDC Trusted Publishers（`release.yaml` の `publish` job が `needs: release-please` + `if: release_created` でゲートされ、`npm publish --provenance --access public` で発行）。詳細は「前提」節を参照。
+Publishing for this repo is via OIDC Trusted Publishers (the `publish` job in `release.yaml` is gated by `needs: release-please` + `if: release_created`, and issued via `npm publish --provenance --access public`). See the "Prerequisites" section for details.
 
-### 5. 失敗時の案内
+### 5. Guidance on failure
 
-publish workflow が `failure` の場合、失敗ログを要約して原因を案内する（自動修正はスコープ外）:
+If the publish workflow is `failure`, summarize the failure log and give guidance on the cause (automatic fixing is out of scope):
 
 ```bash
-gh run view <run-id> --log-failed   # 失敗 step のログのみ取得して要約
+gh run view <run-id> --log-failed   # fetch and summarize only the log of the failed step
 ```
 
-よくある原因（OIDC Trusted Publishers 文脈）:
+Common causes (in the OIDC Trusted Publishers context):
 
-| 症状 | 原因 | 対処の案内 |
+| Symptom | Cause | Guidance |
 | --- | --- | --- |
-| `403 Forbidden — you don't have permission` | **Trusted Publisher 未登録** / workflow filename・repo 名の不一致 | npmjs.com の Settings → Publishing を確認 |
-| `OIDC token not available` | workflow / job の **`permissions: id-token: write` 不足** | permissions を追加 |
-| provenance が付かない | private repo からの publish / CircleCI（provenance 未対応） | GitHub-hosted runner + public repo を確認 |
-| npm CLI が古い | npm CLI v11.5.1 未満 / Node 22.14 未満 | `npm install -g npm@latest` を確認 |
+| `403 Forbidden — you don't have permission` | **Trusted Publisher not registered** / mismatch of workflow filename / repo name | Check Settings → Publishing on npmjs.com |
+| `OIDC token not available` | **`permissions: id-token: write` missing** on the workflow / job | Add the permissions |
+| provenance is not attached | publish from a private repo / CircleCI (provenance unsupported) | Check for a GitHub-hosted runner + public repo |
+| npm CLI is outdated | npm CLI below v11.5.1 / Node below 22.14 | Check `npm install -g npm@latest` |
 
-自動修正は本スキルのスコープ外。CI の再実行・修正が要る場合は `/ci-fix` 等に接続できる旨を案内する。
+Automatic fixing is out of scope for this skill. If a CI rerun or fix is needed, note that it can be connected to `/ci-fix` etc.
 
-### 6. publish workflow なしリポの分岐
+### 6. Branch for repos without a publish workflow
 
-配布物を持たない（npm publish workflow が無い）リポでは、**マージ + tag / GitHub Release の確認**で完了とする:
+For repos that don't have a distributed artifact (no npm publish workflow), completion is defined as **merge + confirming the tag / GitHub Release**:
 
 ```bash
-gh release list --limit 5     # release-please が作成した Release / tag を確認
+gh release list --limit 5     # check the Release / tag created by release-please
 ```
 
-release-please のマージで tag と GitHub Release が作成されていれば完了。npm 反映確認（4. の `npm view`）は行わない。
+If the tag and GitHub Release were created by the release-please merge, it's complete. Do not perform the npm rollout confirmation (the `npm view` in step 4).
 
-## 前提: npm publish は OIDC Trusted Publishers
+## Prerequisites: npm publish uses OIDC Trusted Publishers
 
-- npm publish は **OIDC Trusted Publishers** を使う（knowledge `standards/npm-trusted-publishers` の方針）。長寿命の **`NPM_TOKEN` は使わない**（漏洩リスク・ローテーション負担のため）。
-- publish workflow は `permissions: id-token: write` を持ち、`--provenance` で attestation を自動付与する（`npm view <pkg> dist.attestations` で確認可能）。
-- **private repo からの publish は public パッケージでも provenance が付かない**（source link 秘匿のため）点に注意。
+- npm publish uses **OIDC Trusted Publishers** (per the policy in knowledge `standards/npm-trusted-publishers`). It **does not use** a long-lived **`NPM_TOKEN`** (due to leak risk and rotation burden).
+- The publish workflow has `permissions: id-token: write` and automatically attaches attestation via `--provenance` (verifiable with `npm view <pkg> dist.attestations`).
+- Note that **publishing from a private repo does not attach provenance even for a public package** (to keep the source link private).
 
-## エラーハンドリング
+## Error handling
 
-| 状況 | 動作 |
+| Situation | Behavior |
 | --- | --- |
-| `--repo` 未指定で GitHub remote 不在 | エラーを提示し `--repo owner/repo` の明示を促す。マージしない |
-| `gh` 未認証 / rate limit / network | エラーを提示して中断（マージ・publish 監視に進まない） |
-| release-please PR 0 件 | 「リリース対象なし」+ draft release 有無を併記して終了 |
-| 検証 fail（SemVer / CHANGELOG / CI のいずれか） | 失敗項目を提示して停止（マージしない）。`--auto` でも停止 |
-| merge 失敗（branch protection 等） | 失敗を提示。手動マージを促す |
-| publish workflow タイムアウト（20 分） | run URL を提示し手動確認を促す |
-| publish workflow failure | `gh run view --log-failed` の要約 + よくある原因を案内 |
+| `--repo` not specified and no GitHub remote | Present an error and prompt to specify `--repo owner/repo` explicitly. Does not merge |
+| `gh` not authenticated / rate limit / network | Present an error and abort (does not proceed to merge or publish monitoring) |
+| 0 release-please PRs | End with "No releases pending" + noting whether a draft release exists |
+| Validation failed (any of SemVer / CHANGELOG / CI) | Present the failing item(s) and stop (does not merge). Stops even with `--auto` |
+| Merge failure (branch protection, etc.) | Present the failure. Prompt for manual merge |
+| Publish workflow timeout (20 min) | Present the run URL and prompt for manual confirmation |
+| Publish workflow failure | Summary of `gh run view --log-failed` + guidance on common causes |
 
-## スコープ外
+## Out of scope
 
-| 項目 | 除外理由 |
+| Item | Reason for exclusion |
 | --- | --- |
-| 1. automation dependency PR（renovate / dependabot） | `/deps` の責務。本スキルは release-please PR のみ |
-| 2. 判定条件の自由化 | 検証は固定チェックリストのみ。LLM の自由判断でマージ可否を決めない（再現性・リリースの不可逆性のため） |
-| 3. publish 失敗の自動修正 | ログ要約 + 原因案内まで。修正は `/ci-fix` 等に接続 |
-| 4. cross-repo release | 現時点では単一リポのみ |
-| 5. release-please PR 自体の生成 | release-please-action（CI）の責務。本スキルは生成された PR の検証・マージ・監視のみ |
+| 1. automation dependency PRs (renovate / dependabot) | Responsibility of `/deps`. This skill handles only release-please PRs |
+| 2. Loosening the judgment criteria | Validation is only the fixed checklist. Does not decide mergeability by the LLM's free judgment (for reproducibility and the irreversibility of releases) |
+| 3. Automatic fixing of publish failures | Only up through log summary + cause guidance. Fixing is connected to `/ci-fix` etc. |
+| 4. cross-repo release | Currently single-repo only |
+| 5. Generation of the release-please PR itself | Responsibility of release-please-action (CI). This skill only validates, merges, and monitors the generated PR |
 
-## 注意事項
+## Notes
 
-- `.env` ファイルは読み取り・ステージングしない。
-- リリースは外部可視・実質不可逆。既定は承認ゲート（`irreversible`=`ask`）を維持する。`--auto` は明示 opt-out だが、**検証 fail 時は `--auto` でも停止**する。
-- 検証は固定チェックリスト（SemVer 整合 / CHANGELOG / CI green）でのみ判定する。Claude は再判定しない（迷ったら停止）。
-- npm publish は OIDC Trusted Publishers（`NPM_TOKEN` 不使用）。
-- 新規 runtime 依存は追加しない（Node stdlib + `gh` / `git` / `npm` のみ）。
+- Do not read or stage `.env` files.
+- Releases are externally visible and effectively irreversible. Maintain the approval gate by default (`irreversible`=`ask`). `--auto` is an explicit opt-out, but **even with `--auto`, it stops when validation fails**.
+- Validation is judged only by the fixed checklist (SemVer consistency / CHANGELOG / CI green). Claude does not re-judge (when in doubt, stop).
+- npm publish uses OIDC Trusted Publishers (no `NPM_TOKEN` used).
+- Do not add new runtime dependencies (Node stdlib + `gh` / `git` / `npm` only).

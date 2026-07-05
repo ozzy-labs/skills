@@ -72,16 +72,16 @@ test("lessons-triage canonical SKILL.md keeps the workflow skeleton in order", a
   const { body } = await loadCanonical();
 
   const expectedSections = [
-    "前提と原則",
-    "アクション分類と policy 参照",
-    "入力",
-    "未処理セッションの特定",
-    "プレフィルタ",
-    "教訓抽出",
-    "HITL 承認と issue 起票",
-    "処理済み記録",
-    "完了報告",
-    "注意事項",
+    "Premises and principles",
+    "Action classification and policy reference",
+    "## Input",
+    "Identify unprocessed sessions",
+    "Prefilter",
+    "Lesson extraction",
+    "HITL approval and issue filing",
+    "Recording as processed",
+    "Completion report",
+    "## Notes",
   ];
 
   let cursor = 0;
@@ -94,10 +94,10 @@ test("lessons-triage canonical SKILL.md keeps the workflow skeleton in order", a
 
 test("lessons-triage canonical SKILL.md documents the HITL contract", async () => {
   const { body } = await loadCanonical();
-  assert.match(body, /auto-apply 経路なし/, "no-auto-apply contract must be documented");
+  assert.match(body, /No auto-apply path/, "no-auto-apply contract must be documented");
   assert.match(
     body,
-    /issue 起票以外の外部反映を行わない/,
+    /No external reflection other than filing issues/,
     "issue filing must be declared as the only external output",
   );
 });
@@ -109,18 +109,22 @@ test("lessons-triage canonical SKILL.md references the central policy (not a har
   assert.match(body, /externally-visible/, "issue filing must be classed as externally-visible");
   assert.match(body, /batch-confirm/, "zero-config gate for issue filing must be batch-confirm");
   assert.match(body, /policy-read\.mjs/, "must point at the policy read substrate");
-  assert.match(body, /一括確認/, "batch confirmation of extracted lessons must be documented");
+  assert.match(
+    body,
+    /batch confirmation/,
+    "batch confirmation of extracted lessons must be documented",
+  );
   // Negative assertions: the old per-item-default prose must be gone (superseded
-  // by the batch-confirm gate). The word "1 件ずつ" may still appear only as the
+  // by the batch-confirm gate). "per-lesson approval" may still appear only as the
   // strict `ask` fallback, but the old default sentences must not.
   assert.doesNotMatch(
     body,
-    /抽出した教訓を 1 件ずつユーザーに提示し/,
+    /present the extracted lessons to the user one by one/i,
     "old per-item default approval prose must be removed",
   );
   assert.doesNotMatch(
     body,
-    /issue 起票は 1 件ずつユーザー承認を得てから行う/,
+    /issue filing happens only after obtaining per-lesson user approval/i,
     "old per-item auto-apply principle prose must be removed",
   );
 });
@@ -129,13 +133,17 @@ test("lessons-triage canonical SKILL.md documents the privacy contract", async (
   const { body } = await loadCanonical();
   assert.match(
     body,
-    /transcript の内容を外部 CLI \/ 外部サービスへ渡さない/,
+    /Never pass transcript content to an external CLI \/ external service/,
     "external delegation ban must be documented",
   );
-  assert.match(body, /gemini-delegate 等への委譲は禁止/, "gemini-delegate must be named");
   assert.match(
     body,
-    /逐語引用・機密情報（トークン、内部パス、private リポの内容等）を含めない/,
+    /Delegation to things like gemini-delegate is prohibited/,
+    "gemini-delegate must be named",
+  );
+  assert.match(
+    body,
+    /Do not include verbatim transcript quotes or sensitive information \(tokens, internal paths, private repo content, etc\.\) in the issue body/,
     "issue-body privacy rule must be documented",
   );
 });
@@ -149,17 +157,17 @@ test("lessons-triage canonical SKILL.md documents the metrics-primed reflection 
   // The filed issue is a backlog pointer, not a fix carrier, and cites the rollup.
   assert.match(
     body,
-    /backlog ポインタ/,
+    /backlog pointer/,
     "issue must be framed as a backlog pointer (priority index), not a fix carrier",
   );
   assert.match(
     body,
-    /定量ベースライン/,
+    /Quantitative baseline/,
     "issue-body template must include the rollup as quantitative evidence",
   );
   assert.match(
     body,
-    /診断・修正は transcript のあるローカルで行い/,
+    /diagnosis and fixing happen locally, where the transcript is/,
     "diagnosis/fix must be deferred to the local transcript, not carried in the issue",
   );
 });
@@ -170,12 +178,12 @@ test("lessons-triage canonical SKILL.md keeps rollup quotes free of verbatim log
   // transcript / payload / secret / raw identifiers may leak through a quote.
   assert.match(
     body,
-    /rollup 引用にも逐語トランスクリプト・payload・secret・raw repo 名\/cwd\/PR 生値を含めない/,
+    /Rollup citations must also not include verbatim transcripts, payloads, secrets, or raw repo names\/cwd\/PR values/,
     "rollup-quote privacy rule must be documented",
   );
   assert.match(
     body,
-    /rollup を引用する場合も \*\*metadata（件数・window）のみ\*\*/,
+    /citing the rollup, include \*\*metadata only \(counts, window\)\*\*/,
     "issue-body rule must restrict rollup quotes to metadata only",
   );
 });
@@ -189,17 +197,25 @@ test("lessons-triage canonical SKILL.md documents the auto-ok label convention +
   assert.match(body, /consume/, "reflect → consume framing must be documented");
 
   // HATL: auto-ok is human-only and this skill must NOT apply it (no auto path).
-  assert.match(body, /人間のみが付与/, "auto-ok must be documented as human-only to apply");
   assert.match(
     body,
-    /起票時に .*を付けない/,
+    /applied only by a human/,
+    "auto-ok must be documented as human-only to apply",
+  );
+  assert.match(
+    body,
+    /does not attach `auto-ok` when filing/,
     "the skill must be documented as never applying auto-ok itself",
   );
 
   // The two human boundary conditions (HATL): filing approval + label.
   assert.match(body, /HATL/, "the HATL boundary must be named");
-  assert.match(body, /起票承認/, "boundary 1 (issue-filing approval) must be documented");
-  assert.match(body, /ラベル付与/, "boundary 2 (auto-ok label application) must be documented");
+  assert.match(body, /Filing approval/, "boundary 1 (issue-filing approval) must be documented");
+  assert.match(
+    body,
+    /Attaching the `auto-ok` label/,
+    "boundary 2 (auto-ok label application) must be documented",
+  );
 });
 
 test("lessons-triage canonical SKILL.md documents reflection as opt-in HITL", async () => {
@@ -208,7 +224,7 @@ test("lessons-triage canonical SKILL.md documents reflection as opt-in HITL", as
   // aggregation/prioritization may be automatic but issue-filing is not.
   assert.match(
     body,
-    /反映（送信）は常に明示 opt-in・HITL/,
+    /Reflection \(sending\) is always explicit opt-in \/ HITL/,
     "reflection (sending) must be documented as always opt-in HITL",
   );
 });
@@ -226,7 +242,11 @@ test("lessons-triage canonical SKILL.md matches the lesson-capture.sh queue cont
   }
 
   // Append-only semantics protect against producer/consumer races.
-  assert.match(body, /queue 自体は書き換えない/, "append-only queue contract must be documented");
+  assert.match(
+    body,
+    /The queue itself is never rewritten/,
+    "append-only queue contract must be documented",
+  );
 });
 
 test("lessons-triage canonical SKILL.md documents every processed outcome", async () => {
@@ -258,7 +278,7 @@ test("lessons-triage keeps Claude-Code-only behaviors in the companion", async (
   );
   assert.match(
     companionBody,
-    /SessionEnd 未発火のため queue に存在しない/,
+    /hasn't fired SessionEnd yet, it doesn't exist in the queue/,
     "companion must explain why the live session never appears in the queue",
   );
   // batch-confirm gate: the companion must use a single multiSelect round.

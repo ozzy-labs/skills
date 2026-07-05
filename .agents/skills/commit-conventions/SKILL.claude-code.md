@@ -4,4 +4,4 @@ user-invocable: false
 
 # commit-conventions
 
-`.agents/skills/commit-conventions/SKILL.md` を Read し、その内容に従う。
+Read `.agents/skills/commit-conventions/SKILL.md` and follow its contents.

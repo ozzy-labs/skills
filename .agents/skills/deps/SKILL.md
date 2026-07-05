@@ -1,123 +1,123 @@
 ---
 name: deps
-description: renovate / dependabot 等の automation PR を `deps.mjs` エンジンで列挙し、semver 区分（PR タイトル / branch / manifest diff、grouped は最大 bump）・CI 状態・lockfile 整合・peer / engines 変更で固定語彙判定する。patch/minor + CI green + lockfile 整合 → auto-merge 候補、major / CI red / pending / peer / engines → 要確認。author 判定は health 領域 15 と同一（`*[bot]` / `app/*`、release-please は除外＝ /release の責務）。`--dry-run` は判定のみ、`--auto` は確認なし実行。merge は中央 autonomy policy の irreversible gate に従う（`--auto` は policy 上書き）。
+description: Enumerates automation PRs (renovate / dependabot etc.) with the `deps.mjs` engine and makes fixed-vocabulary judgments based on semver classification (from PR title / branch / manifest diff; grouped PRs use the maximum bump), CI status, lockfile consistency, and peer / engines changes. patch/minor + CI green + lockfile consistent → auto-merge candidate; major / CI red / pending / peer / engines → 要確認. Author judgment uses the same pattern as health area 15 (`*[bot]` / `app/*`; release-please is excluded — that's `/release`'s responsibility). `--dry-run` judges only; `--auto` executes without confirmation. Merging follows the central autonomy policy's irreversible gate (`--auto` overrides the policy).
 ---
 
-# deps - automation PR の policy-based triage
+# deps - Policy-based triage for automation PRs
 
-renovate / dependabot 等の automation PR は、health（領域 15）が `要対応` として積むだけで、処理は毎回人手だった。定常的 HITL の最大源泉の一つで、semver 区分 + CI 状態で機械判定できる。本スキルはその triage を一本化する: automation PR を列挙し、固定語彙で `auto-merge 候補` / `要確認` に分類し、policy に従って merge する。
+Automation PRs such as renovate / dependabot were merely piled up by health (area 15) as `要対応`, and handling them was manual every time. This is one of the largest sources of steady-state HITL, and it can be mechanically judged using semver classification + CI status. This skill consolidates that triage: it enumerates automation PRs, classifies them into `auto-merge` (candidate) / `要確認` using fixed vocabulary, and merges according to policy.
 
-決定論（PR 列挙・author 判定・semver 区分・CI 判定・lockfile 整合・peer / engines 検出・固定語彙の判定表・merge 実行・レンダリング）は同梱の **`deps.mjs` エンジン**が担う（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1、先行例 `health-check.mjs` / `backlog.mjs` / `topics.mjs` / `policy-read.mjs`）。本 SKILL.md は判断層 — **いつエンジンを呼ぶか・triage をどう提示するか・どこで人に確認するか（policy gate）** — に絞る。Claude が自由判断で「安全そう」と merge しない（判定はエンジンの固定語彙が決める）。
+The deterministic logic (PR enumeration, author determination, semver classification, CI judgment, lockfile consistency, peer / engines detection, the fixed-vocabulary judgment table, merge execution, and rendering) is handled by the bundled **`deps.mjs` engine** ([ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1, following the precedent of `health-check.mjs` / `backlog.mjs` / `topics.mjs` / `policy-read.mjs`). This SKILL.md confines itself to the judgment layer — **when to call the engine, how to present the triage, and where to confirm with a human (policy gate)**. Claude does not merge just because it "looks safe" on its own judgment (the judgment is determined by the engine's fixed vocabulary).
 
-**スコープ**: 単一リポジトリの automation PR triage。release PR は対象外（`/release` の責務）。cross-repo は将来検討。
+**Scope**: automation PR triage for a single repository. Release PRs are out of scope (that's `/release`'s responsibility). cross-repo is a future consideration.
 
-## 入力
+## Input
 
 ```text
 deps
-  --repo owner/repo   (省略時は cwd の origin から解決)
-  --limit N           (列挙上限。既定 50)
-  --dry-run           (判定のみ。merge も確認もしない)
-  --auto              (確認なしで merge。policy の irreversible gate を明示 opt-out)
+  --repo owner/repo   (resolved from cwd's origin if omitted)
+  --limit N           (enumeration limit; default 50)
+  --dry-run           (judge only; no merge, no confirmation)
+  --auto              (merge without confirmation; explicit opt-out of the policy's irreversible gate)
 ```
 
-- `--dry-run` と `--auto` を同時指定した場合は `--dry-run` を優先する（誤 merge 防止。topics と同じ規則。エンジンが強制する）
-- どちらも未指定時（`plan` モード）: エンジンは判定して `merge_plan`（実行予定の `gh pr merge --squash`）を返し、merge は行わない。gate に従って人に確認する
+- If `--dry-run` and `--auto` are both specified, `--dry-run` takes priority (to prevent accidental merges; the same rule as topics; enforced by the engine)
+- When neither is specified (`plan` mode): the engine judges and returns a `merge_plan` (the scheduled `gh pr merge --squash`) without merging. Confirms with a human according to the gate
 
-## 手順
+## Steps
 
-1. **本 SKILL.md と同じディレクトリ**の `deps.mjs` を Bash で実行する（引数はそのまま渡す）。Claude Code では `~/.claude/skills/deps/deps.mjs`（dogfood は `<repo>/.claude/skills/deps/deps.mjs`、Codex/Gemini は `.agents/skills/deps/deps.mjs`）:
+1. Run `deps.mjs` **in the same directory as this SKILL.md** via Bash (pass the arguments through as-is). In Claude Code this is `~/.claude/skills/deps/deps.mjs` (dogfood: `<repo>/.claude/skills/deps/deps.mjs`; Codex/Gemini: `.agents/skills/deps/deps.mjs`):
 
    ```bash
-   node <この skill のディレクトリ>/deps.mjs [--repo owner/repo] [--limit N] [--dry-run | --auto]
+   node <this skill's directory>/deps.mjs [--repo owner/repo] [--limit N] [--dry-run | --auto]
    ```
 
-   エンジンは既定で **整形済みテキスト**（triage 表 + auto-merge 候補 / 要確認 + merge plan）を stdout に出力する。`--json` で構造化 JSON を得られる。
+   By default the engine outputs **formatted text** (a triage table + auto-merge candidates / 要確認 + merge plan) to stdout. Use `--json` to get structured JSON.
 
-2. エンジンの出力を **そのまま提示**する（再整形・再解釈・再判定しない — 列挙・区分・判定表はすべてエンジンの責務）。`要確認` 群には各 PR の理由（bump 幅 / CI 状態 / lockfile / peer / engines）が併記されている。
-3. `repo_error` が立っている（GitHub remote 不在）場合はその旨を提示し `--repo owner/repo` の明示を促す。`fetch_error`（gh 未認証 / rate limit / network）が立っている場合はエンジンの分類をそのまま伝える。
-4. merge は下記 **policy の `irreversible` gate** に従う。
+2. **Present the engine's output as-is** (do not reformat, reinterpret, or re-judge it — enumeration, classification, and the judgment table are all the engine's responsibility). Each PR's reason (bump size / CI status / lockfile / peer / engines) is noted alongside the `要確認` group.
+3. If `repo_error` is set (no GitHub remote), present that fact and prompt for an explicit `--repo owner/repo`. If `fetch_error` is set (gh not authenticated / rate limit / network), relay the engine's classification as-is.
+4. Merging follows the **policy's `irreversible` gate** below.
 
-## author 判定（health 領域 15 と同一パターン・release-please は除外）
+## Author determination (same pattern as health area 15; release-please excluded)
 
-automation PR の author 判定は **health skill の領域 15（`health-check.mjs` の `isBotAuthor`）と同一パターン**を使う: `*[bot]` で終わる login / `app/*`（GitHub App）/ `is_bot` フラグ。両者の一致は `tests/deps.test.mjs` の sync assertion で強制し、drift を防ぐ（片方だけ変えると CI が落ちる）。
+Author determination for automation PRs uses **the same pattern as health skill's area 15 (`health-check.mjs`'s `isBotAuthor`)**: logins ending in `*[bot]` / `app/*` (GitHub Apps) / the `is_bot` flag. The match between the two is enforced by a sync assertion in `tests/deps.test.mjs`, preventing drift (changing only one side breaks CI).
 
-**release-please は除外する**: release-please は bot だが、その PR は `/release` の責務であり deps triage の対象外。エンジンが `isReleasePlease` で必ず除外する。
+**release-please is excluded**: release-please is a bot, but its PRs are `/release`'s responsibility and out of scope for deps triage. The engine always excludes it via `isReleasePlease`.
 
-## 判定表（固定語彙・エンジンが決定論的に判定）
+## Judgment table (fixed vocabulary; the engine judges deterministically)
 
-エンジンが下表の固定語彙で判定する。Claude はこの判定を**再解釈・上書きしない**。
+The engine judges using the fixed vocabulary in the table below. Claude **does not reinterpret or override** this judgment.
 
-| 条件 | 判定 |
+| Condition | Judgment |
 | --- | --- |
-| semver **patch / minor** + CI **green** + lockfile 整合 + peer なし + engines なし | **`auto-merge`**（候補） |
+| semver **patch / minor** + CI **green** + lockfile consistent + no peer + no engines | **`auto-merge`** (candidate) |
 | semver **major** | `要確認` |
-| CI **red** / **pending** / **no checks** / 状態取得不能 | `要確認` |
-| semver **区分不能（unknown）** | `要確認`（保守側） |
-| **lockfile drift**（manifest 変更に対し lockfile 未更新） | `要確認` |
-| **peer 依存**変更 / **engines** 変更 | `要確認` |
+| CI **red** / **pending** / **no checks** / status unobtainable | `要確認` |
+| semver **unclassifiable (unknown)** | `要確認` (conservative side) |
+| **lockfile drift** (manifest changed but lockfile not updated) | `要確認` |
+| **peer dependency** change / **engines** change | `要確認` |
 
-判定材料の取り方:
+How the judgment inputs are obtained:
 
-- **semver 区分**: PR タイトル / branch 名 / manifest diff の `from→to` バージョン対から判定する。**grouped PR は含まれる最大 bump** で判定する（major が 1 つでも含まれれば major）。区分不能な場合は保守的に `unknown` → `要確認`
-- **CI**: `gh pr checks <N>` の全 check が green のときのみ green。fail / cancel → red、running / queued → pending。check が 1 つもなければ `no-checks`（いずれも `要確認`）
-- **lockfile 整合**: manifest（`package.json` / `pyproject.toml` / `go.mod` 等）が変更されているのに対応する lockfile が未更新なら drift（`要確認`）。lockfile のみ変更（lockfile-maintenance / transitive）や manifest/lockfile を触らない PR（例: GitHub Actions のバージョン bump）は整合扱い
+- **semver classification**: determined from the PR title / branch name / the `from→to` version pair in the manifest diff. **Grouped PRs are judged by the maximum bump they contain** (if even one major is included, it's major). If unclassifiable, conservatively `unknown` → `要確認`
+- **CI**: green only when all checks from `gh pr checks <N>` are green. fail / cancel → red; running / queued → pending. If there are no checks at all, `no-checks` (all of these are `要確認`)
+- **lockfile consistency**: if the manifest (`package.json` / `pyproject.toml` / `go.mod` etc.) is changed but the corresponding lockfile is not updated, that's drift (`要確認`). PRs that change only the lockfile (lockfile-maintenance / transitive) or that touch neither manifest nor lockfile (e.g. a GitHub Actions version bump) are treated as consistent
 
-この固定語彙は `deps.mjs` に実装されている。語彙・判定条件を増減する場合は `deps.mjs` + 本表の同時改訂で行う（Claude の自由判断で条件を足さない）。
+This fixed vocabulary is implemented in `deps.mjs`. To add or remove vocabulary or judgment conditions, revise both `deps.mjs` and this table together (Claude does not add conditions on its own judgment).
 
-## merge（policy の `irreversible` gate に従う）
+## Merging (follows the policy's `irreversible` gate)
 
-`gh pr merge --squash` は **不可逆アクション**（irreversible）。個別の承認ゲートを prose にハードコードせず、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙の SSOT）に従う。分類とゼロコンフィグ既定:
+`gh pr merge --squash` is an **irreversible action**. Rather than hardcoding an individual approval gate in prose, it follows the central autonomy policy (the SSOT for the 3 classes and gate vocabulary, defined by the `policy` skill). Classification and zero-config default:
 
-| 本 skill のアクション | クラス | policy 参照 | ゼロコンフィグ既定 gate |
+| This skill's action | Class | Policy reference | Zero-config default gate |
 | --- | --- | --- | --- |
-| PR merge（`gh pr merge --squash`） | `irreversible` | `--action=merge` | `ask`（auto-merge 候補を 1 件ずつ確認） |
+| PR merge (`gh pr merge --squash`) | `irreversible` | `--action=merge` | `ask` (confirms auto-merge candidates one at a time) |
 
-有効 gate は sibling の `policy` skill の `policy-read.mjs` で引く（user-scope では `~/.claude/skills/policy/policy-read.mjs`、dogfood は `<repo>/.claude/skills/policy/policy-read.mjs`、Codex/Gemini は `.agents/skills/policy/policy-read.mjs`）:
+The effective gate is looked up via the sibling `policy` skill's `policy-read.mjs` (user-scope: `~/.claude/skills/policy/policy-read.mjs`; dogfood: `<repo>/.claude/skills/policy/policy-read.mjs`; Codex/Gemini: `.agents/skills/policy/policy-read.mjs`):
 
 ```bash
-node <policy skill のディレクトリ>/policy-read.mjs --action=merge --repo-root="$PWD"
-# => .resolved.gate（既定 ask）
+node <policy skill's directory>/policy-read.mjs --action=merge --repo-root="$PWD"
+# => .resolved.gate (default ask)
 ```
 
-flag は policy と整合させる:
+Flags are kept consistent with policy:
 
-- `--dry-run` 指定時: エンジンは判定のみ出力し、merge も確認もしない（`gh pr merge` を呼ばない）
-- `--auto` 指定時: **irreversible gate の明示 opt-out**。エンジンが確認なしで各 auto-merge 候補に対し `gh pr merge <N> --squash` を直列実行する（routine / `/loop` / `schedule` 経由の無人実行に必須）
-- どちらも未指定時（`plan` モード）: エンジンは merge せず `merge_plan`（実行予定コマンド）を返す。gate に従って人に確認する:
-  - gate=`ask`（ゼロコンフィグ既定）: auto-merge 候補を **1 件ずつ**確認する。承認された PR のみ `gh pr merge <N> --squash` を実行する
-  - gate=`batch-confirm`: auto-merge 候補を 1 回まとめて提示・一括確認し、承認されたら同じ引数に `--auto` を付けて再実行する
-  - gate=`proceed`: 確認なしで `--auto` 付き再実行
+- When `--dry-run` is specified: the engine outputs judgments only, with no merge and no confirmation (it does not call `gh pr merge`)
+- When `--auto` is specified: an **explicit opt-out of the irreversible gate**. The engine runs `gh pr merge <N> --squash` serially against each auto-merge candidate without confirmation (required for unattended execution via routine / `/loop` / `schedule`)
+- When neither is specified (`plan` mode): the engine does not merge and returns a `merge_plan` (the commands scheduled for execution). Confirms with a human according to the gate:
+  - gate=`ask` (zero-config default): confirms auto-merge candidates **one at a time**. Only approved PRs get `gh pr merge <N> --squash` executed
+  - gate=`batch-confirm`: presents auto-merge candidates together once for a single batch confirmation; if approved, re-runs with `--auto` appended to the same arguments
+  - gate=`proceed`: re-runs with `--auto` without confirmation
 
-**policy 不在でも壊れない:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は厳しい側（`ask`）へ倒す。`policy` skill 未配置の環境では上表のゼロコンフィグ既定 gate（`irreversible`=`ask`）を直接適用する。
+**Does not break even if policy is absent:** `policy-read.mjs` is fail-safe by design — unreadable or invalid values fall to the stricter side (`ask`). In environments where the `policy` skill is not deployed, the zero-config default gate in the table above (`irreversible`=`ask`) is applied directly.
 
-## エラーハンドリング（エンジンが JSON に載せる）
+## Error handling (the engine puts this in the JSON)
 
-| 状況 | エンジンの動作 |
+| Situation | Engine behavior |
 | --- | --- |
-| `--repo` 未指定で GitHub remote 不在 | `repo_error` を立てる。merge は行わない |
-| `gh` 未認証 / rate limit / network（PR 列挙） | `fetch_error` に分類を載せる。候補は空 |
-| PR 個別の CI 状態 / diff 取得失敗 | 該当 PR のみ `要確認` に降格（`ci: error` / `diff_error`）。他 PR は継続 |
-| merge 失敗（branch protection 等・`--auto` 時） | 該当 PR のみ `要確認` に降格して継続（`merge_results` に記録） |
-| automation PR 0 件 | `candidates: []`。merge plan は空 |
+| `--repo` not specified and no GitHub remote | Sets `repo_error`. No merge is performed |
+| `gh` not authenticated / rate limit / network (PR enumeration) | Puts the classification in `fetch_error`. Candidates are empty |
+| Failure to fetch a PR's individual CI status / diff | Only that PR is downgraded to `要確認` (`ci: error` / `diff_error`). Other PRs continue |
+| Merge failure (branch protection etc., under `--auto`) | Only that PR is downgraded to `要確認` and continues (recorded in `merge_results`) |
+| 0 automation PRs | `candidates: []`. merge plan is empty |
 
-## `/loop` / `schedule` との連携
+## Integration with `/loop` / `schedule`
 
-`--auto` を `schedule`（cron routine）や `/loop` から起動すると、「毎朝 automation PR を消化する」ループが閉じる（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R5）。例: `/deps --auto`。無人実行では対話できないため、判定表（保守側 = 迷ったら `要確認`）と policy gate が唯一の境界になる。
+Launching `--auto` from `schedule` (cron routine) or `/loop` closes the loop of "consume automation PRs every morning" ([ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R5). Example: `/deps --auto`. Since unattended execution cannot be interactive, the judgment table (conservative side = `要確認` when in doubt) and the policy gate become the sole boundary.
 
-## スコープ外
+## Out of scope
 
-| 項目 | 除外理由 |
+| Item | Reason for exclusion |
 | --- | --- |
-| 1. release PR の処理 | `/release` の責務。release-please 作者は必ず除外する |
-| 2. 判定条件の自由化 | 判定は固定語彙のみ。LLM の自由判断で「安全そう」と merge しない（再現性・信頼性のため） |
-| 3. cross-repo triage | 現時点では単一リポのみ。複数リポ横断は別 issue で検討 |
-| 4. `--delete-branch` / `--auto`（GitHub auto-merge） | 本スキルは即時 squash merge のみ。branch 削除・GitHub auto-merge は行わない |
+| 1. Handling release PRs | `/release`'s responsibility. release-please authors are always excluded |
+| 2. Making judgment conditions freeform | Judgment uses only fixed vocabulary. The LLM does not merge just because it "looks safe" on its own judgment (for reproducibility and reliability) |
+| 3. cross-repo triage | Single repo only for now. Crossing multiple repos will be considered in a separate issue |
+| 4. `--delete-branch` / `--auto` (GitHub auto-merge) | This skill only does immediate squash merges. It does not delete branches or use GitHub auto-merge |
 
-## 注意事項
+## Notes
 
-- `.env` ファイルは読み取り・ステージングしない
-- author 判定は health 領域 15 と同一パターン（`tests/deps.test.mjs` の sync assertion が drift を防ぐ）。release-please は必ず除外する
-- 判定は固定語彙（上表）でエンジンが決定する。Claude は再判定しない（迷ったら `要確認`）
-- merge は policy の `irreversible` gate（既定 `ask`）に従う。`--auto` は明示 opt-out として確認をスキップするため、まず `--dry-run` で内容を確認してから使う運用を推奨する
-- 新規 runtime 依存は追加しない（Node stdlib + `gh` / `git` のみ）
+- Do not read or stage `.env` files
+- Author determination uses the same pattern as health area 15 (a sync assertion in `tests/deps.test.mjs` prevents drift). release-please is always excluded
+- Judgment is determined by the engine using the fixed vocabulary (table above). Claude does not re-judge (`要確認` when in doubt)
+- Merging follows the policy's `irreversible` gate (default `ask`). Since `--auto` is an explicit opt-out that skips confirmation, it's recommended to first check the content with `--dry-run` before using it
+- Do not add new runtime dependencies (only Node stdlib + `gh` / `git`)

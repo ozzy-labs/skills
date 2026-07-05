@@ -1,29 +1,29 @@
 ---
-description: ビルド・型・テスト・lint の複合検証を一発で実行する統合スキル。`verify.mjs` エンジンが検証コマンドを発見連鎖（AGENTS.md「検証」節 → package.json scripts → justfile/Makefile/lefthook → 言語 heuristic）で自動発見し、出典付きで直列実行して結果サマリを返す。上位段でヒットすればその段のみ実行（段跨ぎ禁止）。
+description: An integrated skill that runs the combined validation of build / typecheck / test / lint in one shot. The `verify.mjs` engine auto-discovers validation commands via a discovery chain (AGENTS.md's 「検証」 section → package.json scripts → justfile/Makefile/lefthook → language heuristics), executes them serially with their source attached, and returns a result summary. If a higher-priority stage produces a hit, only that stage is executed (no crossing stages).
 argument-hint: "[--dry-run] [--json] [--repo-root=<dir>]"
 allowed-tools: Bash, Read
 ---
 
 # verify
 
-`.agents/skills/verify/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/verify/SKILL.md` and follow the workflow procedure.
 
-**重要:** 検証コマンドの発見連鎖・直列実行・結果サマリのレンダリングは `verify.mjs` エンジンが担う。エンジンの stdout をそのまま提示し、再整形・再解釈しない。
+**Important:** The discovery chain of validation commands, serial execution, and rendering of the result summary are handled by the `verify.mjs` engine. Present the engine's stdout as-is; do not reformat or reinterpret it.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### エンジンの実行
+### Running the engine
 
-同階層の `verify.mjs` を Bash で実行する（`$ARGUMENTS` をそのまま渡す）。user-scope では `~/.claude/skills/verify/verify.mjs`、dogfood では `<repo>/.claude/skills/verify/verify.mjs`:
+Execute `verify.mjs` in the same directory via Bash (passing `$ARGUMENTS` as-is). In user-scope it's `~/.claude/skills/verify/verify.mjs`, in dogfood it's `<repo>/.claude/skills/verify/verify.mjs`:
 
 ```bash
 node ~/.claude/skills/verify/verify.mjs $ARGUMENTS
 ```
 
-### 引数解析
+### Argument parsing
 
-`--dry-run`（別名 `--discover`）/ `--json` / `--repo-root=<dir>` の有無を判定する。いずれもエンジンが解釈するため、`$ARGUMENTS` をそのまま渡すだけでよい。
+Determine the presence of `--dry-run` (alias `--discover`) / `--json` / `--repo-root=<dir>`. Since the engine interprets all of these, it's sufficient to simply pass `$ARGUMENTS` as-is.
 
-### 完了報告・次のアクション提案
+### Completion report / next-action suggestion
 
-エンジン出力を提示したら終了する。失敗コマンドがあってもここで自動修正・再実行はしない（呼び出し元の判断に委ねる）。次のアクション提案も行わない。
+End once the engine output has been presented. Even if there are failed commands, do not automatically fix or re-run here (leave that to the caller's judgment). Do not suggest next actions either.

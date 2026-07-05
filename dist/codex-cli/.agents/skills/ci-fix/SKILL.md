@@ -1,113 +1,113 @@
 ---
 name: ci-fix
-description: 失敗した CI run のログを収集してコンテキストを整形し `/drive` へ接続する薄い wrapper。入力解決（明示 run id > 明示 branch の最新 failure > 現在ブランチの最新 failure）→ flaky 判定（`gh run rerun --failed` 1 回 + polling、`--no-rerun` で skip）→ ログ抽出（`gh run view --log-failed`、ANSI 除去 + エラー行抽出 regex は health の same-error 判定と同一）→ 指示テキスト組み立て → `/drive` 起動。`--dry-run` は指示テキストのみ出力（rerun も drive 起動もしない）。main ブランチの failure は優先度高としてレポート冒頭で明示。
+description: A thin wrapper that collects logs from a failed CI run, formats the context, and connects to `/drive`. Input resolution (explicit run id > latest failure on an explicit branch > latest failure on the current branch) → flaky determination (one `gh run rerun --failed` + polling; skipped with `--no-rerun`) → log extraction (`gh run view --log-failed`; the ANSI-stripping + error-line extraction regex is the same as health's same-error determination) → assembling the instruction text → launching `/drive`. `--dry-run` outputs only the instruction text (no rerun, no drive launch). A failure on the main branch is called out as high priority at the top of the report.
 ---
 
-# ci-fix - 失敗 CI run のコンテキスト整形 → drive 接続
+# ci-fix - Format context for a failed CI run → connect to drive
 
-失敗した CI run の**ログ収集とコンテキスト整形だけを担う薄い wrapper**。実装・修正・PR 作成は `/drive` の責務なので、本 skill は「どの run を対象にするか」「flaky でないか」「何が失敗したか」を確定し、整形した**指示テキスト**を単一モードの `/drive` に渡すところまでを行う。これにより health の Recent failed actions（領域 13）を閉じる経路が skill として成立する。
+A **thin wrapper responsible only for collecting logs from a failed CI run and formatting the context**. Since implementation, fixing, and PR creation are `/drive`'s responsibility, this skill goes only as far as determining "which run to target," "whether it's flaky," and "what failed," and then passing the formatted **instruction text** to `/drive` in single mode. This establishes a skill-level path to close health's Recent failed actions (area 13).
 
-決定論的な処理（入力解決の優先順位 / flaky 判定フロー / エラー抽出 regex）は本 SKILL.md の固定契約であり、Claude が自由判断で順序や regex を変えない。
+The deterministic processing (input resolution priority / flaky determination flow / error extraction regex) is a fixed contract in this SKILL.md, and Claude does not change the order or regex on its own judgment.
 
-## 入力
+## Input
 
 ```text
 ci-fix [<run-id> | --branch <name>]
-  --no-rerun   flaky 判定（rerun）を skip する（クレジット消費を避けたい場合）
-  --dry-run    指示テキストのみ出力する（rerun も drive 起動もしない・副作用なし）
-  --auto       drive 起動前の確認を skip する（Claude Code companion 参照）
+  --no-rerun   skips the flaky determination (rerun) (use when you want to avoid consuming credits)
+  --dry-run    outputs only the instruction text (no rerun, no drive launch; no side effects)
+  --auto       skips confirmation before launching drive (see the Claude Code companion)
 ```
 
-`<run-id>` と `--branch` は同時指定しない（run id が優先）。
+`<run-id>` and `--branch` are not specified together (run id takes priority).
 
-## 入力解決の優先順位（固定）
+## Input resolution priority (fixed)
 
-対象 run は下表の順で解決する。上位が解決できたら下位は評価しない（固定順・Claude は再解釈しない）。
+The target run is resolved in the order in the table below. Once a higher-priority entry resolves, lower-priority entries are not evaluated (fixed order; Claude does not reinterpret it).
 
-| 順位 | 入力 | 解決方法 |
+| Rank | Input | Resolution method |
 | --- | --- | --- |
-| 1 | 明示 run id（`<run-id>`） | その run を対象にする |
-| 2 | 明示 branch（`--branch <name>`） | `gh run list --branch <name> --status failure --limit 1` の最新 failure |
-| 3 | 現在ブランチ（入力なし） | `gh run list --branch <current-branch> --status failure --limit 1` の最新 failure |
+| 1 | Explicit run id (`<run-id>`) | Target that run |
+| 2 | Explicit branch (`--branch <name>`) | The latest failure from `gh run list --branch <name> --status failure --limit 1` |
+| 3 | Current branch (no input) | The latest failure from `gh run list --branch <current-branch> --status failure --limit 1` |
 
-該当する failed run がない場合は「**failed run なし**」と報告して終了する（drive は起動しない）。
+If there is no matching failed run, report "**no failed run**" and end (drive is not launched).
 
-**main ブランチの failure は優先度高**（= merged コードの破損）として扱い、レポート冒頭で明示する。対象 run のブランチが `main` の場合は最初の 1 行で `⚠️ main branch failure (merged code broken)` を出す。
+**A failure on the main branch is treated as high priority** (= broken merged code) and called out at the top of the report. If the target run's branch is `main`, output `⚠️ main branch failure (merged code broken)` as the first line.
 
-## flaky 判定（先行）
+## Flaky determination (up front)
 
-再現しない失敗（flaky）を drive に流さないため、ログ抽出の**前に** 1 回だけ再実行して判定する。`--no-rerun` 指定時はこのステップ全体を skip し、直接ログ抽出へ進む。
+To avoid passing a non-reproducing failure (flaky) to drive, it is rerun once **before** log extraction to determine this. When `--no-rerun` is specified, this entire step is skipped and it proceeds directly to log extraction.
 
-1. `gh run rerun <id> --failed` を **1 回だけ** 実行する（失敗した job のみ再実行）。
-2. 完了まで polling する: **間隔 30 秒・上限 15 分**。`gh run view <id> --json status,conclusion` で `status=completed` まで待つ。
-3. 判定:
-   - 再実行が `success` で完了 → 「**flaky（修正不要）**」と報告して終了する（drive は起動しない）。
-   - 再実行が再び `failure` → 再現する失敗として次の「ログ抽出」へ進む。
-   - polling が上限 15 分に到達 → `要確認`（判定不能）として終了する（drive は起動しない）。
+1. Run `gh run rerun <id> --failed` **only once** (reruns only the failed jobs).
+2. Poll until completion: **30-second interval, 15-minute cap**. Wait for `status=completed` via `gh run view <id> --json status,conclusion`.
+3. Determination:
+   - If the rerun completes as `success` → report "**flaky (no fix needed)**" and end (drive is not launched).
+   - If the rerun fails again (`failure`) → treat it as a reproducing failure and proceed to the "Log extraction" step below.
+   - If polling reaches the 15-minute cap → end as `要確認` (undeterminable) (drive is not launched).
 
-`--no-rerun` の場合は rerun せず、直近の failed run のログをそのまま抽出対象にする（flaky か否かは判定しない）。
+With `--no-rerun`, no rerun is performed, and the most recent failed run's log is used directly as the extraction target (whether it is flaky is not determined).
 
-## ログ抽出
+## Log extraction
 
-再現する失敗のみ、失敗ログからエラー要約を抽出する。
+Only for reproducing failures, extract an error summary from the failure log.
 
 ```bash
 gh run view <id> --log-failed | tail -200
 ```
 
-抽出は 2 段:
+Extraction has two stages:
 
-1. **ANSI 除去:** `/\[[0-9;]*m/g` を空文字に置換する。
-2. **エラー行抽出:** 各行に `/(error|Error|failed)[\s:].*$/` をマッチさせ、**最後にマッチした行**のマッチ部分を要約キーにする。
+1. **ANSI stripping:** replace `/\[[0-9;]*m/g` with an empty string.
+2. **Error-line extraction:** match `/(error|Error|failed)[\s:].*$/` against each line, and use the matched portion of the **last matching line** as the summary key.
 
-この 2 つの regex は **health `--deep` の same-error 判定と同一**（SSOT は `~/.agents/skills/health/health-check.mjs` の `stripAnsi` と `extractCiErrorKey`）。`tests/ci-fix.test.mjs` が health-check.mjs と本 SKILL.md の regex 一致を sync assertion で強制する（drift 防止）。regex を変える場合は health 側と本 SKILL.md を同時に改訂する。
+These two regexes are **identical to health `--deep`'s same-error determination** (the SSOT is `~/.agents/skills/health/health-check.mjs`'s `stripAnsi` and `extractCiErrorKey`). `tests/ci-fix.test.mjs` enforces the regex match between health-check.mjs and this SKILL.md via a sync assertion (to prevent drift). If the regex changes, revise both the health side and this SKILL.md together.
 
-## 指示テキスト（テンプレート）
+## Instruction text (template)
 
-drive に渡す指示テキストは次の形式で組み立てる。分からない項目は省略する（空欄で埋めない）。
+The instruction text passed to drive is assembled in the following format. Omit items that are unknown (do not fill them with blanks).
 
 ```text
 CI failure on <workflow-name> (branch: <branch>, run: <run-id>)
 
   Job:   <failed-job>
   Step:  <failed-step>
-  Error: <抽出したエラー要約>
-  Workflow file: <.github/workflows/xxx.yaml のパス>
-  Repro: <再現コマンド（分かる場合。例: pnpm test / pnpm run lint）>
+  Error: <extracted error summary>
+  Workflow file: <path to the file under .github/workflows/xxx.yaml>
+  Repro: <reproduction command, if known. e.g. pnpm test / pnpm run lint>
 
-上記の CI 失敗を調査して原因を修正し、PR を作成してください。
+Investigate the above CI failure, fix the cause, and create a PR.
 ```
 
-`<workflow-name>` / `<failed-job>` / `<failed-step>` は `gh run view <id> --json` の出力から、workflow ファイルパスは `.github/workflows/` の該当ファイルから埋める。
+Fill `<workflow-name>` / `<failed-job>` / `<failed-step>` from the output of `gh run view <id> --json`, and the workflow file path from the corresponding file under `.github/workflows/`.
 
-## drive への接続
+## Connecting to drive
 
-- **既定:** 組み立てた指示テキストを提示して確認を取り、承認後に単一モードの `/drive "<指示テキスト>"` を起動する（確認 UI の配線はホスト依存 — Claude Code は `SKILL.claude-code.md` の AskUserQuestion）。drive 起動は PR 作成という**外部可視アクション**なので既定で確認を挟む。
-- **`--auto`:** 起動前の確認を skip して直接 `/drive` を起動する（外部可視アクションの明示 opt-out）。
-- **`--dry-run`:** 指示テキストを出力するだけで **rerun も drive 起動も行わない**（下記「副作用の境界」参照）。
+- **Default:** present the assembled instruction text for confirmation, and after approval launch single-mode `/drive "<instruction text>"` (the confirmation UI wiring is host-dependent — for Claude Code it's the AskUserQuestion in `SKILL.claude-code.md`). Since launching drive is an **externally-visible action** (PR creation), confirmation is inserted by default.
+- **`--auto`:** skips confirmation before launching and launches `/drive` directly (an explicit opt-out of the externally-visible action).
+- **`--dry-run`:** only outputs the instruction text and **performs neither the rerun nor the drive launch** (see "Boundary of side effects" below).
 
-## 副作用の境界
+## Boundary of side effects
 
-| フラグ | rerun（`gh run rerun`） | drive 起動 |
+| Flag | rerun (`gh run rerun`) | drive launch |
 | --- | --- | --- |
-| （既定） | する（1 回） | 確認後にする |
-| `--no-rerun` | しない | 確認後にする |
-| `--auto` | する（1 回） | 確認なしでする |
-| `--dry-run` | **しない** | **しない** |
+| (default) | Yes (once) | After confirmation |
+| `--no-rerun` | No | After confirmation |
+| `--auto` | Yes (once) | Without confirmation |
+| `--dry-run` | **No** | **No** |
 
-`--dry-run` は**副作用なし**（rerun によるクレジット消費も drive の PR 作成も発生しない）。`--dry-run` と他フラグが同時指定された場合も `--dry-run` の「出力のみ」が優先される。
+`--dry-run` has **no side effects** (neither credit consumption from rerun nor PR creation by drive occurs). Even when `--dry-run` is specified together with other flags, `--dry-run`'s "output only" takes priority.
 
-## スコープ外
+## Out of scope
 
-| 項目 | 除外理由 |
+| Item | Reason for exclusion |
 | --- | --- |
-| 1. 実際の修正・PR 作成 | drive の責務。本 skill は入力解決とコンテキスト整形のみ |
-| 2. flaky の複数回再実行 | rerun は 1 回のみ（クレジット消費を抑える）。1 回で通れば flaky、通らなければ再現扱い |
-| 3. 複数 run の一括処理 | 対象は 1 run のみ。複数失敗は個別に起動する |
+| 1. Actual fixing and PR creation | drive's responsibility. This skill only does input resolution and context formatting |
+| 2. Multiple reruns for flakiness | Rerun happens only once (to limit credit consumption). If it passes once, it's flaky; if not, it's treated as reproducing |
+| 3. Batch processing of multiple runs | Only 1 run is targeted. Multiple failures are launched individually |
 
-## 注意事項
+## Notes
 
-- `.env` ファイルは読み取り・ステージングしない
-- `gh` CLI が未認証の場合はエラーメッセージを表示して中断する
-- エラー抽出 regex の SSOT は health（`health-check.mjs` の `extractCiErrorKey`）。本 skill は同一 regex を文書化し、テストで一致を強制する（再掲による drift を防ぐため regex 自体を勝手に拡張しない）
-- 対象 run のブランチが `main` の場合は優先度高としてレポート冒頭で明示する
+- Do not read or stage `.env` files
+- If the `gh` CLI is not authenticated, display an error message and abort
+- The SSOT for the error-extraction regex is health (`health-check.mjs`'s `extractCiErrorKey`). This skill documents the identical regex and enforces the match via tests (it does not extend the regex itself on its own, to prevent drift from restating it)
+- If the target run's branch is `main`, call it out as high priority at the top of the report

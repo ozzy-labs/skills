@@ -1,5 +1,5 @@
 ---
-description: ローカルの observability イベントログ（~/.agents/observability/events.jsonl）を集計し、skill 別の発火件数と注目イベント（fallback / HITL 却下 / loop 上限到達 / 中断）を read-only で提示する。「skill のメトリクスを見せて」「観測結果を集計して」「どの skill がよく使われてる?」で発火。送信はしない。
+description: Aggregates the local observability event log (~/.agents/observability/events.jsonl) and presents, read-only, per-skill invocation counts and notable events (fallback / HITL rejection / loop cap reached / abort). Fires on "show me the skill metrics," "aggregate the observability results," "which skills get used the most?" Does not send anything.
 argument-hint: "[--since=<ISO 8601>] [--skill=<name>] [--snapshot]"
 disable-model-invocation: true
 allowed-tools: Bash, Read
@@ -7,16 +7,16 @@ allowed-tools: Bash, Read
 
 # skill-metrics
 
-`~/.agents/skills/skill-metrics/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `~/.agents/skills/skill-metrics/SKILL.md` and follow the workflow steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### 集計エンジンの実行
+### Running the aggregation engine
 
-同階層の `skill-metrics.mjs` を Bash で実行して JSON rollup を得る（`$ARGUMENTS` をそのまま渡す）。user-scope では `~/.claude/skills/skill-metrics/skill-metrics.mjs`、dogfood では `<repo>/.claude/skills/skill-metrics/skill-metrics.mjs`:
+Run the `skill-metrics.mjs` in the same directory via Bash to obtain the JSON rollup (pass `$ARGUMENTS` through as-is). User-scope: `~/.claude/skills/skill-metrics/skill-metrics.mjs`; dogfood: `<repo>/.claude/skills/skill-metrics/skill-metrics.mjs`:
 
 ```bash
 node ~/.claude/skills/skill-metrics/skill-metrics.mjs $ARGUMENTS
 ```
 
-得た JSON を人間可読に整形して提示する（read-only・送信なし）。
+Format the resulting JSON into something human-readable and present it (read-only, no sending).

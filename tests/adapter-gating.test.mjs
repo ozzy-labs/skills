@@ -233,7 +233,7 @@ test("default-on usage-guard wiring is confined to the claude-code overlay", asy
   const codex = await new CodexCliAdapter().generate([drive]);
   const codexDrive = codex.find((o) => o.relativePath === ".agents/skills/drive/SKILL.md");
   assert.ok(codexDrive, "codex adapter emits .agents/skills/drive/SKILL.md");
-  for (const sym of ["CronCreate", "checkpoint での手順", "graceful degrade（skill 不在）"]) {
+  for (const sym of ["CronCreate", "Steps at a checkpoint", "Graceful degrade (skill absent)"]) {
     assert.ok(
       !codexDrive.content.includes(sym),
       `codex build output must not leak usage-guard wiring procedure: ${sym}`,
@@ -242,7 +242,7 @@ test("default-on usage-guard wiring is confined to the claude-code overlay", asy
   // sanity: the neutral doc is what codex/gemini/copilot all read, and it must
   // still mark usage-guard as Claude-Code-only (no silent default-on elsewhere)
   assert.ok(
-    codexDrive.content.includes("Claude Code 環境のみ") ||
+    codexDrive.content.includes("only in the Claude Code environment") ||
       codexDrive.content.includes("Claude Code only"),
     "neutral drive doc must mark usage-guard as Claude Code only",
   );

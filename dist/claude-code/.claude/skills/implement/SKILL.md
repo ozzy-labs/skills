@@ -1,5 +1,5 @@
 ---
-description: Issue または指示をもとに、ブランチ作成・実装計画・コード変更を行う。Issue 番号またはテキスト指示を受け取る。
+description: Creates a branch, plans the implementation, and makes code changes based on an Issue or an instruction. Accepts an Issue number or a text instruction.
 argument-hint: <#issue-number | instruction>
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUserQuestion
@@ -7,34 +7,34 @@ allowed-tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, AskUser
 
 # implement
 
-`~/.agents/skills/implement/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `~/.agents/skills/implement/SKILL.md` and follow the workflow steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### 入力解析
+### Input parsing
 
-`$ARGUMENTS` を解析し、要件を特定する。
+Parse `$ARGUMENTS` and identify the requirements.
 
-- **引数なしの場合:** AskUserQuestion で「何を実装しますか？（Issue 番号 or 説明）」と確認する（`answers` パラメータは設定しない）
-- **`gh` CLI エラー時:** 認証エラーの場合は `gh auth login` の実行を案内して中断する
+- **If no argument:** confirm with AskUserQuestion, "What would you like to implement? (Issue number or description)" (do not set the `answers` parameter)
+- **On `gh` CLI error:** if it's an authentication error, guide the user to run `gh auth login` and abort
 
-### 実装計画の確認（policy の gate に従う）
+### Confirming the implementation plan (follow policy's gate)
 
-「アクション分類と policy 参照」で解決した gate に応じて分岐する:
+Branch according to the gate resolved in "Action classification and policy reference":
 
-- **gate=`proceed`（`reversible-local` の既定）:** AskUserQuestion を出さず、計画を提示して実装を進める（計画・変更内容を audit trail として報告に残す）
-- **gate=`ask`（`irreversible`: migration / データ削除 / CI・リリース設定変更）:** 実装計画を提示した後、AskUserQuestion で確認する（`answers` パラメータは設定しない）:
-  - **「この計画で実装」**
-  - **「計画を修正」**
-  - **「キャンセル」**
-- **gate=`batch-confirm`:** 着手前に 1 回だけまとめて確認する
+- **gate=`proceed` (default for `reversible-local`):** do not show AskUserQuestion; present the plan and proceed with implementation (leave the plan/changes in the report as an audit trail)
+- **gate=`ask` (`irreversible`: migration / data deletion / CI or release config changes):** after presenting the implementation plan, confirm with AskUserQuestion (do not set the `answers` parameter):
+  - **"Implement with this plan"**
+  - **"Revise the plan"**
+  - **"Cancel"**
+- **gate=`batch-confirm`:** confirm once, all together, before starting
 
-**drive 配下:** 自律実行が委任済みのため、`reversible-local` の `proceed` により従来どおり承認をスキップして進める。`ask` と判定したアクションのみ確認する。
+**Under drive:** since autonomous execution has already been delegated, proceed as before, skipping approval, via `reversible-local`'s `proceed`. Only confirm for actions judged `ask`.
 
-### 完了後の次のアクション
+### Next action after completion
 
-実装完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
+Immediately after the implementation completion report, call AskUserQuestion (do not set the `answers` parameter):
 
-- **「検証・コミット・PR まで一括実行する」** → `~/.claude/skills/ship/SKILL.md` を Read し、その手順に従う
-- **「検証（verify）を実行する」** → `~/.claude/skills/verify/SKILL.md` を Read し、その手順に従う
-- **「追加の変更を行う」** → 終了する
+- **"Run verification, commit, and PR all at once"** → Read `~/.claude/skills/ship/SKILL.md` and follow its steps
+- **"Run verification (verify)"** → Read `~/.claude/skills/verify/SKILL.md` and follow its steps
+- **"Make additional changes"** → end

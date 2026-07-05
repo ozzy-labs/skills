@@ -1,37 +1,37 @@
 ---
 name: ship
-description: 検証・コミット・PR 作成を一括実行する。変更に対して verify（ビルド + 型 + テスト + lint）→ コミット → PR 作成を順に実行する統合パイプライン。
+description: Runs verification, commit, and PR creation all at once. An integrated pipeline that runs verify (build + type + test + lint) → commit → PR creation in sequence against the changes.
 ---
 
-# ship - 検証・コミット・PR を一括実行
+# ship - Run verification, commit, and PR all at once
 
-変更に対して verify（検証）→ コミット → PR 作成を順に実行する統合パイプライン。いずれかのステップで失敗した場合は中断し、エラー内容を報告する。
+An integrated pipeline that runs verify (verification) → commit → PR creation in sequence against the changes. If any step fails, abort and report the error content.
 
-## 手順
+## Procedure
 
-### Step 1: verify（検証）
+### Step 1: verify (verification)
 
-1. `~/.agents/skills/verify/SKILL.md` を参照し、verify エンジンでビルド + 型 + テスト + lint の複合検証を実行する（検証コマンドは発見連鎖で自動発見される）
-2. 失敗したコマンドがある場合は報告して中断する
+1. Refer to `~/.agents/skills/verify/SKILL.md` and run the combined build + type + test + lint verification with the verify engine (verification commands are auto-discovered via the discovery chain)
+2. If any command fails, report it and abort
 
 ### Step 2: commit
 
-1. `git status` で変更ファイルの一覧を取得する
-2. 変更ファイルを個別に `git add <file>` でステージする。`.env` ファイルはステージングしない
-3. `~/.agents/skills/commit-conventions/SKILL.md` を参照し、Conventional Commits に従いコミットメッセージを生成する
-4. `git commit -m "<message>"` でコミットする
+1. Get the list of changed files with `git status`
+2. Stage changed files individually with `git add <file>`. Do not stage `.env` files
+3. Refer to `~/.agents/skills/commit-conventions/SKILL.md` and generate a commit message following Conventional Commits
+4. Commit with `git commit -m "<message>"`
 
-変更がない場合、既にコミット済みの未プッシュコミットがあれば Step 3 に進む。なければ終了する。
+If there are no changes, proceed to Step 3 if there are already-committed, unpushed commits. Otherwise, end.
 
 ### Step 3: pr
 
-1. `git branch --show-current` で現在のブランチを確認する（main の場合は中断）
-2. `git push -u origin <branch>` でリモートにプッシュする
-3. `gh pr view` で既存 PR を確認する
-   - 既存 PR がない場合: `gh pr create --title "<タイトル>" --body "<本文>"` で作成
-   - 既存 PR がある場合: プッシュのみ（PR は自動更新）
+1. Check the current branch with `git branch --show-current` (abort if it is main)
+2. Push to the remote with `git push -u origin <branch>`
+3. Check for an existing PR with `gh pr view`
+   - If no existing PR: create one with `gh pr create --title "<title>" --body "<body>"`
+   - If an existing PR exists: push only (the PR updates automatically)
 
-### Step 4: 完了報告
+### Step 4: Completion report
 
 ```text
 完了:

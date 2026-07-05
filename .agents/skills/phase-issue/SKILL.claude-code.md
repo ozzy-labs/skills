@@ -6,54 +6,54 @@ allowed-tools: Bash, Read, Write, AskUserQuestion
 
 # phase-issue
 
-`.agents/skills/phase-issue/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/phase-issue/SKILL.md` and follow its workflow steps.
 
-**重要:** 章立て・整形ルール・マーカーブロックは canonical SKILL.md の規約に厳密に従う。Claude の自由判断で章を増減しない。
+**Important:** Follow the canonical SKILL.md's conventions for the section structure, formatting rules, and marker block strictly. Do not add or remove sections at Claude's own discretion.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### 引数解析
+### Argument parsing
 
-`$ARGUMENTS` を解析する:
+Parse `$ARGUMENTS`:
 
-- `<phase-number>` と `<title>` が欠落している場合、AskUserQuestion でそれぞれ確認する（`answers` パラメータは設定しない）
-- 任意オプション（`--description`, `--refs`, `--donts`, `--decisions-file`, `--tasks-file`, `--dod`, `--outlook`, `--related`, `--label`, `--repo`, `--draft`）は引数から取得する
+- If `<phase-number>` and `<title>` are missing, confirm each with AskUserQuestion (do not set the `answers` parameter)
+- Obtain optional options (`--description`, `--refs`, `--donts`, `--decisions-file`, `--tasks-file`, `--dod`, `--outlook`, `--related`, `--label`, `--repo`, `--draft`) from the arguments
 
-### 不足項目の対話補完
+### Interactively filling in missing items
 
-引数で渡されなかった任意項目について、AskUserQuestion で **個別に** 補完するか確認する（`answers` パラメータは設定しない）。
+For optional items not passed as arguments, confirm **individually** via AskUserQuestion whether to fill them in (do not set the `answers` parameter).
 
-質問順序（章立て順に従う）:
+Question order (follows the section order):
 
-1. **「プロジェクト概要を入力する」** / 「省略する」 → `--description` 相当
-2. **「参考実装を入力する」** / 「省略する」 → `--refs` 相当（カンマ区切り）
-3. **「やってはいけないことを入力する」** / 「省略する」 → `--donts` 相当（改行区切り）
-4. **「決定事項ファイルを指定する」** / 「TBD で残す」 → `--decisions-file` 相当
-5. **「タスクファイルを指定する」** / 「TBD で残す」 → `--tasks-file` 相当
-6. **「DoD を入力する」** / 「TBD で残す」 → `--dod` 相当（改行区切り）
-7. **「Phase N+1 outlook を入力する」** / 「(未定) で残す」 → `--outlook` 相当
-8. **「関連を入力する」** / 「省略する」 → `--related` 相当（改行区切り）
+1. **「プロジェクト概要を入力する」** / 「省略する」 → corresponds to `--description`
+2. **「参考実装を入力する」** / 「省略する」 → corresponds to `--refs` (comma-separated)
+3. **「やってはいけないことを入力する」** / 「省略する」 → corresponds to `--donts` (newline-separated)
+4. **「決定事項ファイルを指定する」** / 「TBD で残す」 → corresponds to `--decisions-file`
+5. **「タスクファイルを指定する」** / 「TBD で残す」 → corresponds to `--tasks-file`
+6. **「DoD を入力する」** / 「TBD で残す」 → corresponds to `--dod` (newline-separated)
+7. **「Phase N+1 outlook を入力する」** / 「(未定) で残す」 → corresponds to `--outlook`
+8. **「関連を入力する」** / 「省略する」 → corresponds to `--related` (newline-separated)
 
-「入力する」を選んだ場合は AskUserQuestion で具体的な内容を尋ねる（自由記述は別の AskUserQuestion 呼び出しで行う）。
+If 「入力する」 is chosen, ask for the specific content via AskUserQuestion (free-form entry is done via a separate AskUserQuestion call).
 
-引数で既に渡された項目については **質問しない**（同じ情報を二重で集めない）。
+For items already passed as arguments, **do not ask** (do not collect the same information twice).
 
-### body プレビューと最終確認
+### Body preview and final confirmation
 
-body 組み立て後、起票または stdout 出力の前に、AskUserQuestion で確認する（`answers` パラメータは設定しない）:
+After assembling the body, before filing the issue or outputting to stdout, confirm via AskUserQuestion (do not set the `answers` parameter):
 
-- **「この内容で起票する」** → `gh issue create --body-file` で起票（`--draft` 指定時は stdout 出力）
-- **「修正する」** → 修正対象セクションを尋ねて該当項目を再入力する
-- **「キャンセル」** → 中断する
+- **「この内容で起票する」** → file the issue with `gh issue create --body-file` (or output to stdout when `--draft` is specified)
+- **「修正する」** → ask which section to revise and re-enter the corresponding item
+- **「キャンセル」** → abort
 
-**重要:** 承認なしに `gh issue create` を実行しない。`--draft` モードでも、stdout 出力前に内容確認を行う。
+**Important:** Do not run `gh issue create` without approval. Even in `--draft` mode, confirm the content before outputting to stdout.
 
-### 完了後の次のアクション
+### Next action after completion
 
-完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
+Immediately after the completion report, call AskUserQuestion (do not set the `answers` parameter):
 
-- **「この issue から `/drive` で実装を始める」** → 起票した issue 番号を引数として `/drive` を案内する（実行はしない）
-- **「別の Phase issue を作成する」** → 本スキルを再度実行するよう案内する
-- **「終了する」** → 終了する
+- **「この issue から `/drive` で実装を始める」** → guide the user to `/drive` with the filed issue number as an argument (do not execute it)
+- **「別の Phase issue を作成する」** → guide the user to run this skill again
+- **「終了する」** → end
 
-ネクストアクションはユーザーの確認なく実行しない。
+Do not execute the next action without the user's confirmation.

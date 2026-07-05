@@ -1,33 +1,33 @@
 ---
 name: correctness
 category: required
-description: ロジック誤り・エッジケース・並行性・エラーハンドリング
+description: Logic errors, edge cases, concurrency, error handling
 applies_when: ["**/*"]
 default_enabled: true
 severity_rules: { critical: "悪用・データ破壊・誤った状態遷移・無限ループ・回帰の温床になり得るバグ", warning: "通常パスは動くが特定入力で破綻するケース、未処理の例外", info: "防御的コーディングの改善余地、より堅牢な書き方の提案" }
 exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
-# correctness — 正確性
+# correctness — Correctness
 
-## 検査項目
+## Inspection items
 
-- **ロジック誤り**: 条件分岐の取りこぼし、off-by-one、boolean 反転、誤った演算子
-- **エッジケース**: 空入力、null / undefined、最大/最小値、空配列・空文字列、Unicode、改行
-- **並行性**: race condition、競合する書き込み、shared state の取り扱い、await 漏れ、Promise の handling
-- **エラーハンドリング**: 握りつぶし（catch して何もしない）、誤った再 throw、エラー型の取り違え、finally の副作用
-- **戻り値・副作用**: 関数が宣言した契約を満たしているか、未文書化の副作用がないか
-- **型の整合**: `as` キャストや `any` 経由で実行時に破綻するパスがないか
+- **Logic errors**: missed branches in conditionals, off-by-one, inverted booleans, wrong operators
+- **Edge cases**: empty input, null / undefined, max/min values, empty arrays / empty strings, Unicode, line breaks
+- **Concurrency**: race conditions, conflicting writes, handling of shared state, missing await, Promise handling
+- **Error handling**: swallowing errors (catch and do nothing), incorrect re-throwing, mixing up error types, side effects in finally
+- **Return values / side effects**: whether the function satisfies its declared contract, whether there are undocumented side effects
+- **Type consistency**: whether there are paths that break at runtime via `as` casts or `any`
 
-## severity ガイド
+## Severity guide
 
-- **critical**: 悪用・データ破壊・誤った状態遷移・無限ループ・回帰の温床になり得るバグ
-- **warning**: 通常パスは動くが特定入力で破綻するケース、未処理の例外
-- **info**: 防御的コーディングの改善余地、より堅牢な書き方の提案
+- **critical**: bugs that could enable abuse, data corruption, incorrect state transitions, infinite loops, or become a breeding ground for regressions
+- **warning**: cases where the normal path works but specific inputs break it, unhandled exceptions
+- **info**: room for improvement in defensive coding, suggestions for more robust code
 
 ## skip_when
 
-なし（required 観点は常に適用）。
+None (a `required` perspective is always applied).
 
 ## exit_criteria.drive_loop
 
@@ -38,4 +38,4 @@ exit_criteria:
     warning: 0
 ```
 
-正確性に関する critical / warning が残っている状態で merge-ready とは判定しない。
+Do not judge as merge-ready while critical / warning issues related to correctness remain.

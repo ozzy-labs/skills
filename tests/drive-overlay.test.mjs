@@ -68,11 +68,11 @@ test("drive claude-code companion advertises --no-usage-guard + default-on wirin
   );
   // dedicated wiring section, now keyed on the opt-out flag
   assert.ok(
-    raw.includes("usage-guard 配線（既定 ON・`--no-usage-guard` で無効化）"),
+    raw.includes("usage-guard wiring (default ON, disabled via `--no-usage-guard`)"),
     "companion must carry a default-on usage-guard wiring section keyed on --no-usage-guard",
   );
   // default-on wording present
-  assert.ok(raw.includes("既定で有効"), "must document usage-guard as default-on (既定で有効)");
+  assert.ok(raw.includes("Enabled by default"), "must document usage-guard as default-on");
 });
 
 test("drive companion keeps --usage-guard as a deprecated no-op alias", async () => {
@@ -113,12 +113,12 @@ test("drive companion gates wave/worker dispatch with headroom-aware projection 
   );
   // single-mode checkpoints stay headroom=0 (legacy gate on current util)
   assert.ok(
-    raw.includes("単一モードの Phase1 / review-loop checkpoint は headroom を渡さない"),
+    raw.includes("The single-mode Phase 1 / review-loop checkpoint doesn't pass headroom"),
     "single-mode checkpoints must NOT pass headroom (legacy gate on current util)",
   );
   // two-layer defense: boundary pause + #123 mid-unit hook elevated to default
   assert.ok(
-    raw.includes("二層防御") && raw.includes("#123"),
+    raw.includes("two-layer defense") && raw.includes("#123"),
     "must document the two-layer defense (boundary pause + #123 mid-unit hook)",
   );
 });
@@ -127,12 +127,12 @@ test("drive companion documents graceful degrade when the usage-guard skill is a
   const companion = await loadCompanion("drive", "claude-code", []);
   const raw = companion.raw;
   assert.ok(
-    raw.includes("graceful degrade（skill 不在）"),
+    raw.includes("Graceful degrade (skill absent)"),
     "companion must carry a graceful-degrade section for an absent usage-guard skill",
   );
   // 1-line warning + continue (fail-open) when the skill / usage-check.mjs is missing
   assert.ok(
-    raw.includes("未インストール") || raw.includes("未配置"),
+    raw.includes("not installed"),
     "graceful degrade must cover the skill-not-installed case",
   );
   assert.ok(raw.includes("fail-open"), "skill-absent path must be treated as fail-open");
@@ -182,7 +182,10 @@ test("neutral drive SKILL.md documents usage-guard as default-on + Claude Code o
   // opt-out flag is documented
   assert.match(raw, /--no-usage-guard/);
   // default-on wording
-  assert.ok(raw.includes("既定で有効"), "neutral SKILL.md must document usage-guard as default-on");
+  assert.ok(
+    raw.includes("Enabled by default"),
+    "neutral SKILL.md must document usage-guard as default-on",
+  );
   // --usage-guard survives as a deprecated no-op alias
   assert.ok(
     raw.includes("--usage-guard") && raw.includes("no-op"),
@@ -190,7 +193,7 @@ test("neutral drive SKILL.md documents usage-guard as default-on + Claude Code o
   );
   // marked Claude Code only (same treatment as review --deep)
   assert.ok(
-    raw.includes("Claude Code 環境のみ") || raw.includes("Claude Code only"),
+    raw.includes("only in the Claude Code environment") || raw.includes("Claude Code only"),
     "neutral SKILL.md must mark usage-guard as Claude Code only",
   );
   // continuation command drops the forced flag
@@ -199,7 +202,10 @@ test("neutral drive SKILL.md documents usage-guard as default-on + Claude Code o
     "neutral SKILL.md continuation command is /drive <original args>",
   );
   // wave-boundary granularity + PreToolUse hook ceiling noted
-  assert.ok(raw.includes("wave 境界"), "notes orchestration pauses at wave-boundary granularity");
+  assert.ok(
+    raw.includes("wave boundary"),
+    "notes orchestration pauses at wave-boundary granularity",
+  );
   assert.ok(
     raw.includes("PreToolUse hook"),
     "notes an in-flight worker's ceiling is the PreToolUse hook",
@@ -217,7 +223,7 @@ test("neutral drive SKILL.md: workers do not self-merge; parent centralizes merg
   const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
   // worker stops at merge-ready (Phase 4 skipped for workers)
   assert.ok(
-    raw.includes("worker は Phase 4"),
+    raw.includes("as an orchestration worker, Phase 4 is not run"),
     "documents that orchestration workers skip Phase 4 (do not self-merge)",
   );
   // worker return status capped at merge-ready
@@ -227,7 +233,7 @@ test("neutral drive SKILL.md: workers do not self-merge; parent centralizes merg
   );
   // parent merges in dependency order at Final-4
   assert.ok(
-    raw.includes("Phase Final-4: 依存順マージ"),
+    raw.includes("Phase Final-4: dependency-order merge"),
     "documents Final-4 parent-centralized dependency-order merge",
   );
 });
@@ -236,23 +242,23 @@ test("neutral drive SKILL.md: Final phases reordered — audit pre-merge, cleanu
   const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
   // Final-2 audit is pre-merge
   assert.ok(
-    raw.includes("Phase Final-2: cross-cutting audit（マージ前"),
+    raw.includes("Phase Final-2: cross-cutting audit (pre-merge"),
     "Final-2 cross-cutting audit runs pre-merge",
   );
   // Final-3 reconciliation folds into the introducing PR
   assert.ok(
-    raw.includes("Phase Final-3: reconciliation") && raw.includes("導入元 PR"),
+    raw.includes("Phase Final-3: reconciliation") && raw.includes("originating PR"),
     "Final-3 reconciliation folds gaps into the introducing PR",
   );
   // cleanup moved to Final-5 (after merge)
   assert.ok(
-    raw.includes("Phase Final-5: worker 作業コピーの cleanup"),
+    raw.includes("Phase Final-5: cleanup of worker working copies"),
     "cleanup moved to Final-5 (last, after merge)",
   );
   // document ORDER must be audit(2) < merge(4) < cleanup(5), not just labels present
   const iAudit = raw.indexOf("#### Phase Final-2: cross-cutting audit");
-  const iMerge = raw.indexOf("#### Phase Final-4: 依存順マージ");
-  const iCleanup = raw.indexOf("#### Phase Final-5: worker 作業コピーの cleanup");
+  const iMerge = raw.indexOf("#### Phase Final-4: dependency-order merge");
+  const iCleanup = raw.indexOf("#### Phase Final-5: cleanup of worker working copies");
   assert.ok(
     iAudit > 0 && iMerge > iAudit && iCleanup > iMerge,
     "Final phases are ordered audit(2) → merge(4) → cleanup(5) in the document",
@@ -260,14 +266,17 @@ test("neutral drive SKILL.md: Final phases reordered — audit pre-merge, cleanu
   // audit attribution carries source_pr — anchored to the attribution output block
   // (co-located with category:), not a bare token match
   assert.ok(
-    raw.includes("導入元 PR に attribution") && /source_pr:[\s\S]{0,80}category:/.test(raw),
+    raw.includes("attributed to its originating PR") && /source_pr:[\s\S]{0,80}category:/.test(raw),
     "audit output block attributes each gap to its source_pr alongside category",
   );
   // reconciliation single-pass convergence (specific phrase)
-  assert.ok(raw.includes("1 パス固定"), "reconciliation is a single pass (convergence guarantee)");
+  assert.ok(
+    raw.includes("fixed at 1 pass"),
+    "reconciliation is a single pass (convergence guarantee)",
+  );
   // fail-soft anchored to the reconciliation failure edge-case row, not any occurrence
   assert.ok(
-    /reconciliation の lint\/畳み込みが失敗[\s\S]{0,40}fail-soft/.test(raw),
+    /Reconciliation's lint\/folding fails[\s\S]{0,40}Fail-soft/.test(raw),
     "reconciliation fold failure is handled fail-soft (anchored to its edge-case row)",
   );
 });
@@ -278,12 +287,13 @@ test("drive companion: worker prompt forbids self-merge and keeps stacked base",
   const raw = companion.raw;
   // subagent prompt: no gh pr merge
   assert.ok(
-    raw.includes("マージ禁止"),
-    "companion instructs workers not to call gh pr merge (マージ禁止)",
+    raw.includes("Merge prohibition"),
+    "companion instructs workers not to call gh pr merge (Merge prohibition)",
   );
   // Final-2/3 run inside the still-present worker worktree, in parallel per PR
   assert.ok(
-    raw.includes("Phase Final-2: cross-cutting audit") && raw.includes("worktree 内で並列"),
+    raw.includes("Phase Final-2: cross-cutting audit") &&
+      raw.includes("parallel within worker worktrees"),
     "companion runs Final-2 audit inside worker worktrees, parallel per PR",
   );
   assert.ok(
@@ -298,7 +308,7 @@ test("drive companion: worker prompt forbids self-merge and keeps stacked base",
   // Final-2 audit + Final-3 reconciliation run regardless of --merge (self-closing
   // guarantee for the --merge-unspecified path); only Final-4 branches on --merge
   assert.ok(
-    raw.includes("`--merge` 有無を問わず") && raw.includes("Final-3"),
+    raw.includes("regardless of whether `--merge` is present") && raw.includes("Final-3"),
     "companion runs Final-1..Final-3 regardless of --merge (only Final-4 merge branches)",
   );
 });
@@ -319,9 +329,12 @@ test("drive's real build discovery ships worktree-safety and excludes the compan
   );
   const wt = extras.find((e) => e.relativePath === "worktree-safety.claude-code.md");
   // the extracted detail (7-axis detection + recovery + cleanup) lives there now
-  assert.ok(wt.content.includes("汚染検出 7 軸"), "extra file carries the 7-axis detection detail");
   assert.ok(
-    wt.content.includes("recovery シーケンス") && wt.content.includes("cleanup 実行手順"),
+    wt.content.includes("7 contamination-detection axes"),
+    "extra file carries the 7-axis detection detail",
+  );
+  assert.ok(
+    wt.content.includes("Recovery sequence") && wt.content.includes("Cleanup execution steps"),
     "extra file carries recovery + cleanup mechanics",
   );
 });
@@ -359,7 +372,7 @@ test("neutral drive SKILL.md: --merge is the explicit opt-in overriding the gate
   // The dedicated policy subsection ties --merge to a proceed override.
   assert.match(
     raw,
-    /マージと autonomy policy/,
+    /Merge and the autonomy policy/,
     "must carry the dedicated merge ⇄ autonomy-policy subsection",
   );
   assert.ok(
@@ -369,7 +382,7 @@ test("neutral drive SKILL.md: --merge is the explicit opt-in overriding the gate
     "--merge must be documented as the explicit opt-in overriding the gate to proceed",
   );
   // both merge sites (single Phase 4 + orchestration Final-4) reference the gate
-  const gateRefs = (raw.match(/`irreversible` gate に従う/g) ?? []).length;
+  const gateRefs = (raw.match(/follows the central policy's `irreversible` gate/g) ?? []).length;
   assert.ok(
     gateRefs >= 2,
     `both merge sites (Phase 4 + Phase Final-4) must reference the irreversible gate (found ${gateRefs})`,
@@ -380,7 +393,7 @@ test("neutral drive SKILL.md documents policy-absence fail-safe for merge", asyn
   const raw = await readFile(join(SRC, "drive", "SKILL.md"), "utf8");
   assert.match(
     raw,
-    /policy 不在でも壊れない/,
+    /Doesn't break even without a policy present/,
     "must document policy-absence safety (fail-safe to ask)",
   );
   assert.match(raw, /fail-safe/, "must reference the fail-safe design");

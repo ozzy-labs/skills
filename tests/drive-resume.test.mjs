@@ -45,24 +45,26 @@ function section(raw, startMarker, endMarker) {
 
 test("canonical drive SKILL.md: input-parsing section documents the argument-restoration convention", async () => {
   const raw = await loadCanonicalRaw();
-  const parsing = section(raw, "## 入力解析", "## 単一モード");
+  const parsing = section(raw, "## Input parsing", "## Single mode");
   assert.ok(
-    parsing.includes("### 引数復元（再開コマンド）"),
+    parsing.includes("### Argument restoration (resume command)"),
     "input parsing must carry a dedicated argument-restoration subsection",
   );
   // same rule as the usage-guard continuation command
   assert.ok(
-    parsing.includes("継続コマンド規約と同一"),
+    parsing.includes("identical to usage-guard's continuation-command convention"),
     "restoration convention must be declared identical to the usage-guard continuation-command rule",
   );
   // carry --no-usage-guard only when the user specified it
   assert.ok(
-    parsing.includes("`--no-usage-guard` はユーザー指定されていた場合のみ引き継ぐ"),
+    parsing.includes("`--no-usage-guard` is carried over only if the user specified it"),
     "must carry --no-usage-guard only when user-specified",
   );
   // never force / persist the deprecated no-op alias
   assert.ok(
-    parsing.includes("`--usage-guard` は deprecated no-op エイリアスのため保存・付与しない"),
+    parsing.includes(
+      "`--usage-guard` is a deprecated no-op alias, so it is neither saved nor added",
+    ),
     "must never save/force the deprecated --usage-guard alias",
   );
 });
@@ -71,7 +73,7 @@ test("canonical drive SKILL.md: input-parsing section documents the argument-res
 
 test("canonical drive SKILL.md: Phase 5 report template carries the resume line", async () => {
   const raw = await loadCanonicalRaw();
-  const phase5 = section(raw, "### Phase 5: 完了報告", "## オーケストレーションモード");
+  const phase5 = section(raw, "### Phase 5: completion report", "## Orchestration mode");
   // template line (aligned) + prose rule both present
   assert.ok(
     phase5.includes("再開:     /drive <元の引数>"),
@@ -80,12 +82,12 @@ test("canonical drive SKILL.md: Phase 5 report template carries the resume line"
   assert.ok(phase5.includes(RESUME_LINE), "Phase 5 prose must spell the exact resume command");
   // gated on failed / merge-ready — and mandatory there
   assert.ok(
-    /`failed` または `merge-ready` のとき\*\*必ず\*\*出力する/.test(phase5),
+    /is \*\*always\*\* output when the status is `failed` or `merge-ready`/.test(phase5),
     "resume line must be mandatory for failed / merge-ready outcomes",
   );
   // suppressed when the run completed (merged / auto-merge enabled)
   assert.ok(
-    phase5.includes("`merged` / `auto-merge enabled` で完結した場合は表示しない"),
+    phase5.includes("not shown when the status completes as `merged` / `auto-merge enabled`"),
     "resume line must be suppressed when the single-mode run completed",
   );
 });
@@ -94,26 +96,26 @@ test("canonical drive SKILL.md: Phase 5 report template carries the resume line"
 
 test("canonical drive SKILL.md: Phase Final-6 aggregate report carries the resume line", async () => {
   const raw = await loadCanonicalRaw();
-  const final6 = section(raw, "#### Phase Final-6: 集約レポート", "## 失敗 semantics");
+  const final6 = section(raw, "#### Phase Final-6: aggregate report", "## Failure semantics");
   // the example template shows the line after the 集計 block
   assert.ok(final6.includes(RESUME_LINE), "Final-6 template/prose must include the resume line");
   // gated on failed / merge-ready leftovers / skipped — and mandatory there
   assert.ok(
-    final6.includes("`failed` / `merge-ready` 残置 / `skipped` が 1 件以上あるとき"),
+    final6.includes("whenever there's 1 or more `failed` / leftover `merge-ready` / `skipped`"),
     "resume line triggers on failed / merge-ready leftovers / skipped",
   );
   assert.ok(
-    final6.includes("**必ず**出力する"),
+    final6.includes("is **always** output"),
     "resume line must be mandatory in Final-6 when leftovers exist",
   );
   // suppressed when every target merged
   assert.ok(
-    final6.includes("全 target が merged で完結した場合は表示しない"),
+    final6.includes("not shown when all targets complete as merged"),
     "resume line must be suppressed when all targets merged",
   );
   // idempotent-resume semantics: merged PRs are detected and skipped
   assert.ok(
-    final6.includes("merged 済み PR") && final6.includes("続行"),
+    final6.includes("already-merged PRs") && final6.includes("continues"),
     "documents that idempotent resume skips already-merged targets and continues",
   );
 });
@@ -122,13 +124,13 @@ test("canonical drive SKILL.md: Phase Final-6 aggregate report carries the resum
 
 test("canonical drive SKILL.md: failure-semantics section notes the shared resume path", async () => {
   const raw = await loadCanonicalRaw();
-  const semantics = section(raw, "## 失敗 semantics", "## 注意事項");
+  const semantics = section(raw, "## Failure semantics", "## Notes");
   assert.ok(
     semantics.includes(RESUME_LINE),
     "failure semantics must point at the report resume line",
   );
   assert.ok(
-    semantics.includes("冪等 resume"),
+    semantics.includes("Idempotent resume"),
     "failure semantics must name the idempotent resume mechanism",
   );
 });
@@ -166,7 +168,9 @@ test("built claude-code drive output emits the failure-report resume line wiring
   );
   // restoration convention preserved in the built output
   assert.ok(
-    driveOut.content.includes("`--no-usage-guard` がユーザー指定されていた場合のみ"),
+    driveOut.content.includes(
+      "carried over to the continuation command, only if the user specified it",
+    ),
     "built output must keep the --no-usage-guard carry-only-when-user-specified rule",
   );
   assert.ok(

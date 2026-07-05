@@ -6,16 +6,16 @@ allowed-tools: Bash, Read
 
 # skill-metrics
 
-`.agents/skills/skill-metrics/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/skill-metrics/SKILL.md` and follow the workflow steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### 集計エンジンの実行
+### Running the aggregation engine
 
-同階層の `skill-metrics.mjs` を Bash で実行して JSON rollup を得る（`$ARGUMENTS` をそのまま渡す）。user-scope では `~/.claude/skills/skill-metrics/skill-metrics.mjs`、dogfood では `<repo>/.claude/skills/skill-metrics/skill-metrics.mjs`:
+Run the `skill-metrics.mjs` in the same directory via Bash to obtain the JSON rollup (pass `$ARGUMENTS` through as-is). User-scope: `~/.claude/skills/skill-metrics/skill-metrics.mjs`; dogfood: `<repo>/.claude/skills/skill-metrics/skill-metrics.mjs`:
 
 ```bash
 node ~/.claude/skills/skill-metrics/skill-metrics.mjs $ARGUMENTS
 ```
 
-得た JSON を人間可読に整形して提示する（read-only・送信なし）。
+Format the resulting JSON into something human-readable and present it (read-only, no sending).

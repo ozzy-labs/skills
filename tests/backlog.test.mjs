@@ -138,7 +138,7 @@ test("SKILL.md references drive as the dependency-notation SSOT and does NOT re-
   assert.match(raw, /detectBodyDeps/, "must name the reused detectBodyDeps function");
   assert.match(
     raw,
-    /再掲しない|再掲せず|重複記述しない/,
+    /restates? the rules|does not restate|re-document(?:ed|ing)? the (?:grammar|rules)/i,
     "must state the rule is not re-documented (drift prevention)",
   );
   // Negative: does NOT re-encode the drive regex alternation as its own rule.
@@ -171,7 +171,7 @@ test("SKILL.md documents --auto with auto-ok label gating (no ungated --auto)", 
   assert.match(raw, /HATL/, "must frame the gate as HATL (human sets the boundary via labels)");
   assert.match(
     raw,
-    /ゲーティングなしの `--auto` は存在しない|ゲーティングなし.*--auto/,
+    /no ungated `--auto`|ungated.*--auto|--auto.*ungated/i,
     "must explicitly forbid an ungated --auto",
   );
 });
@@ -186,7 +186,7 @@ test("SKILL.md classes drive launch as externally-visible and references the pol
 
 test("SKILL.md hardcodes the fixed priority vocabulary table", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /優先度規則/, "must have a priority-rule section");
+  assert.match(raw, /Priority rules/i, "must have a priority-rule section");
   assert.match(raw, /blocker/, "rule (a): blocker");
   assert.match(raw, /milestone/, "rule (b): milestone due");
   assert.match(raw, /priority:high/, "rule (c): priority:high label");
@@ -196,7 +196,7 @@ test("SKILL.md hardcodes the fixed priority vocabulary table", async () => {
 
 test("SKILL.md declares single-repo scope (cross-repo out of scope)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /単一リポ/, "must declare single-repo scope");
+  assert.match(raw, /single repo(?:sitory)?/i, "must declare single-repo scope");
   assert.match(raw, /cross-repo/i, "must enumerate cross-repo as out of scope");
 });
 

@@ -1,7 +1,7 @@
 ---
 name: usability
 category: ux
-description: CLI 文言・エラーメッセージ・skill argument-hint・README 即座理解性
+description: CLI wording, error messages, skill argument-hint, README immediate comprehensibility
 applies_when: ["src/**", "**/*.md", "**/SKILL.md", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "**/*.py", "**/*.sh"]
 skip_when: { diff_only_in: ["tests/**", "**/*.test.*"] }
 default_enabled: true
@@ -9,28 +9,28 @@ severity_rules: { critical: "ユーザーが詰まる致命的な UX 不備 (無
 exit_criteria: { drive_loop: { critical: 0 } }
 ---
 
-# usability — ユーザビリティ / DX
+# usability — Usability / DX
 
-## 検査項目
+## Review Criteria
 
-- **CLI 文言**: help / usage 表示、フラグ名の直感性、`--<flag>` の命名規則統一
-- **エラーメッセージ**: 何が原因で何をすればよいかが伝わるか、ユーザー操作で対処可能か
-- **skill / agent の argument-hint**: 期待される引数形式が一目で分かるか
-- **README 即座理解性**: 最初の画面で何を提供する skill / package か理解できるか
-- **失敗時のリカバリ手順**: ハッピーパス以外で詰まらない設計、再実行可能性
-- **デフォルト値**: 一般的なケースで設定なしで動くか、安全側に倒れているか
-- **AskUserQuestion**: ユーザーへの確認が AskUserQuestion を使っているか、テキスト出力で選択肢を列挙していないか（CLAUDE.md ルール）
-- **国際化**: メッセージが日本語 / 英語のどちらかに統一されているか、混在していないか
+- **CLI wording**: help / usage display, intuitiveness of flag names, consistency of `--<flag>` naming conventions
+- **Error messages**: Whether the cause and required action are conveyed, whether the user can address it through their own actions
+- **skill / agent argument-hint**: Whether the expected argument format is clear at a glance
+- **README immediate comprehensibility**: Whether the first screen makes clear what the skill / package provides
+- **Recovery steps on failure**: Design that doesn't get stuck outside the happy path, re-runnability
+- **Default values**: Whether it works without configuration in the common case, whether it errs on the safe side
+- **AskUserQuestion**: Whether user confirmations use AskUserQuestion, and whether choices are not enumerated via plain text output (CLAUDE.md rule)
+- **Internationalization**: Whether messages are consistently in either Japanese or English, without mixing
 
-## severity ガイド
+## Severity Guide
 
-- **critical**: ユーザーが詰まる致命的な UX 不備（無限ループ的な確認、復旧不可能な操作の無確認実行）
-- **warning**: 紛らわしいメッセージ、誤解を招く CLI 文言、argument-hint の欠落
-- **info**: より親切な文言、説明追記、UX の細かな改善
+- **critical**: Fatal UX defects that get users stuck (infinite-loop-like confirmations, executing unrecoverable operations without confirmation)
+- **warning**: Confusing messages, misleading CLI wording, missing argument-hint
+- **info**: Friendlier wording, added explanations, minor UX improvements
 
 ## skip_when
 
-テストのみの変更ではユーザビリティ観点は適用しない。
+The usability perspective does not apply to changes that are only to tests.
 
 ## exit_criteria.drive_loop
 
@@ -40,4 +40,4 @@ exit_criteria:
     critical: 0
 ```
 
-ユーザビリティの warning は許容（merge 後の継続改善対象）。critical は阻止する。
+Usability warnings are permitted (subject to continued improvement after merge). critical blocks.
