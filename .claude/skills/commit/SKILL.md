@@ -1,16 +1,16 @@
 ---
-description: 変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
+description: Stages changes and commits them following Conventional Commits. Does not push or create a PR.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
 
 # commit
 
-`.agents/skills/commit/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/commit/SKILL.md` and follow the workflow steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-変更ファイルの一覧をユーザーに提示する:
+Present the list of changed files to the user:
 
 ```text
 変更ファイル:
@@ -18,7 +18,7 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
   A src/content/blog/new-post.md
 ```
 
-完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）。報告の出力だけでスキルを終了しない:
+Immediately after the completion report, call AskUserQuestion (do not set the `answers` parameter). Do not end the skill with just the report output:
 
-- **「PR を作成する」** → `.claude/skills/pr/SKILL.md` を Read し、その手順に従う
-- **「追加の変更を行う」** → 終了する
+- **"Create a PR"** → Read `.claude/skills/pr/SKILL.md` and follow its steps
+- **"Make additional changes"** → end

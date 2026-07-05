@@ -1,41 +1,41 @@
 ---
 name: commit-conventions
-description: Conventional Commits のメッセージ生成ルール（Type/Scope 判定表、フォーマット）。他スキルから参照される。
+description: Rules for generating Conventional Commits messages (Type/Scope decision table, format). Referenced by other skills.
 ---
 
-# commit-conventions - コミットメッセージ生成ルール
+# commit-conventions - Commit message generation rules
 
-Conventional Commits 1.0.0 に準拠する（commitlint で検証される）。
+Conforms to Conventional Commits 1.0.0 (validated by commitlint).
 
-## Type の自動判定
+## Automatic Type determination
 
-| 変更内容 | Type |
+| Nature of change | Type |
 |---------|------|
-| 新機能の追加 | `feat` |
-| バグ修正 | `fix` |
-| ドキュメント変更 | `docs` |
-| フォーマット（動作変更なし） | `style` |
-| リファクタリング | `refactor` |
-| パフォーマンス改善 | `perf` |
-| テスト追加・修正 | `test` |
-| ビルド・依存関係 | `build` |
-| CI/CD 設定 | `ci` |
-| その他 | `chore` |
+| Adding a new feature | `feat` |
+| Bug fix | `fix` |
+| Documentation change | `docs` |
+| Formatting (no behavior change) | `style` |
+| Refactoring | `refactor` |
+| Performance improvement | `perf` |
+| Adding/fixing tests | `test` |
+| Build / dependencies | `build` |
+| CI/CD configuration | `ci` |
+| Other | `chore` |
 
-## Scope の判定
+## Scope determination
 
-変更が特定のディレクトリや機能に集中している場合、scope を付与する。ディレクトリ名や機能名から簡潔な scope を選ぶ:
+If the change is concentrated in a specific directory or feature, attach a scope. Choose a concise scope from the directory name or feature name:
 
-- 例: `feat(blog):`, `fix(auth):`, `ci(deploy):`
-- 複数ディレクトリにまたがる場合は scope を省略する
+- Example: `feat(blog):`, `fix(auth):`, `ci(deploy):`
+- If the change spans multiple directories, omit the scope
 
-## メッセージ本文
+## Message body
 
-- 1 行目: `type[(scope)]: description`（英語で、50 文字以内目安）
-- 複数の論理的変更がある場合は body で補足
+- Line 1: `type[(scope)]: description` (in English, roughly 50 characters or fewer)
+- If there are multiple logical changes, elaborate in the body
 
-## 共通注意事項
+## General notes
 
-- **force push は絶対に行わない**
-- **.env ファイルは読み取り・ステージングしない**（`git add` 対象から除外）
-- コミットメッセージの `Co-Authored-By` は付与しない（個人プロジェクトのため）
+- **Never force push**
+- **Do not read or stage `.env` files** (exclude from `git add` targets)
+- Do not add `Co-Authored-By` to commit messages (this is a personal project)

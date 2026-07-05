@@ -1,82 +1,82 @@
 ---
 name: skill-observability
-description: skill observability のイベント契約（event.schema.json）と emit substrate（obs-emit.mjs）の定義。skill 改善ループの計測層の SSOT。他スキル・hook から参照される。
+description: Defines the skill observability event contract (event.schema.json) and emit substrate (obs-emit.mjs). The SSOT for the measurement layer of the skill improvement loop. Referenced by other skills and hooks.
 user-invocable: false
 ---
 
-# skill-observability - 計測イベント契約と emit substrate
+# skill-observability - Measurement event contract and emit substrate
 
-skill 改善ループ（install→利用→反映）の **計測層** を支える契約とツールを定義する被参照 companion。**イベントの形（schema）と書き込みの作法（emit）の SSOT**、および transcript から発火を事後導出する **痕跡導出 hook（obs-derive.mjs）** を提供する。集計（`/skill-metrics`）や反映は本契約の上に別途構築する。
+A referenced companion that defines the contract and tools underpinning the **measurement layer** of the skill improvement loop (install → use → reflect). Provides the **SSOT for the shape of events (schema) and the convention for writing them (emit)**, along with the **trace-derivation hook (obs-derive.mjs)** that derives invocations after the fact from the transcript. Aggregation (`/skill-metrics`) and reflection are built separately on top of this contract.
 
-## 原則
+## Principles
 
-- **痕跡導出を主軸**: 計測は可能な限り `gh`/`git` の ground truth と transcript 痕跡から事後導出する（自己申告バイアスの回避）。skill prompt 内からの inline emit は、痕跡に出ない意味論シグナル（fallback・HITL 却下・loop 上限到達等）に限る従。
-- **fail-open**: emit の失敗で被計測 skill を止めない。`obs-emit.mjs` は不在・失敗・検証エラーのいずれでも throw せず、警告を stderr に出して exit 0。
-- **privacy（最厳格モード）**: イベントは metadata のみ。`event.schema.json` の `additionalProperties: false` が payload / diff / token / path 等の未知フィールドを**機械的に拒否**する。repo 識別子は raw を保存せず hash（`repo_hash`）のみ。送信（reflection）は常に明示 opt-in・HITL（本 skill は送信経路を持たない）。
-- **件数主義**: 単一作者・低頻度のデータ量では統計的有意性に届かないため、本契約は率や信頼区間を強制しない。集計側は件数 + 注目イベントを基本とする。
+- **Trace derivation as the main axis**: Measurement is derived after the fact, as much as possible, from `gh`/`git` ground truth and transcript traces (avoiding self-report bias). Inline emit from within a skill prompt is secondary, limited to semantic signals that don't show up in traces (fallback, HITL rejection, loop cap reached, etc.).
+- **fail-open**: A failed emit must not stop the skill being measured. `obs-emit.mjs` never throws — whether absent, failing, or hitting a validation error — it prints a warning to stderr and exits 0.
+- **privacy (strictest mode)**: Events are metadata only. `event.schema.json`'s `additionalProperties: false` **mechanically rejects** unknown fields such as payload / diff / token / path. Repo identifiers are never stored raw — only a hash (`repo_hash`). Sending (reflection) is always explicit opt-in / HITL (this skill has no send path of its own).
+- **Count-based reasoning**: Because a single author's low-frequency data volume doesn't reach statistical significance, this contract does not force rates or confidence intervals. The aggregation side is built primarily around counts + notable events.
 
-## イベントログ
+## Event log
 
 ```text
-~/.agents/observability/events.jsonl   # 追記専用・1 行 1 イベント・OTel 非依存で自己完結
+~/.agents/observability/events.jsonl   # append-only, 1 line per event, self-contained without OTel dependency
 ```
 
-HOME-anchored（skills dir の外）。dogfood mirror の再ビルドで消えない。任意の consumer / hook が読める。
+HOME-anchored (outside the skills dir). Survives a dogfood mirror rebuild. Readable by any consumer / hook.
 
-## イベント契約（event.schema.json が SSOT）
+## Event contract (event.schema.json is the SSOT)
 
-`event.schema.json`（本 skill の sibling）が唯一の SSOT。`obs-emit.mjs` も test も**このファイルを読んで**検証するため doc とコードの drift が起きない。フィールド名は OpenTelemetry GenAI セマンティック規約の**「形」**に寄せる（`skill`≈`gen_ai.agent.name` / `operation`≈`gen_ai.operation.name`）。規約は experimental なので密結合はしない。
+`event.schema.json` (a sibling of this skill) is the sole SSOT. Both `obs-emit.mjs` and the tests validate by **reading this file**, so doc and code never drift apart. Field names lean toward the **shape** of the OpenTelemetry GenAI semantic conventions (`skill`≈`gen_ai.agent.name` / `operation`≈`gen_ai.operation.name`). Since the conventions are experimental, this skill does not couple tightly to them.
 
-必須フィールド: `schema_version`(=1) / `ts`(ISO 8601) / `adapter` / `session_id` / `skill` / `event`。
+Required fields: `schema_version`(=1) / `ts`(ISO 8601) / `adapter` / `session_id` / `skill` / `event`.
 
-`event` の種別:
+Types of `event`:
 
-| event | 用途 | 追加必須 |
+| event | Purpose | Additional required field |
 | --- | --- | --- |
-| `start` | skill 発火 | — |
-| `phase` | フェーズ遷移（implement / ship / review 等） | — |
-| `outcome` | 終了状態 | `status` ∈ {completed, aborted, fallback} |
-| `signal` | 意味論カウンタ（痕跡に出ない遷移） | `name`（固定語彙） |
-| `heartbeat` | 「観測が走った」記録（データ不在＝成功の誤読を防ぐ） | — |
+| `start` | Skill invocation | — |
+| `phase` | Phase transition (implement / ship / review, etc.) | — |
+| `outcome` | End state | `status` ∈ {completed, aborted, fallback} |
+| `signal` | Semantic counter (a transition that doesn't show up in traces) | `name` (fixed vocabulary) |
+| `heartbeat` | Records that "observation ran" (prevents misreading absent data as success) | — |
 
-`signal.name` の固定語彙（初期）: `review.loop_iter` / `review.deep_to_quick_fallback` / `usage_guard.fail_open` / `hitl.rejected` / `loop.hit_cap`。
+Fixed vocabulary (initial) for `signal.name`: `review.loop_iter` / `review.deep_to_quick_fallback` / `usage_guard.fail_open` / `hitl.rejected` / `loop.hit_cap`.
 
-privacy: `repo_hash` は 12 桁 hex（sha256 prefix）のみ。raw repo 名・cwd・PR 番号生値は契約上書けない（`additionalProperties: false`）。
+privacy: `repo_hash` is 12-digit hex (a sha256 prefix) only. The contract makes it impossible to write raw repo names, cwd, or raw PR numbers (`additionalProperties: false`).
 
-## emit substrate（obs-emit.mjs）
+## Emit substrate (obs-emit.mjs)
 
-`obs-emit.mjs`（sibling・全 adapter で動く CLI）が build→validate→append の write primitive。痕跡導出 hook も inline emit も、最終的にこれを通して 1 イベントを追記する。
+`obs-emit.mjs` (sibling, a CLI that runs on all adapters) is the build→validate→append write primitive. Both the trace-derivation hook and inline emit ultimately go through this to append a single event.
 
 ```bash
-# 例
+# Examples
 node obs-emit.mjs --skill=drive  --event=outcome --status=completed
 node obs-emit.mjs --skill=review --event=signal  --name=review.loop_iter --value=2
 node obs-emit.mjs --skill=drive  --event=heartbeat
 node obs-emit.mjs --skill=drive  --event=outcome --status=merged --repo="$(git rev-parse --show-toplevel)"
 ```
 
-引数: `--skill` / `--event`（必須相当）、`--status` / `--name` / `--value` / `--phase` / `--operation` / `--reason` / `--run`（任意）、`--repo`（hash して `repo_hash` に格納）、`--adapter` / `--session`（既定は env から解決）。
+Arguments: `--skill` / `--event` (effectively required), `--status` / `--name` / `--value` / `--phase` / `--operation` / `--reason` / `--run` (optional), `--repo` (hashed and stored in `repo_hash`), `--adapter` / `--session` (resolved from env by default).
 
-検証に通らないイベント・あらゆる失敗は**追記せず警告して exit 0**（fail-open）。`&&` で連結した caller を壊さない。
+Any event that fails validation, and any other failure, is **not appended — it warns and exits 0** (fail-open). Does not break callers chained with `&&`.
 
-## 痕跡導出 hook（obs-derive.mjs）
+## Trace-derivation hook (obs-derive.mjs)
 
-`obs-derive.mjs`（sibling・SessionEnd hook）が**主捕捉経路**。セッション終了後に transcript を読み、**どの skill が発火したか**を事後導出して obs-emit substrate 経由で記録する。model に mid-run の自己申告を求めず痕跡から再構成するため、**自己申告バイアス**（中断する最悪の run ほど emit を落とす）を回避する。
+`obs-derive.mjs` (sibling, a SessionEnd hook) is the **primary capture path**. After a session ends, it reads the transcript, derives after the fact **which skill fired**, and records it via the obs-emit substrate. Because it reconstructs from traces rather than asking the model for a mid-run self-report, it avoids **self-report bias** (the worst-case runs that abort being exactly the ones that drop the emit).
 
-導出する reliable コア:
+The reliable core it derives:
 
-- セッションごとに `heartbeat` 1 件（「観測が走った」記録。空 window が「発火 0」と「hook 未発火」を区別可能に）。
-- transcript 中の各 skill 発火につき `start` 1 件。2 チャネル:
-  - model 呼出の `Skill` tool_use → `operation: invoke_agent`
-  - user 入力の `/slash-command` → `operation: slash_command`（**実在 skill のみ**。sibling に skill dir が無い組込みコマンド `/clear` `/compact` 等は除外しデータ汚染を防ぐ）
+- One `heartbeat` per session (a record that "observation ran." Makes an empty window distinguishable between "zero invocations" and "the hook didn't fire").
+- One `start` per skill invocation found in the transcript. 2 channels:
+  - A model-invoked `Skill` tool_use → `operation: invoke_agent`
+  - A user-entered `/slash-command` → `operation: slash_command` (**only for skills that actually exist**. Built-in commands with no sibling skill dir, such as `/clear` `/compact`, are excluded to prevent data contamination)
 
-skill の引数（機密を含みうる）は**記録しない**（skill 名と channel のみ）。
+The skill's arguments (which may be sensitive) are **not recorded** (only the skill name and channel).
 
-**deferred（本 hook では導出しない）**: merge/abort の **outcome**。セッション終了時点の merge 状態は未確定で session→PR linkage + 遅延再評価が要り、abort 推定（「PR なしで終了」）は人間中断・冪等 resume と区別できずノイズが多い。reliable・低ノイズを保つため別増分に分離する。
+**Deferred (not derived by this hook)**: the merge/abort **outcome**. The merge state at session end is not yet settled — it requires session→PR linkage plus deferred re-evaluation, and abort inference ("ended without a PR") is hard to distinguish from a human interruption or an idempotent resume, and is noisy. To keep things reliable and low-noise, this is split off into a separate increment.
 
-### SessionEnd hook を有効化（手動 opt-in）
+### Enabling the SessionEnd hook (manual opt-in)
 
-本リポは settings/hook を配らない（usage-guard hook と同じ方針）。`~/.claude/settings.json`（または `settings.local.json`）に SessionEnd エントリを追加する。`command` は `obs-derive.mjs` の **絶対パス**（user-scope `~/.claude/skills/skill-observability/...` と dogfood `<repo>/.claude/skills/skill-observability/...` で異なる・自分の path を埋める）:
+This repo does not distribute settings/hooks (same policy as the usage-guard hook). Add a SessionEnd entry to `~/.claude/settings.json` (or `settings.local.json`). `command` must be the **absolute path** to `obs-derive.mjs` (differs between user-scope `~/.claude/skills/skill-observability/...` and dogfood `<repo>/.claude/skills/skill-observability/...` — fill in your own path):
 
 ```json
 {
@@ -92,18 +92,18 @@ skill の引数（機密を含みうる）は**記録しない**（skill 名と 
 }
 ```
 
-stdin の SessionEnd JSON（`session_id` / `transcript_path` / `cwd` / `reason`）を受け取り、常に exit 0・軽量（行は substring プレフィルタしてから JSON.parse）。
+Receives the SessionEnd JSON on stdin (`session_id` / `transcript_path` / `cwd` / `reason`), always exits 0, and stays lightweight (lines are pre-filtered by substring before `JSON.parse`).
 
-## 適用範囲
+## Scope of application
 
-本 skill は **契約 + emit substrate + 痕跡導出 hook（発火捕捉）** を提供する。本契約の上に構築される層（捕捉 → 集計 → 反映 → 消化）:
+This skill provides the **contract + emit substrate + trace-derivation hook (invocation capture)**. Layers built on top of this contract (capture → aggregate → reflect → consume):
 
-- **`/skill-metrics`**（集計・shipped）: events.jsonl を件数 + 注目イベントで read-only 集計。
-- **反映チャネル**（反映・shipped）: `lessons-triage` の metrics-primed 化。privacy 洗浄済みロールアップを HITL で backlog ポインタ issue に反映（送信は opt-in）。
-- **`backlog`**（消化・shipped）: その issue を優先 index として `drive` に渡す。
-- **outcome 導出**（別 PR・保留）: `gh`/`git` の merge ground truth + session→PR linkage で merge/abort 状態を rollup に畳み込む（痕跡導出 hook の次増分）。
+- **`/skill-metrics`** (aggregation, shipped): read-only aggregation of events.jsonl into counts + notable events.
+- **Reflection channel** (reflection, shipped): the metrics-primed version of `lessons-triage`. Privacy-cleansed rollups are reflected into a backlog-pointer issue via HITL (sending is opt-in).
+- **`backlog`** (consumption, shipped): passes that issue to `drive` as a priority index.
+- **outcome derivation** (separate PR, pending): folds merge/abort state into the rollup using `gh`/`git` merge ground truth + session→PR linkage (the next increment of the trace-derivation hook).
 
-## 注意事項
+## Notes
 
-- `.env` ファイルは読み取らない。
-- イベントに逐語ログ・機密・private repo 名/path/PR 生値を含めない（schema が機械的に拒否する）。
+- Does not read `.env` files.
+- Events must not include verbatim logs, secrets, or raw private repo names/paths/PR values (the schema mechanically rejects these).

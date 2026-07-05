@@ -1,30 +1,30 @@
 ---
 name: security
 category: required
-description: 注入・秘密情報露出・権限昇格・サプライチェーン・スクリプト実行
+description: Injection, secret exposure, privilege escalation, supply chain, script execution
 applies_when: ["**/*"]
 default_enabled: true
 severity_rules: { critical: "悪用可能な脆弱性、明示的な秘密情報の commit、認証回避、任意コード実行", warning: "防御層の欠落、未サニタイズ入力、過剰な権限、暗黙の信頼境界", info: "改善余地のある defensive coding、CSP / セキュリティヘッダの強化提案" }
 exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
-# security — セキュリティ
+# security — Security
 
-## 検査項目
+## Inspection items
 
-- **注入**: コマンドインジェクション、SQL/NoSQL injection、shell の `eval`、未エスケープのテンプレート展開、prompt injection
-- **秘密情報の露出**: ハードコードされたトークン・API キー・パスワード、`.env` の commit、ログへの secret 漏洩
-- **権限昇格**: 過剰な権限を持つ token / IAM ポリシー、`sudo` の不要利用、root 実行
-- **サプライチェーン**: 信頼できないレジストリ、未固定の依存、unverified なスクリプト実行（`curl | bash`）
-- **スクリプト実行**: 外部入力を eval / spawn に流す、unsanitized URL fetch、ユーザ入力を含む `child_process`
-- **CI/CD ワークフロー**: `pull_request_target`、`run-on-pr` の secret 露出、third-party action の SHA 固定漏れ
-- **データの取り扱い**: PII の不要な保持・送信、暗号化漏れ、TLS なしの通信
+- **Injection**: command injection, SQL/NoSQL injection, shell `eval`, unescaped template expansion, prompt injection
+- **Secret exposure**: hardcoded tokens / API keys / passwords, committing `.env`, secrets leaking into logs
+- **Privilege escalation**: overly permissive tokens / IAM policies, unnecessary use of `sudo`, running as root
+- **Supply chain**: untrusted registries, unpinned dependencies, unverified script execution (`curl | bash`)
+- **Script execution**: passing external input into eval / spawn, unsanitized URL fetch, `child_process` with user input
+- **CI/CD workflows**: `pull_request_target`, secret exposure in `run-on-pr`, missing SHA pinning for third-party actions
+- **Data handling**: unnecessary retention/transmission of PII, missing encryption, communication without TLS
 
-## severity ガイド
+## Severity guide
 
-- **critical**: 悪用可能な脆弱性、明示的な秘密情報の commit、認証回避、任意コード実行
-- **warning**: 防御層の欠落、未サニタイズ入力、過剰な権限、暗黙の信頼境界
-- **info**: 改善余地のある defensive coding、CSP / セキュリティヘッダの強化提案
+- **critical**: exploitable vulnerabilities, explicit commits of secrets, authentication bypass, arbitrary code execution
+- **warning**: missing defensive layer, unsanitized input, excessive privileges, implicit trust boundaries
+- **info**: defensive coding with room for improvement, suggestions for strengthening CSP / security headers
 
 ## skip_when
 
@@ -33,7 +33,7 @@ skip_when:
   diff_only_in: []
 ```
 
-required 観点のため常に適用する。
+Always applied because this is a `required` perspective.
 
 ## exit_criteria.drive_loop
 
@@ -44,4 +44,4 @@ exit_criteria:
     warning: 0
 ```
 
-security に関する critical / warning が残っている状態で merge-ready とは判定しない。
+Do not judge as merge-ready while critical / warning issues related to security remain.

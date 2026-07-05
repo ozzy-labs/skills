@@ -1,139 +1,139 @@
 ---
 name: backlog
-description: open issue を `backlog.mjs` エンジンで収集し、依存グラフ（drive の依存記法 SSOT を再利用）と固定語彙の優先度規則で並べ、着手候補を提示して drive 引数形式（例 `#12,#15 -> #18`）で出力する。既定は提示のみ、`--drive[=N]` で確認後 drive へ、`--auto` は `auto-ok` ラベル付き issue のみ無確認で drive へ（HATL）。単一リポのみ。
+description: Collects open issues with the `backlog.mjs` engine, orders them by dependency graph (reusing drive's dependency-notation SSOT) and fixed-vocabulary priority rules, and presents start candidates output in drive argument format (e.g. `#12,#15 -> #18`). Default is presentation only; `--drive[=N]` hands off to drive after confirmation; `--auto` hands off to drive without confirmation, but only for issues labeled `auto-ok` (HATL). Single repo only.
 ---
 
-# backlog - open issue を優先度整理して drive へ接続
+# backlog - Prioritize open issues and connect to drive
 
-drive は「着手する issue 番号を人間が与える」前提で、自律ループの**上流**（何に着手するかの選定）が skill 化されていなかった。本スキルはその断絶を埋める: open issue を収集し、依存グラフと優先度で並べ、着手候補を drive 引数形式で提示・接続する。
+drive presupposes that "a human hands it the issue number to start on," so the **upstream** of the autonomous loop (selecting what to start on) had not been made into a skill. This skill fills that gap: it collects open issues, orders them by dependency graph and priority, and presents/connects start candidates in drive argument format.
 
-決定論（issue 収集・依存抽出・優先度ソート・`auto-ok` ゲーティング・drive 引数の整形・レンダリング）は同梱の **`backlog.mjs` エンジン**が担う（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1、先行例 `drive-plan.mjs` / `topics.mjs` / `health-check.mjs` / `policy-read.mjs`）。本 SKILL.md は判断層 — **いつエンジンを呼ぶか・候補をどう提示するか・どこで人に確認するか（policy gate）** — に絞る。Claude が自由判断で優先順位を作らない（順位はエンジンの固定語彙が決める）。
+The deterministic logic (issue collection, dependency extraction, priority sorting, `auto-ok` gating, drive-argument formatting, and rendering) is handled by the bundled **`backlog.mjs` engine** ([ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1, following the precedent of `drive-plan.mjs` / `topics.mjs` / `health-check.mjs` / `policy-read.mjs`). This SKILL.md confines itself to the judgment layer — **when to call the engine, how to present the candidates, and where to confirm with a human (policy gate)**. Claude does not create priority ordering on its own judgment (the ordering is determined by the engine's fixed vocabulary).
 
-**スコープ**: 単一リポジトリのみ。cross-repo backlog は将来検討（[スコープ外](#スコープ外)参照）。
+**Scope**: single repository only. cross-repo backlog is a future consideration (see [Out of scope](#out-of-scope)).
 
-## 入力
+## Input
 
 ```text
 backlog
-  --repo owner/repo   (省略時は cwd の origin から解決)
-  --label <filter>    (gh issue list へ渡すラベル絞り込み)
-  --limit N           (収集上限。既定 20)
-  --drive[=N]         (上位 N 件 + 依存閉包を確認後 drive へ。N 省略で全候補)
-  --auto              (無確認で drive へ。ただし `auto-ok` ラベル付き issue のみ対象)
+  --repo owner/repo   (resolved from cwd's origin if omitted)
+  --label <filter>    (label filter passed to gh issue list)
+  --limit N           (collection limit; default 20)
+  --drive[=N]         (hand off top N + dependency closure to drive after confirmation; omit N for all candidates)
+  --auto              (hand off to drive without confirmation, but only for issues labeled `auto-ok`)
 ```
 
-`--dry-run` 相当（提示のみ・副作用なし）は **既定挙動**なのでフラグ不要。
+The `--dry-run` equivalent (presentation only, no side effects) is the **default behavior**, so no flag is needed.
 
-## 手順
+## Steps
 
-1. **本 SKILL.md と同じディレクトリ**の `backlog.mjs` を Bash で実行する（引数はそのまま渡す）。Claude Code では `~/.claude/skills/backlog/backlog.mjs`（dogfood は `<repo>/.claude/skills/backlog/backlog.mjs`、Codex/Gemini は `.agents/skills/backlog/backlog.mjs`）:
+1. Run `backlog.mjs` **in the same directory as this SKILL.md** via Bash (pass the arguments through as-is). In Claude Code this is `~/.claude/skills/backlog/backlog.mjs` (dogfood: `<repo>/.claude/skills/backlog/backlog.mjs`; Codex/Gemini: `.agents/skills/backlog/backlog.mjs`):
 
    ```bash
-   node <この skill のディレクトリ>/backlog.mjs [--repo owner/repo] [--label <filter>] [--limit N] [--drive[=N] | --auto]
+   node <this skill's directory>/backlog.mjs [--repo owner/repo] [--label <filter>] [--limit N] [--drive[=N] | --auto]
    ```
 
-   エンジンは既定で **整形済みテキスト**（優先度順の候補表 + blocker 一覧 + drive 引数形式）を stdout に出力する。`--json` で構造化 JSON を得られる。
+   By default the engine outputs **formatted text** (a priority-ordered candidate table + blocker list + drive argument format) to stdout. Use `--json` to get structured JSON.
 
-2. エンジンの出力を **そのまま提示**する（再整形・再解釈・再ソートしない — 収集・依存抽出・優先度規則はすべてエンジンの責務）。
-3. `repo_error` が立っている（GitHub remote 不在）場合は、その旨を提示し `--repo owner/repo` の明示を促す。`fetch_error`（gh 未認証 / rate limit / network）が立っている場合はエンジンの分類をそのまま伝える。
-4. drive への接続は下記モード分岐と **policy の `externally-visible` gate** に従う。
+2. **Present the engine's output as-is** (do not reformat, reinterpret, or re-sort it — collection, dependency extraction, and priority rules are all the engine's responsibility).
+3. If `repo_error` is set (no GitHub remote), present that fact and prompt for an explicit `--repo owner/repo`. If `fetch_error` is set (gh not authenticated / rate limit / network), relay the engine's classification as-is.
+4. Connecting to drive follows the mode branching below and the **policy's `externally-visible` gate**.
 
-## 依存記法（SSOT は drive）
+## Dependency notation (SSOT is drive)
 
-依存抽出の文法（`depends on #X` 系）と抽出規則、そして依存を wave に分割するロジックは **drive 側の SSOT**（`drive-plan.mjs` の `detectBodyDeps` / `topoWaves`、canonical は drive SKILL.md「明示依存記法」「Phase 0」）。`backlog.mjs` はそれを **import して再利用**する。本 SKILL.md でも `backlog.mjs` 内でも規則を**再掲しない**（drift 防止）。依存グラフの意味を確認したいときは drive SKILL.md を参照する。
+The grammar for dependency extraction (the `depends on #X` family) and its extraction rules, along with the logic that splits dependencies into waves, are **SSOT'd on the drive side** (`drive-plan.mjs`'s `detectBodyDeps` / `topoWaves`; the canonical source is drive SKILL.md's "Explicit dependency notation" / "Phase 0"). `backlog.mjs` **imports and reuses** them. Neither this SKILL.md nor `backlog.mjs` **restates the rules** (to prevent drift). Refer to drive SKILL.md to check the meaning of the dependency graph.
 
-「blocker」= 収集した他 issue から依存されている issue（`detectBodyDeps` が検出した被依存先）。エンジンはこれを優先度規則 (a) と drive 引数の wave 順の両方に反映する。
+"blocker" = an issue that other collected issues depend on (a depended-upon target detected by `detectBodyDeps`). The engine reflects this in both priority rule (a) and the wave order of the drive arguments.
 
-## 優先度規則（固定語彙・上から優先）
+## Priority rules (fixed vocabulary, listed in priority order from top)
 
-エンジンが下表の固定語彙で決定論的にソートする。Claude はこの順位を**再解釈・上書きしない**。
+The engine sorts deterministically using the fixed vocabulary in the table below. Claude **does not reinterpret or override** this ordering.
 
-| 順位 | 規則 | 判定 |
+| Rank | Rule | Criterion |
 | --- | --- | --- |
-| (a) | **blocker**（他 issue から依存される） | 被依存先を先に |
-| (b) | **milestone 期限 昇順** | `milestone.dueOn` が早い順。期限なし / milestone なしは最後 |
-| (c) | **`priority:high` 等のラベル** | 固定語彙 `priority:high` / `priority: high` / `p0` / `p1`（case 無視）を持つ issue を先に |
-| (d) | **updatedAt 古い順** | 最終更新が古い（放置された）issue を先に |
-| tie-break | **issue 番号 昇順** | 上記すべて同点なら番号の小さい順（完全決定論） |
+| (a) | **blocker** (depended on by other issues) | Depended-upon targets go first |
+| (b) | **milestone due date ascending** | Earliest `milestone.dueOn` first. No due date / no milestone goes last |
+| (c) | **labels such as `priority:high`** | Issues with the fixed vocabulary `priority:high` / `priority: high` / `p0` / `p1` (case-insensitive) go first |
+| (d) | **updatedAt ascending (oldest first)** | Issues with an older (neglected) last update go first |
+| tie-break | **issue number ascending** | If all of the above tie, lower numbers go first (fully deterministic) |
 
-この固定語彙は `backlog.mjs` に実装されている。語彙を増減する場合は `backlog.mjs` + 本表の同時改訂で行う（Claude の自由判断でラベル語彙を足さない）。
+This fixed vocabulary is implemented in `backlog.mjs`. To add or remove vocabulary, revise both `backlog.mjs` and this table together (Claude does not add label vocabulary on its own judgment).
 
-## 出力（drive 引数形式）
+## Output (drive argument format)
 
-エンジンは選定結果を drive がそのまま解釈できる引数文字列で返す（`handoff.drive_args`）:
+The engine returns the selection result as an argument string that drive can interpret directly (`handoff.drive_args`):
 
-- 依存のない候補群 → カンマ列 `#1,#2,#3`
-- クリーンな依存構造（各 wave のノードが直前までの全ノードに（推移的に）依存する）→ drive の依存記法 `->` で wave 表現 `#12,#15 -> #18`（#18 は #12,#15 の完了後）
+- A group of candidates with no dependencies → comma-separated list `#1,#2,#3`
+- A clean dependency structure (where each wave's nodes (transitively) depend on all preceding nodes) → expressed as waves using drive's dependency notation `->`: `#12,#15 -> #18` (#18 comes after #12, #15 complete)
 
-wave 分割は drive の `topoWaves` を再利用する。ただし独立ノードと依存ノードが混在し、wave 表現が**偽の依存辺を捏造してしまう**場合（drive は `A,B -> C` を「C は A と B 両方に依存」と解釈するため、無関係な wave-mate の失敗で C が誤って skip され得る）は、`->` を使わず**優先度順のフラットなカンマ列**にフォールバックする。この場合 drive 側の Phase 0 が同じ `detectBodyDeps`（`drive-plan.mjs`）で issue 本文から実 DAG を再構築するため、偽の辺は生まれない。いずれの形式もそのまま `/drive <drive_args>` に渡せる（`handoff.faithful` がどちらを出力したか示す）。
+Wave splitting reuses drive's `topoWaves`. However, when independent and dependent nodes are mixed and the wave notation would **fabricate false dependency edges** (drive interprets `A,B -> C` as "C depends on both A and B", so an unrelated wave-mate's failure could cause C to be incorrectly skipped), it falls back to a **flat, priority-ordered comma list** instead of using `->`. In this case, no false edges arise because drive's Phase 0 reconstructs the real DAG from the issue body using the same `detectBodyDeps` (`drive-plan.mjs`). Either format can be passed directly to `/drive <drive_args>` (`handoff.faithful` indicates which one was output).
 
-## drive への接続（モード分岐）
+## Connecting to drive (mode branching)
 
-| モード | 起動条件 | 挙動 |
+| Mode | Trigger condition | Behavior |
 | --- | --- | --- |
-| **present**（既定） | `--drive` / `--auto` なし | 候補表 + `drive_args` を提示するのみ。drive は起動しない。ホストの確認 UI でユーザーが選択したら、その部分集合の drive 引数を出力するか `/drive` を起動する |
-| **drive** | `--drive[=N]` | 上位 N 件（依存を含む閉包に拡張）を確認 UI で提示 → 承認後 `/drive <drive_args>` を起動 |
-| **auto** | `--auto` | 個別確認なしで drive へ。ただし対象は `auto-ok` ラベル付き issue のみ（下記 HATL）。policy gate に従う |
+| **present** (default) | Neither `--drive` nor `--auto` | Only presents the candidate table + `drive_args`. drive is not launched. Once the user selects via the host's confirmation UI, either output the drive arguments for that subset or launch `/drive` |
+| **drive** | `--drive[=N]` | Presents the top N (expanded to include the dependency closure) in the confirmation UI → launches `/drive <drive_args>` after approval |
+| **auto** | `--auto` | Goes to drive without individual confirmation. However, targets are limited to issues labeled `auto-ok` (HATL below). Follows the policy gate |
 
-## `--auto` の HATL ゲーティング（`auto-ok` ラベル必須）
+## `--auto`'s HATL gating (requires the `auto-ok` label)
 
-`--auto` は「無確認で drive を起動する」が、**対象は `auto-ok` ラベルの付いた issue に限る**。これは HATL（human-at-the-loop）: **人間は個別承認をせず、代わりにラベルで境界条件を設定する**。
+`--auto` "launches drive without confirmation", but **its scope is limited to issues labeled `auto-ok`**. This is HATL (human-at-the-loop): **the human does not give individual approval, but instead sets the boundary condition via the label**.
 
-- ラベル規約: `auto-ok` は **人間のみ**が付与する。誰が・いつ付けるかを運用で固定し、自動付与経路を作らない。ラベル付与 = その issue を無確認で drive に流してよいという standing 承認。
-- エンジンの強制: `--auto` 時、エンジンは `auto-ok` ラベルのない issue を handoff 集合から**必ず除外**する（`handoff.excluded_no_label`）。さらに、`auto-ok` issue が **`auto-ok` でない issue に依存**している場合はその issue も除外する（`excluded_unapproved_dep`・カスケード）。承認されていない issue を drive が着手することはない。
-- **ゲーティングなしの `--auto` は存在しない**。`auto-ok` ラベルの issue が 1 件もなければ handoff 集合は空になり、drive は起動されない。
+- Label convention: `auto-ok` is applied **only by a human**. Who applies it and when is fixed by operational practice, and no automatic-application path is created. Applying the label = standing approval that this issue may be passed to drive without confirmation.
+- Engine enforcement: under `--auto`, the engine **always excludes** issues without the `auto-ok` label from the handoff set (`handoff.excluded_no_label`). Furthermore, if an `auto-ok` issue **depends on an issue that is not `auto-ok`**, that issue is also excluded (`excluded_unapproved_dep`, cascading). drive never starts work on an unapproved issue.
+- **There is no ungated `--auto`**. If there are zero issues with the `auto-ok` label, the handoff set is empty and drive is not launched.
 
-## 接続時の policy 参照（`externally-visible` gate）
+## Policy reference at connection time (`externally-visible` gate)
 
-backlog が drive を起動すると、drive は PR 作成・（`--merge` 時）マージ等の**外部可視・不可逆アクション**を行う。したがって backlog からの **drive 起動そのものを外部可視アクションとして分類**し、個別の承認ゲートを prose にハードコードせず、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙の SSOT）に従う。分類とゼロコンフィグ既定:
+When backlog launches drive, drive performs **externally-visible, irreversible actions** such as creating a PR and (with `--merge`) merging. Therefore, **the act of launching drive from backlog itself is classified as an externally-visible action**, and rather than hardcoding an individual approval gate in prose, it follows the central autonomy policy (the SSOT for the 3 classes and gate vocabulary, defined by the `policy` skill). Classification and zero-config default:
 
-| 本 skill のアクション | クラス | policy 参照 | ゼロコンフィグ既定 gate |
+| This skill's action | Class | Policy reference | Zero-config default gate |
 | --- | --- | --- | --- |
-| drive 起動（`--drive` / `--auto`） | `externally-visible` | `--action=drive-launch --class=externally-visible` | `batch-confirm`（起動する drive 引数を 1 回提示して一括確認） |
+| Launching drive (`--drive` / `--auto`) | `externally-visible` | `--action=drive-launch --class=externally-visible` | `batch-confirm` (presents the drive arguments to be launched once, for a single batch confirmation) |
 
-有効 gate は sibling の `policy` skill の `policy-read.mjs` で引く（Claude Code の user-scope では `~/.claude/skills/policy/policy-read.mjs`、dogfood は `<repo>/.claude/skills/policy/policy-read.mjs`、Codex/Gemini は `.agents/skills/policy/policy-read.mjs`）:
+The effective gate is looked up via the sibling `policy` skill's `policy-read.mjs` (in Claude Code's user-scope this is `~/.claude/skills/policy/policy-read.mjs`; dogfood: `<repo>/.claude/skills/policy/policy-read.mjs`; Codex/Gemini: `.agents/skills/policy/policy-read.mjs`):
 
 ```bash
-node <policy skill のディレクトリ>/policy-read.mjs --action=drive-launch --class=externally-visible --repo-root="$PWD"
-# => .resolved.gate（既定 batch-confirm）
+node <policy skill's directory>/policy-read.mjs --action=drive-launch --class=externally-visible --repo-root="$PWD"
+# => .resolved.gate (default batch-confirm)
 ```
 
-gate ごとの挙動:
+Behavior per gate:
 
-- gate=`batch-confirm`（ゼロコンフィグ既定）:
-  - `--drive`: 起動する drive 引数を 1 回提示して一括確認 → 承認後 `/drive` 起動
-  - `--auto`: `auto-ok` ラベルが standing 承認（境界条件）として機能するため、handoff 集合（= `auto-ok` issue のみ）を 1 回提示して起動する。個別確認はしない
-- gate=`proceed`: 確認なしで起動
-- gate=`ask`: drive 引数を 1 件ずつ確認する（`--auto` でも fail-safe に個別確認へ格上げ）
+- gate=`batch-confirm` (zero-config default):
+  - `--drive`: presents the drive arguments to be launched once for a single batch confirmation → launches `/drive` after approval
+  - `--auto`: since the `auto-ok` label functions as standing approval (a boundary condition), the handoff set (= `auto-ok` issues only) is presented once and launched. No individual confirmation is done
+- gate=`proceed`: launches without confirmation
+- gate=`ask`: confirms drive arguments one at a time (even with `--auto`, it fails safe and is escalated to individual confirmation)
 
-**policy 不在でも壊れない:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は厳しい側（`ask`）へ倒す。`policy` skill 未配置の環境では上表のゼロコンフィグ既定 gate（`externally-visible`=`batch-confirm`）を直接適用する。いずれの場合も `--auto` の `auto-ok` ゲーティングは常に効く。
+**Does not break even if policy is absent:** `policy-read.mjs` is fail-safe by design — unreadable or invalid values fall to the stricter side (`ask`). In environments where the `policy` skill is not deployed, the zero-config default gate in the table above (`externally-visible`=`batch-confirm`) is applied directly. In either case, `--auto`'s `auto-ok` gating always takes effect.
 
-## 定期実行との連携（`schedule` / `/loop`）
+## Integration with scheduled execution (`schedule` / `/loop`)
 
-`--auto` + `--limit` を `schedule`（cron routine）や `/loop` から起動すると、「`auto-ok` を付ければ自動で消化される」ループが閉じる（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R5）。例: `/backlog --auto --limit 3`。人間の関与は「`auto-ok` ラベル付与」の 1 点に収束する。
+Launching `--auto` + `--limit` from `schedule` (cron routine) or `/loop` closes the loop of "attach `auto-ok` and it gets consumed automatically" ([ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R5). Example: `/backlog --auto --limit 3`. Human involvement converges to a single point: "applying the `auto-ok` label".
 
-## エラーハンドリング（エンジンが JSON に載せる）
+## Error handling (the engine puts this in the JSON)
 
-| 状況 | エンジンの動作 |
+| Situation | Engine behavior |
 | --- | --- |
-| `--repo` 未指定で GitHub remote 不在 | `repo_error` を立てる。gh のデフォルトリポ解決に委ねず明示を促す |
-| `gh` 未認証 / rate limit / network | `fetch_error` に分類を載せる。候補は空 |
-| open issue 0 件 | `issues: []`。handoff は空 |
-| 循環依存 | drive 引数をフラットなカンマ列にフォールバックし `warnings` に記録 |
+| `--repo` not specified and no GitHub remote | Sets `repo_error`. Prompts for an explicit value rather than relying on gh's default repo resolution |
+| `gh` not authenticated / rate limit / network | Puts the classification in `fetch_error`. Candidates are empty |
+| 0 open issues | `issues: []`. handoff is empty |
+| Circular dependency | Falls back to a flat comma list for the drive arguments and records it in `warnings` |
 
-## スコープ外
+## Out of scope
 
-| 項目 | 除外理由 |
+| Item | Reason for exclusion |
 | --- | --- |
-| 1. cross-repo backlog | 現時点では単一リポのみ。複数リポ横断の選定は別 issue で検討 |
-| 2. 優先度規則の自由化 | 順位は固定語彙のみ。LLM の自由判断で順位を作らない（再現性・信頼性のため） |
-| 3. drive 実行の内部 | 本 skill は選定と起動のみ。実装・review・マージは drive の責務 |
+| 1. cross-repo backlog | Single repo only for now. Selection across multiple repos will be considered in a separate issue |
+| 2. Making priority rules freeform | Ranking uses only fixed vocabulary. The LLM does not create rankings on its own judgment (for reproducibility and reliability) |
+| 3. The internals of drive execution | This skill only selects and launches. Implementation, review, and merging are drive's responsibility |
 
-## 注意事項
+## Notes
 
-- `.env` ファイルは読み取り・ステージングしない
-- 依存記法の SSOT は drive（`drive-plan.mjs`）。backlog は import で再利用し、規則を再掲しない
-- **`drive` skill を同階層に要する**: `backlog.mjs` は sibling の `drive/drive-plan.mjs` を import する（依存規則の重複を避けるため）。backlog は drive へ handoff する skill なので drive は常に併存する前提。単体 install（backlog のみ）は想定しない
-- 優先度は固定語彙（上表）でエンジンが決定する。Claude は再ソートしない
-- `--auto` は必ず `auto-ok` ラベルでゲートする（ゲーティングなしの無確認起動は存在しない）
-- drive 起動は policy の `externally-visible` gate（既定 `batch-confirm`）に従う
+- Do not read or stage `.env` files
+- The SSOT for dependency notation is drive (`drive-plan.mjs`). backlog reuses it via import and does not restate the rules
+- **Requires the `drive` skill at the same level**: `backlog.mjs` imports the sibling `drive/drive-plan.mjs` (to avoid duplicating dependency rules). Since backlog is a skill that hands off to drive, drive is always assumed to coexist with it. Standalone install (backlog only) is not supported
+- Priority is determined by the engine using the fixed vocabulary (table above). Claude does not re-sort
+- `--auto` is always gated by the `auto-ok` label (there is no ungated, unconfirmed launch)
+- Launching drive follows the policy's `externally-visible` gate (default `batch-confirm`)

@@ -81,33 +81,33 @@ test("ci-fix is user-invocable (no user-invocable:false in either doc)", async (
 
 test("SKILL.md documents the FIXED input-resolution priority (run id > branch > current branch)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /入力解決の優先順位/, "must have an input-resolution priority section");
+  assert.match(raw, /Input resolution priority/i, "must have an input-resolution priority section");
   // The three-tier priority, in order, appears as a table.
-  assert.match(raw, /明示 run id/, "tier 1: explicit run id");
-  assert.match(raw, /明示 branch/, "tier 2: explicit branch");
-  assert.match(raw, /現在ブランチ/, "tier 3: current branch");
+  assert.match(raw, /Explicit run id/, "tier 1: explicit run id");
+  assert.match(raw, /Explicit branch/, "tier 2: explicit branch");
+  assert.match(raw, /Current branch/, "tier 3: current branch");
   assert.match(
     raw,
     /gh run list --branch <[^>]*> --status failure --limit 1/,
     "must show the gh run list resolution command",
   );
-  assert.match(raw, /failed run なし/, "must define the no-failed-run termination");
+  assert.match(raw, /no failed run/i, "must define the no-failed-run termination");
 });
 
 test("SKILL.md flags main-branch failures as high priority at the top of the report", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /main ブランチの failure/, "must call out main-branch failures");
-  assert.match(raw, /優先度高/, "must mark them high priority");
-  assert.match(raw, /冒頭/, "must place it at the top of the report");
+  assert.match(raw, /main branch failure/i, "must call out main-branch failures");
+  assert.match(raw, /high priority/i, "must mark them high priority");
+  assert.match(raw, /top of the report/i, "must place it at the top of the report");
 });
 
 test("SKILL.md documents the flaky flow: one rerun, 30s/15min polling, --no-rerun skip", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
   assert.match(raw, /flaky/i, "must have a flaky-check section");
   assert.match(raw, /gh run rerun <[^>]*> --failed/, "must use gh run rerun --failed");
-  assert.match(raw, /1 回だけ/, "must rerun exactly once");
-  assert.match(raw, /30 秒/, "must poll at 30s interval");
-  assert.match(raw, /15 分/, "must cap polling at 15 minutes");
+  assert.match(raw, /only once/i, "must rerun exactly once");
+  assert.match(raw, /30-second/i, "must poll at 30s interval");
+  assert.match(raw, /15-minute/i, "must cap polling at 15 minutes");
   assert.match(raw, /--no-rerun/, "must document the --no-rerun skip");
   assert.match(raw, /要確認/, "polling cap must terminate as 要確認 (undecidable)");
 });
@@ -120,7 +120,7 @@ test("SKILL.md documents log extraction via gh run view --log-failed", async () 
 
 test("SKILL.md provides the drive instruction-text template and connects to /drive", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
-  assert.match(raw, /指示テキスト/, "must describe the instruction text");
+  assert.match(raw, /instruction text/i, "must describe the instruction text");
   assert.match(raw, /CI failure on/, "must ship the instruction template");
   assert.match(raw, /\/drive/, "must connect to the /drive skill");
 });
@@ -128,11 +128,11 @@ test("SKILL.md provides the drive instruction-text template and connects to /dri
 test("SKILL.md documents --dry-run as side-effect free (no rerun, no drive launch)", async () => {
   const raw = await readFile(SKILL_MD, "utf8");
   assert.match(raw, /--dry-run/, "must document --dry-run");
-  assert.match(raw, /副作用/, "must frame --dry-run around side effects");
+  assert.match(raw, /side effects/i, "must frame --dry-run around side effects");
   // Explicit: dry-run does NOT rerun and does NOT launch drive.
   assert.match(
     raw,
-    /rerun (も|は).*drive 起動(も|は).*(しない|行わない)/,
+    /performs neither the rerun nor the drive launch/i,
     "must state --dry-run performs neither a rerun nor a drive launch",
   );
 });
@@ -174,14 +174,10 @@ test("companion wires AskUserQuestion confirm + /drive launch, skipped under --a
   assert.match(raw, /AskUserQuestion/, "companion must keep the pre-launch confirm");
   assert.match(raw, /\/drive/, "companion must wire the /drive launch");
   assert.match(raw, /SlashCommand/, "companion must launch drive via SlashCommand");
+  assert.match(raw, /--auto.*skip|skip.*--auto/i, "companion must skip the confirm under --auto");
   assert.match(
     raw,
-    /--auto.*(挟ま|skip|スキップ)|(挟ま|skip|スキップ).*--auto/,
-    "companion must skip the confirm under --auto",
-  );
-  assert.match(
-    raw,
-    /--dry-run.*(SlashCommand|drive).*(呼ばない|しない|行わない)|rerun.*drive.*(行わ|しない)/,
+    /--dry-run.*neither the rerun nor the drive launch is performed/i,
     "companion must state --dry-run launches nothing",
   );
 });

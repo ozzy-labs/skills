@@ -1,20 +1,20 @@
 ---
-description: 検証・コミット・PR 作成を一括実行する。変更に対して verify（ビルド + 型 + テスト + lint）→ コミット → PR 作成を順に実行する統合パイプライン。
+description: Runs verification, commit, and PR creation all at once. An integrated pipeline that runs verify (build + type + test + lint) → commit → PR creation in sequence against the changes.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
 
 # ship
 
-`.agents/skills/ship/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/ship/SKILL.md` and follow the workflow steps.
 
-**重要:** 各ステップの実行中、読み込んだスキル内の「次のアクション提案」セクションおよび「完了報告」セクションは**すべて無視**する。ステップ間の遷移は本スキルが制御する。
+**Important:** while executing each step, **ignore entirely** the "next action suggestion" section and the "completion report" section within the loaded skill. This skill controls the transitions between steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-**失敗した場合:** エラー内容を報告し、修正→再度 `/ship` を提案して中断する。
+**If it fails:** report the error content, suggest fixing it and running `/ship` again, then abort.
 
-完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
+Immediately after the completion report, call AskUserQuestion (do not set the `answers` parameter):
 
-- **「PR をレビューする」** → `.claude/skills/review/SKILL.md` を Read し、その手順に従う
-- **「PR をマージする」** → `gh pr merge --squash --delete-branch` でマージを実行し、結果を報告する
+- **「PR をレビューする」** → Read `.claude/skills/review/SKILL.md` and follow its steps
+- **「PR をマージする」** → run the merge with `gh pr merge --squash --delete-branch` and report the result

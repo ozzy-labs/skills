@@ -1,5 +1,5 @@
 ---
-description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）と skill catalog 整合性を `health-check.mjs` エンジンで一発確認し、16 領域のステータス表と固定語彙の推奨アクションを提示する。`--deep` で `要確認` 項目を read-only 追加調査、`--fix` で安全語彙（prune / delete / fetch、`--deep` 昇格した drop）を中央 policy の gate に従って実行する（reversible-local=proceed / irreversible=ask）。既定は read-only。
+description: Checks, in one shot via the `health-check.mjs` engine, for state unintentionally left behind during repository work (working tree, stash, branch, worktree, PR, issue, actions, etc.) and skill-catalog consistency, presenting a 16-area status table and fixed-vocabulary recommended actions. With `--deep`, does additional read-only investigation of `要確認` items; with `--fix`, executes safe-vocabulary actions (prune / delete / fetch, and `drop` when promoted by `--deep`) following the central policy's gate (reversible-local=proceed / irreversible=ask). Read-only by default.
 argument-hint: "[--deep] [--fix] [--yes]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, AskUserQuestion
@@ -7,38 +7,38 @@ allowed-tools: Bash, Read, Grep, AskUserQuestion
 
 # health
 
-`.agents/skills/health/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/health/SKILL.md` and follow its workflow steps.
 
-**重要:** レンダリング（ステータス表・非 clean section・実行結果）は `health-check.mjs` エンジンが担う。エンジンの stdout をそのまま提示し、再整形・再解釈しない。
+**Important:** rendering (the status table, non-clean sections, execution results) is handled by the `health-check.mjs` engine. Present the engine's stdout as-is; don't reformat or reinterpret it.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### エンジンの実行
+### Running the engine
 
-同階層の `health-check.mjs` を Bash で実行する（`$ARGUMENTS` をそのまま渡す）。user-scope では `~/.claude/skills/health/health-check.mjs`、dogfood では `<repo>/.claude/skills/health/health-check.mjs`:
+Run `health-check.mjs`, in the same directory, via Bash (passing `$ARGUMENTS` as-is). In user-scope it's `~/.claude/skills/health/health-check.mjs`; for dogfooding, `<repo>/.claude/skills/health/health-check.mjs`:
 
 ```bash
 node ~/.claude/skills/health/health-check.mjs $ARGUMENTS
 ```
 
-### 引数解析
+### Argument parsing
 
-`--deep` / `--fix` / `--yes` の有無を判定する。`--fix` なし（引数なし / `--deep`）はエンジンが read-only で完結するため、出力をそのまま提示して終了する。それ以外のフラグは無視する（将来の拡張用）。
+Determine the presence of `--deep` / `--fix` / `--yes`. When `--fix` is absent (no arguments / `--deep`), the engine completes read-only, so present the output as-is and end. Any other flags are ignored (reserved for future extension).
 
-### `--fix` の確認ゲート配線（中央 policy に従う）
+### `--fix` confirmation-gate wiring (follows the central policy)
 
-`--fix` が指定され、かつ `--yes` が **ない** 場合、エンジンが各アクションの gate を中央 policy（`policy-read.mjs`）で解決する。ホスト側は **gate ごとに** UI を分岐する（gate 判定はエンジンが持つ。ホストで語彙・クラスを再判定しない）:
+When `--fix` is specified and `--yes` is **absent**, the engine resolves each action's gate via the central policy (`policy-read.mjs`). The host side branches the UI **per gate** (gate determination belongs to the engine — the host never re-determines the vocabulary/class):
 
-1. **実行 + 一覧提示:** `node ~/.claude/skills/health/health-check.mjs --fix [--deep]` を実行する。エンジンは `proceed`（reversible-local）アクションを**その場で実行**し「実行結果」（各行 `✔ done` / `✖ failed`）を出力する（audit trail・確認不要）。`ask`（irreversible の stash drop）アクションは「確認が必要なアクション (gate=ask)」として出力し**実行しない**。
-2. **`ask` の個別確認:** `ask` 一覧がある場合のみ、`AskUserQuestion` で**アクションごとに**「実行してよいか」を確認する（テキストで選択肢を列挙しない）。
-   - 承認 → `node ~/.claude/skills/health/health-check.mjs --fix --yes [--deep]` を実行して残り（承認済み `ask`）を実行し、実行結果と実行後ステータス表をそのまま提示する。
-   - 却下 → 何も追加実行せず終了する。
-   - `ask` 一覧が空（全て `proceed` で実行済み）→ 実行結果と実行後ステータス表を提示して終了する。
+1. **Execute + list:** run `node ~/.claude/skills/health/health-check.mjs --fix [--deep]`. The engine **executes on the spot** `proceed` (reversible-local) actions and outputs the "execution results" (`✔ done` / `✖ failed` on each line) (audit trail, no confirmation needed). `ask` (irreversible stash drop) actions are output as "actions requiring confirmation (gate=ask)" and are **not executed**.
+2. **Individual confirmation of `ask` items:** only when there's an `ask` list, confirm with `AskUserQuestion` **per action** whether it's OK to execute (don't enumerate options as text).
+   - Approved → run `node ~/.claude/skills/health/health-check.mjs --fix --yes [--deep]` to execute the rest (the approved `ask` items), and present the execution results and the post-execution status table as-is.
+   - Rejected → end without executing anything additional.
+   - The `ask` list is empty (everything already executed via `proceed`) → present the execution results and post-execution status table, and end.
 
-`--fix --yes`（最初から `--yes` あり）の場合は確認を挟まずエンジンをそのまま 1 回実行する。`--yes` は **policy を上書きする明示 opt-out** で、gate が `ask` のアクションも含め全安全アクションを実行する（routine / `/loop` / `schedule` 経由の無人実行）。
+For `--fix --yes` (with `--yes` from the start), run the engine once, as-is, without inserting a confirmation. `--yes` is an **explicit opt-out that overrides the policy**, executing all safe actions, including those with gate `ask` (unattended execution via routine / `/loop` / `schedule`).
 
-エンジンの `--fix` 安全境界（`prune` / `delete` / `fetch` / `--deep` 昇格 `drop` のみ実行、`push` / `要確認` / `要対応` / `abort or continue` は非対象）と gate 解決（reversible-local=proceed / irreversible=ask、policy 不在は fail-safe に ask）は SKILL.md の契約どおりエンジン側で強制される。ホスト側で語彙・gate を再判定しない。
+The engine's `--fix` safe boundary (executing only `prune` / `delete` / `fetch` / the `--deep`-promoted `drop`, with `push` / `要確認` / `要対応` / `abort or continue` out of scope) and gate resolution (reversible-local=proceed / irreversible=ask, falling back fail-safe to ask when a policy is absent) are enforced on the engine side, per the SKILL.md contract. The host side never re-determines the vocabulary or gate.
 
-### 完了報告・次のアクション提案
+### Completion report and next-action suggestions
 
-エンジン出力を提示したら終了する。`--fix` の単一確認以外で AskUserQuestion は使わない。次のアクション提案も行わない。
+End once the engine output has been presented. AskUserQuestion is not used other than for `--fix`'s individual confirmation. No next-action suggestion is made either.

@@ -1,34 +1,34 @@
 ---
 name: commit
-description: 変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
+description: Stages changes and commits them following Conventional Commits. Does not push or create a PR.
 ---
 
-# commit - ステージング＆コミット
+# commit - Stage and commit
 
-変更をステージし、Conventional Commits でコミットする。プッシュや PR 作成は行わない。
+Stages changes and commits them following Conventional Commits. Does not push or create a PR.
 
-## 手順
+## Procedure
 
-### 1. 状態確認
+### 1. Check the state
 
-以下のコマンドで現在の状態を把握する:
+Grasp the current state with the following commands:
 
-- `git status` で変更ファイルの一覧を取得
-- `git diff` でステージされていない変更を確認
-- `git diff --staged` でステージ済みの変更を確認
-- `git log --oneline -5` で直近のコミット履歴を確認
+- Get the list of changed files with `git status`
+- Check unstaged changes with `git diff`
+- Check staged changes with `git diff --staged`
+- Check recent commit history with `git log --oneline -5`
 
-変更がない場合、コミットする変更がない旨を伝えて終了する。
+If there are no changes, state that there is nothing to commit and end.
 
-### 2. ステージング＆コミット
+### 2. Stage and commit
 
-1. **ステージング:** 変更ファイルを個別に `git add <file>` でステージする。`.env` ファイルはステージングしない
-2. **コミットメッセージ生成:** `.agents/skills/commit-conventions/SKILL.md` を参照し、ルールに従いメッセージを生成する
-3. **コミット実行:** `git commit -m "<message>"`
+1. **Staging:** stage changed files individually with `git add <file>`. Do not stage `.env` files
+2. **Generate the commit message:** refer to `.agents/skills/commit-conventions/SKILL.md` and generate the message following the rules
+3. **Execute the commit:** `git commit -m "<message>"`
 
-### 3. 完了報告
+### 3. Completion report
 
-実行結果を報告する:
+Report the execution result:
 
 ```text
 完了:

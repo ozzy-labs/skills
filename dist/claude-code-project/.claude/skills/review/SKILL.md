@@ -1,5 +1,5 @@
 ---
-description: コード変更や PR を 11 観点（perspectives）でレビューし、JSON 構造化出力 + 人間可読レポートで報告する。quick / deep モードを切替可能。PR 番号またはワーキングツリー差分を入力に取る。
+description: Reviews code changes or PRs across 11 perspectives, reporting via JSON structured output plus a human-readable report. Supports switching between quick and deep modes. Takes a PR number or working-tree diff as input.
 argument-hint: <#PR-number | (blank for working tree changes)> [--axes=<axis,...>] [--deep]
 disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, AskUserQuestion, Workflow
@@ -7,25 +7,25 @@ allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, AskUserQuestion, Work
 
 # review
 
-`.agents/skills/review/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/review/SKILL.md` and follow its workflow steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-### 引数解析
+### Argument parsing
 
-`$ARGUMENTS` を解析する:
+Parse `$ARGUMENTS`:
 
-- 数字または `#N` → PR 番号として扱う
-- `--axes=<axis,...>` → 適用観点の明示指定
-- `--deep` → deep モードで実行（観点ごとに `Agent({subagent_type: "code-reviewer"})` を **同一メッセージ複数 tool call** で並列起動する）
+- A number or `#N` → treated as a PR number
+- `--axes=<axis,...>` → explicit specification of perspectives to apply
+- `--deep` → run in deep mode (launch `Agent({subagent_type: "code-reviewer"})` per perspective in parallel, via **multiple tool calls in the same message**)
 
-### deep モードでの並列起動
+### Parallel launch in deep mode
 
-deep モードでは観点ごとに worker を並列起動する。**Workflow tool が利用可能なら Workflow 方式を優先**し、利用不可なら Agent tool 方式に fallback する。
+In deep mode, launch a worker per perspective in parallel. **Prefer the Workflow approach when the Workflow tool is available**, falling back to the Agent tool approach when it is not.
 
-#### Workflow 方式（推奨）
+#### Workflow approach (recommended)
 
-観点を `args.axes` で渡し、`schema` で findings を構造化検証する（不一致は自動リトライされるため parse 失敗の取りこぼしがない）:
+Pass the perspectives via `args.axes`, and structurally validate findings with `schema` (mismatches are automatically retried, so there is no dropped output from parse failures):
 
 ```js
 export const meta = {
@@ -46,11 +46,11 @@ const results = await parallel(args.axes.map(axis => () =>
 return { findings: results.filter(Boolean) }
 ```
 
-- `agentType: 'code-reviewer'` で既存の subagent 定義を流用する
-- 集約（重複統合・観点間衝突・グルーピング）は workflow 内で行わず、return 後に呼び出し元で findings を `review.mjs render` に渡してエンジンに任せる（canonical 手順 3）。workflow 内に集約 agent を追加しない
-- diff は `args` で渡す（worker に取得させない）
+- Reuse the existing subagent definition via `agentType: 'code-reviewer'`
+- Aggregation (duplicate merging, cross-perspective conflicts, grouping) is not done inside the workflow; after return, the caller passes the findings to `review.mjs render` and leaves it to the engine (canonical step 3). Do not add an aggregation agent inside the workflow
+- Pass the diff via `args` (do not have the worker fetch it)
 
-#### Agent tool 方式（fallback）
+#### Agent tool approach (fallback)
 
 ```text
 Agent({
@@ -59,20 +59,20 @@ Agent({
 })
 ```
 
-- 同一 wave 内の独立 subagent は **1 メッセージ複数 tool call** で並列起動する
-- 集約は呼び出し元で `review.mjs render` に findings を渡して行う（LLM 呼び出しを追加しない）
-- subagent の戻り値（JSON）をマージし、`findings[]` に投入する
+- Independent subagents within the same wave are launched in parallel via **multiple tool calls in a single message**
+- Aggregation is done by the caller passing findings to `review.mjs render` (do not add an LLM call)
+- Merge the subagents' return values (JSON) and push them into `findings[]`
 
-### 完了報告後
+### After the completion report
 
-完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）。
+Call AskUserQuestion immediately after the completion report (do not set the `answers` parameter).
 
-**指摘ありの場合:**
+**When there are findings:**
 
-- **「指摘事項を修正する」** → Critical / Warning の指摘事項に基づきコードを修正する（Info は対象外）
-- **「このまま進める」** → 終了する
+- **"Fix the findings"** → Fix the code based on Critical / Warning findings (Info is out of scope)
+- **"Proceed as-is"** → exit
 
-**指摘なしの場合:**
+**When there are no findings:**
 
-- **「コミット・PR まで一括実行する」** → `.claude/skills/ship/SKILL.md` を Read し、その手順に従う
-- **「このまま進める」** → 終了する
+- **"Run through commit and PR in one go"** → Read `.claude/skills/ship/SKILL.md` and follow its steps
+- **"Proceed as-is"** → exit

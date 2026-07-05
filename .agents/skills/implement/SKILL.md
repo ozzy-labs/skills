@@ -1,28 +1,28 @@
 ---
 name: implement
-description: Issue または指示をもとに、ブランチ作成・実装計画・コード変更を行う。Issue 番号またはテキスト指示を受け取る。
+description: Creates a branch, plans the implementation, and makes code changes based on an Issue or an instruction. Accepts an Issue number or a text instruction.
 ---
 
-# implement - Issue/指示からブランチ作成・実装
+# implement - Create a branch and implement from an Issue/instruction
 
-Issue 読解または直接指示をもとに、ブランチ作成・実装計画・コード変更までを行う。
+Based on reading an Issue or a direct instruction, this performs everything from branch creation through implementation planning to code changes.
 
-## 入力
+## Input
 
-- **Issue 番号の場合**（`#N` または数字のみ）: `gh issue view <N>` で内容を取得し、要件を整理する
-- **テキスト指示の場合**: そのまま要件として扱う
-- **引数なしの場合**: 何を実装するか確認する
+- **If an Issue number** (`#N` or a bare number): fetch the content with `gh issue view <N>` and organize the requirements
+- **If a text instruction**: treat it as-is as the requirements
+- **If no argument**: confirm what to implement
 
-## アクション分類と policy 参照
+## Action classification and policy reference
 
-本 skill は個別の承認ゲートを prose にハードコードせず、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙・`policy.yaml` 階層の SSOT）に従う。自分のアクションを次のクラスに分類し、有効 gate を引いてから実行する:
+This skill does not hardcode individual approval gates into prose; instead it follows the central autonomy policy (the SSOT for the 3 classes, gate vocabulary, and `policy.yaml` hierarchy defined by the `policy` skill). It classifies its own actions into the following classes, resolves the effective gate, and then executes:
 
-| 本 skill のアクション | クラス | policy 参照 | ゼロコンフィグ既定 gate |
+| Action in this skill | Class | policy reference | Zero-config default gate |
 | --- | --- | --- | --- |
-| branch 上の実装（ファイル編集・追加・safe な削除） | `reversible-local` | `--action=branch-edit` | `proceed`（計画を提示して続行 + audit trail） |
-| migration / データ削除 / CI・リリース設定変更を含む変更 | `irreversible` | `--class=irreversible` | `ask`（着手前に明示承認） |
+| Implementation on the branch (file edit/add/safe delete) | `reversible-local` | `--action=branch-edit` | `proceed` (present the plan and continue + audit trail) |
+| Changes involving migration / data deletion / CI or release config changes | `irreversible` | `--class=irreversible` | `ask` (explicit approval before starting) |
 
-有効 gate は sibling の `policy` skill の `policy-read.mjs` で引く（Claude Code の user-scope では `~/.claude/skills/policy/policy-read.mjs`、dogfood は `<repo>/.claude/skills/policy/policy-read.mjs`、Codex/Gemini は `.agents/skills/policy/policy-read.mjs`）:
+Resolve the effective gate with `policy-read.mjs` in the sibling `policy` skill (for Claude Code user-scope this is `~/.claude/skills/policy/policy-read.mjs`, for dogfooding `<repo>/.claude/skills/policy/policy-read.mjs`, and for Codex/Gemini `.agents/skills/policy/policy-read.mjs`):
 
 ```bash
 node <policy skill のディレクトリ>/policy-read.mjs --action=branch-edit --repo-root="$PWD"
@@ -31,50 +31,50 @@ node <policy skill のディレクトリ>/policy-read.mjs --class=irreversible -
 # => .resolved.gate（既定 ask）
 ```
 
-gate 語彙は 3 値のみ:
+The gate vocabulary has only 3 values:
 
-- `proceed`: 承認を待たずに実行し、計画・変更内容を audit trail として報告に残す
-- `batch-confirm`: 着手前に 1 回だけまとめて確認する
-- `ask`: アクションごとに明示承認（Approval Gate）を得る
+- `proceed`: execute without waiting for approval, and leave the plan/changes in the report as an audit trail
+- `batch-confirm`: confirm once, all together, before starting
+- `ask`: obtain explicit approval (Approval Gate) for each action
 
-**policy 不在でも壊れない:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は必ず厳しい側（`ask`）へ倒す。`policy` skill 自体が未配置で `policy-read.mjs` を呼べない環境では、上表のゼロコンフィグ既定 gate（`reversible-local`=`proceed` / `irreversible`=`ask`）を直接適用する。
+**Does not break even if policy is absent:** `policy-read.mjs` is fail-safe by design — unreadable or invalid values always fall back to the stricter side (`ask`). In environments where the `policy` skill itself is not deployed and `policy-read.mjs` cannot be called, apply the zero-config default gates from the table above directly (`reversible-local`=`proceed` / `irreversible`=`ask`).
 
-**drive 配下との整合:** drive はユーザーから自律実行を委任されており、`reversible-local` の既定 `proceed`（計画承認をスキップして続行）はこの委任と整合する。標準の branch 実装は proceed で進み、`irreversible` と判定した変更のみ gate=`ask` で承認を求める。
+**Consistency under drive:** drive is delegated autonomous execution by the user, and the `reversible-local` default of `proceed` (skip plan approval and continue) is consistent with this delegation. Standard branch implementation proceeds with proceed, and only changes judged `irreversible` require approval with gate=`ask`.
 
-## 手順
+## Procedure
 
-### 1. ブランチ作成
+### 1. Create a branch
 
-1. `git status` と `git branch --show-current` で現在の状態を確認する
-2. 要件から `<type>/<slug>` 形式のブランチ名を決定する
-3. `git checkout -b <branch-name>` でブランチを作成する
+1. Check the current state with `git status` and `git branch --show-current`
+2. Determine a branch name in `<type>/<slug>` format from the requirements
+3. Create the branch with `git checkout -b <branch-name>`
 
-既にフィーチャーブランチにいる場合は、そのブランチで作業を続けるか確認する。
+If already on a feature branch, confirm whether to continue working on that branch.
 
-### 2. 実装計画とアクション分類
+### 2. Implementation plan and action classification
 
-1. コードベースを調査する
-   - 関連ファイルの特定
-   - 既存の実装パターンの把握
-   - 影響範囲の確認
-2. 実装計画を提示する:
-   - 変更するファイルとその内容
-   - 影響範囲
-3. 変更内容を「アクション分類と policy 参照」の表でクラスに分類し、policy の有効 gate を引く:
-   - 通常の branch 上の実装のみ → `reversible-local`（既定 `proceed`）: 計画を提示して続行する（承認待ちをしない。計画は audit trail として残す）
-   - migration / データ削除 / CI・リリース設定変更を含む → `irreversible`（既定 `ask`）: 明示承認を得てから実装に進む
+1. Investigate the codebase
+   - Identify relevant files
+   - Understand existing implementation patterns
+   - Check the scope of impact
+2. Present the implementation plan:
+   - Files to change and their content
+   - Scope of impact
+3. Classify the change into a class using the table in "Action classification and policy reference," and resolve the effective policy gate:
+   - Only ordinary implementation on the branch → `reversible-local` (default `proceed`): present the plan and continue (do not wait for approval; the plan is kept as an audit trail)
+   - Includes migration / data deletion / CI or release config changes → `irreversible` (default `ask`): obtain explicit approval before proceeding to implementation
 
-### 3. 実装
+### 3. Implementation
 
-policy で解決した gate に従い、コード変更を実行する（`proceed` は承認待ちなしで着手、`batch-confirm` は着手前に一括確認、`ask` は承認後に着手）。各ファイルの変更完了時に進捗を報告する。
+Execute code changes according to the gate resolved by policy (`proceed` starts without waiting for approval, `batch-confirm` confirms all at once before starting, `ask` starts after approval). Report progress as each file's changes are completed.
 
-### 4. 動作確認（verify）
+### 4. Verification (verify)
 
-実装完了後、`.agents/skills/verify/SKILL.md` を参照し、verify エンジンで複合検証（ビルド + 型 + テスト + lint）を実行する。verify は検証コマンドを発見連鎖（AGENTS.md「検証」節 → package.json scripts → task runner → 言語 heuristic）で自動発見し、出典付きで直列実行する。
+After implementation is complete, refer to `.agents/skills/verify/SKILL.md` and run the combined verification (build + type + test + lint) with the verify engine. verify auto-discovers verification commands through a discovery chain (AGENTS.md's 「検証」 section → package.json scripts → task runner → language heuristics) and runs them serially, each with its source attributed.
 
-エラーが出た場合はその場で修正し、再度 verify を実行する。
+If errors occur, fix them on the spot and run verify again.
 
-### 5. 完了報告
+### 5. Completion report
 
 ```text
 実装完了:
@@ -84,9 +84,9 @@ policy で解決した gate に従い、コード変更を実行する（`procee
     M path/to/modified-file
 ```
 
-## 注意事項
+## Notes
 
-- .env ファイルは読み取り・ステージングしない
-- `gh` CLI が未認証の場合はエラーメッセージを表示して中断する
-- アクションを 3 クラスに分類し policy を引いてから実行する。個別の承認ゲートを prose にハードコードしない
-- `irreversible`（migration / データ削除 / CI・リリース設定変更）と判定した変更は gate=`ask` の下で必ず明示承認を得てから着手する
+- Do not read or stage `.env` files
+- If the `gh` CLI is not authenticated, display an error message and abort
+- Classify actions into the 3 classes and resolve policy before executing. Do not hardcode individual approval gates into prose
+- For changes judged `irreversible` (migration / data deletion / CI or release config changes), always obtain explicit approval under gate=`ask` before starting

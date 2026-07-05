@@ -1,121 +1,121 @@
 ---
 name: health
-description: リポジトリ改修中に意図せず残る状態（working tree, stash, branch, worktree, PR, issue, actions など）と skill catalog 整合性を `health-check.mjs` エンジンで一発確認し、16 領域のステータス表と固定語彙の推奨アクションを提示する。`--deep` で `要確認` 項目を read-only 追加調査、`--fix` で安全語彙（prune / delete / fetch、`--deep` 昇格した drop）を中央 policy の gate に従って実行する（reversible-local=proceed / irreversible=ask）。既定は read-only。
+description: Checks, in one shot via the `health-check.mjs` engine, for state unintentionally left behind during repository work (working tree, stash, branch, worktree, PR, issue, actions, etc.) and skill-catalog consistency, presenting a 16-area status table and fixed-vocabulary recommended actions. With `--deep`, does additional read-only investigation of `要確認` items; with `--fix`, executes safe-vocabulary actions (prune / delete / fetch, and `drop` when promoted by `--deep`) following the central policy's gate (reversible-local=proceed / irreversible=ask). Read-only by default.
 ---
 
-# health - リポジトリ状態の確認と推奨アクション提示
+# health - Checking repository state and presenting recommended actions
 
-リポジトリ改修中に意図せず残る状態（中断中の git op、未 push commit、stale branch、open PR/issue、failed CI など）と skill catalog の整合性を 16 領域に渡って確認し、各項目に **固定語彙の推奨アクション** を付与して報告する。
+Checks, across 16 areas, for state unintentionally left behind during repository work (an interrupted git op, an unpushed commit, a stale branch, an open PR/issue, failed CI, etc.) and skill-catalog consistency, attaching a **fixed-vocabulary recommended action** to each item and reporting it.
 
-決定論（16 領域の検査・固定語彙判定・section ソート・ステータス表/非 clean section のレンダリング・`--fix` 実行）は同梱の **`health-check.mjs` エンジン**が担う（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1、先行例 `usage-check.mjs` / `skill-metrics.mjs` / `policy-read.mjs`）。本 SKILL.md は判断層 — **いつエンジンを呼ぶか・結果をどう提示するか・どこで人に確認するか** — に絞る。
+Determinism (checking the 16 areas, fixed-vocabulary determination, section sorting, rendering the status table/non-clean sections, and running `--fix`) is handled by the bundled **`health-check.mjs` engine** ([ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1, following the precedent of `usage-check.mjs` / `skill-metrics.mjs` / `policy-read.mjs`). This SKILL.md is confined to the judgment layer — **when to call the engine, how to present the results, and where to confirm with a human**.
 
-## 原則
+## Principles
 
-- **既定は read-only:** 引数なし / `--deep` のみの経路は一切 mutation しない（検査と提示のみ）。実行は `--fix` 明示時の安全語彙に限る。
-- **fail-open:** あるチェックが失敗（gh 未認証・不在、コマンド不在、network 等）しても他チェックは継続する。エンジンは失敗領域を JSON の per-check `error` に載せ、git 系チェックは常に続行する。
-- **固定語彙のみ:** 推奨アクションは後述の 8 語彙に限る。エンジンが判定するため、自由文言を生成しない。
-- **health と skill-metrics の責務分離:** `health` は repo 状態、`skill-metrics` は skill 挙動。
+- **Read-only by default:** the no-argument / `--deep`-only paths never mutate anything (inspection and presentation only). Execution is limited to the safe vocabulary, and only when `--fix` is explicit.
+- **fail-open:** even if one check fails (gh unauthenticated / absent, a missing command, network issues, etc.), the other checks continue. The engine records the failed area in the JSON's per-check `error`, and git-based checks always continue.
+- **Fixed vocabulary only:** recommended actions are limited to the 8 vocabulary items described below. Since the engine makes the determination, no free-form wording is generated.
+- **Separation of responsibilities between health and skill-metrics:** `health` covers repo state, `skill-metrics` covers skill behavior.
 
-## 入力
+## Input
 
-- 引数なし → Phase 1 のみ（routine 互換・決定論的・read-only）
-- `--deep` → Phase 1 完了後、`要確認` 項目を read-only コマンドで追加調査し、機械判定可能な範囲でラベルを格上げする
-- `--fix` → 各安全アクションの gate を中央 autonomy policy（`policy-read.mjs`）で解決する。`reversible-local`（prune / delete / fetch）= `proceed` はその場で実行し audit trail を残す。`irreversible`（`--deep` 昇格の stash drop）= `ask` は個別確認のため一覧提示（未実行）にとどめる。詳細は「`--fix` の安全境界」参照
-- `--yes` → `--fix` 併用時のみ有効。**policy を上書きする明示 opt-out** として全安全アクションを確認なしで実行する（routine / `/loop` / `schedule` 経由の無人実行に必須）
-- `--json` → 人間可読レポートの代わりに構造化 JSON を出力（プログラム連携・デバッグ用）
+- No arguments → Phase 1 only (routine-compatible, deterministic, read-only)
+- `--deep` → after Phase 1 completes, additionally investigates `要確認` items with read-only commands, upgrading the label wherever a machine determination is possible
+- `--fix` → resolves the gate for each safe action via the central autonomy policy (`policy-read.mjs`). `reversible-local` (prune / delete / fetch) = `proceed` is executed on the spot, leaving an audit trail. `irreversible` (a stash drop promoted by `--deep`) = `ask` is left as a listed-but-unexecuted item pending individual confirmation. See "`--fix` safe boundary" for details
+- `--yes` → effective only when combined with `--fix`. As an **explicit opt-out that overrides the policy**, executes all safe actions without confirmation (required for unattended execution via routine / `/loop` / `schedule`)
+- `--json` → outputs structured JSON instead of a human-readable report (for program integration / debugging)
 
-`--deep` / `--fix` は明示時のみ有効。
+`--deep` / `--fix` take effect only when explicit.
 
-## 手順
+## Procedure
 
-1. **本 SKILL.md と同じディレクトリ**の `health-check.mjs` を Bash で実行する（引数はそのまま渡す）。Claude Code では `~/.claude/skills/health/health-check.mjs`（dogfood は `<repo>/.claude/skills/health/health-check.mjs`）:
+1. Run `health-check.mjs`, **in the same directory as this SKILL.md**, via Bash (passing the arguments as-is). On Claude Code it's `~/.claude/skills/health/health-check.mjs` (for dogfooding, `<repo>/.claude/skills/health/health-check.mjs`):
 
    ```bash
    node <この skill のディレクトリ>/health-check.mjs [--deep] [--fix] [--yes]
    ```
 
-2. エンジンは既定で **ステータス表 + 非 clean section** を整形済みテキストで stdout に出力する。**その出力をそのまま提示**する（再整形・再解釈しない — レンダリングはエンジンの責務）。
-3. `--fix`（`--yes` なし）の場合、エンジンは各アクションの gate を policy で解決し、`proceed`（reversible-local）アクションはその場で実行して結果（`✔ done` / `✖ failed`）を併記する。`ask`（irreversible の stash drop）アクションは「確認が必要なアクション」として一覧提示し**実行しない**。この `ask` 一覧を人に提示して個別確認を取る（確認ゲートの配線はホスト依存 — Claude Code は `SKILL.claude-code.md` 参照）。承認されたら `--fix --yes` で再実行して残りを実行する。
-4. gh 未認証・不在などで Triage 系 section が `error` の場合は、その旨をそのまま提示する（git 系の結果は有効）。
+2. By default, the engine outputs a **status table + non-clean sections** as pre-formatted text to stdout. **Present that output as-is** (don't reformat or reinterpret it — rendering is the engine's responsibility).
+3. For `--fix` (without `--yes`), the engine resolves each action's gate via the policy; `proceed` (reversible-local) actions are executed on the spot, with the result (`✔ done` / `✖ failed`) noted alongside. `ask` (irreversible stash drop) actions are listed as "actions requiring confirmation" and **not executed**. Present this `ask` list to the human and obtain individual confirmation (the confirmation-gate wiring is host-dependent — see `SKILL.claude-code.md` for Claude Code). Once approved, re-run with `--fix --yes` to execute the rest.
+4. If a Triage-related section is `error` due to gh being unauthenticated / absent, etc., present that as-is (the git-based results remain valid).
 
-## 推奨アクション語彙（固定・人間可読契約）
+## Recommended-action vocabulary (fixed, human-readable contract)
 
-エンジンはこの 8 語彙以外を出力しない。
+The engine outputs nothing other than these 8 vocabulary items.
 
-| ラベル | 意味 / 推奨コマンド | 適用条件（代表例） |
+| Label | Meaning / recommended command | Applicable condition (representative example) |
 |---|---|---|
-| `delete` | `git branch -d <name>`（safe。force `-D` は使わない） | merged PR と紐づく追加 commit なしの local branch |
-| `drop` | `git stash drop` | 紐づく branch なし、または `--deep` で HEAD に clean apply 不可と判定された stash |
-| `prune` | `git remote prune origin` / `git worktree remove` / orphan synthetic branch の `git branch -D` | gone tracking ref / orphaned worktree / 親 worktree 消失の drive synthetic branch |
-| `push` | `git push` | ahead で未 push、PR 未作成 |
-| `fetch` | `git fetch --tags` | remote にあって local 未取得の tag |
-| `要確認` | 機械判断不能、ユーザー目視 | 古い stash / 古い branch / conflict marker / failed CI run |
-| `要対応` | human decision 必要 | open PR / open issue / review request / draft release / automation PR |
-| `abort or continue` | broken state の解消 | MERGE_HEAD / REBASE_HEAD / CHERRY_PICK_HEAD / BISECT_LOG |
+| `delete` | `git branch -d <name>` (safe; force `-D` is not used) | a local branch tied to a merged PR with no additional commits |
+| `drop` | `git stash drop` | a stash with no tied branch, or one that `--deep` determined can't cleanly apply to HEAD |
+| `prune` | `git remote prune origin` / `git worktree remove` / `git branch -D` for an orphan synthetic branch | a gone tracking ref / an orphaned worktree / a drive synthetic branch whose parent worktree has disappeared |
+| `push` | `git push` | ahead and unpushed, no PR created |
+| `fetch` | `git fetch --tags` | a tag that exists on remote but hasn't been fetched locally |
+| `要確認` | not machine-determinable, needs human eyes | an old stash / an old branch / a conflict marker / a failed CI run |
+| `要対応` | needs a human decision | an open PR / open issue / review request / draft release / automation PR |
+| `abort or continue` | resolving a broken state | MERGE_HEAD / REBASE_HEAD / CHERRY_PICK_HEAD / BISECT_LOG |
 
-「古い」の閾値は 14 日。section 順序（Broken state → Local artifacts → Triage(mine) → Triage(automation) → Catalog）が暗黙の優先度を表す。
+The threshold for "old" is 14 days. The section order (Broken state → Local artifacts → Triage(mine) → Triage(automation) → Catalog) represents an implicit priority.
 
-## `--fix` の安全境界（人間可読契約）
+## `--fix` safe boundary (human-readable contract)
 
-`--fix` で自動実行するのは **決定論的・可逆・低リスク** な安全語彙に限る（HITL の Audit Trail with Lazy Review パターン）。
+What `--fix` executes automatically is limited to **deterministic, reversible, low-risk** safe vocabulary (the HITL Audit Trail with Lazy Review pattern).
 
-| ラベル | `--fix` 対象 | 根拠 |
+| Label | `--fix` target | Rationale |
 |---|---|---|
-| `prune` | ○ | remote prune / orphan worktree remove / orphan synthetic branch の `-D` は決定論的 |
-| `delete` | ○ | `git branch -d`（safe）のみ。未 merge branch は git 自身が拒否する |
-| `fetch` | ○ | 読み取り方向で無害 |
-| `drop` | △ | **`--deep` Phase 2 で `drop` に格上げされた stash（HEAD へ clean apply 不可）のみ**。Phase 1 の閾値ベース `drop`（元 branch 消滅）は対象外 |
-| `push` / `要確認` / `要対応` / `abort or continue` | × | 外向き副作用または人間判断領域。エンジンは実行対象にしない |
+| `prune` | ○ | remote prune / orphan worktree remove / `-D` on an orphan synthetic branch are deterministic |
+| `delete` | ○ | `git branch -d` (safe) only. git itself refuses an unmerged branch |
+| `fetch` | ○ | harmless, being read-direction |
+| `drop` | △ | **only a stash promoted to `drop` by `--deep` Phase 2 (can't cleanly apply to HEAD)**. Phase 1's threshold-based `drop` (the original branch has disappeared) is out of scope |
+| `push` / `要確認` / `要対応` / `abort or continue` | × | an outward-facing side effect or human-judgment territory. The engine never targets these for execution |
 
-### 確認ゲートは中央 policy に従う（アクション分類と policy 参照）
+### The confirmation gate follows the central policy (action classification and policy reference)
 
-確認ゲートは skill 個別の prose ではなく、中央 autonomy policy（`policy` skill が定義する 3 クラス・gate 語彙の SSOT）に従う（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R3、[#181](https://github.com/ozzy-labs/skills/issues/181)-PR3。#173 の単一確認を置換）。各安全ラベルを次のクラスに分類し、エンジンが `health-check.mjs` 内から `policy-read.mjs` を読んで有効 gate を解決する:
+The confirmation gate follows not skill-specific prose, but the central autonomy policy (the SSOT for the 3 action classes and gate vocabulary defined by the `policy` skill) ([ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R3, [#181](https://github.com/ozzy-labs/skills/issues/181)-PR3; replacing #173's single confirmation). Each safe label is classified into the following classes, and the engine resolves the effective gate by reading `policy-read.mjs` from within `health-check.mjs`:
 
-| `--fix` ラベル | クラス | policy 参照 | ゼロコンフィグ既定 gate | 挙動 |
+| `--fix` label | Class | policy reference | zero-config default gate | Behavior |
 |---|---|---|---|---|
-| `prune` / `delete` / `fetch` | `reversible-local` | `--action=worktree-prune` / `--action=branch-delete` / `--class=reversible-local` | `proceed` | その場で実行し結果を併記（audit trail・確認しない） |
-| `drop`（`--deep` 昇格の stash drop） | `irreversible` | `--action=stash-drop` | `ask` | 個別確認を経てから実行（無確認では実行しない） |
+| `prune` / `delete` / `fetch` | `reversible-local` | `--action=worktree-prune` / `--action=branch-delete` / `--class=reversible-local` | `proceed` | executed on the spot with the result noted (audit trail, no confirmation) |
+| `drop` (stash drop promoted by `--deep`) | `irreversible` | `--action=stash-drop` | `ask` | executed only after individual confirmation (never executed without confirmation) |
 
-gate 語彙は 3 値のみ: `proceed`（確認なしで実行 + audit trail）/ `batch-confirm`（1 回の一括確認）/ `ask`（アクションごとの明示承認）。
+The gate vocabulary has only 3 values: `proceed` (execute without confirmation + audit trail) / `batch-confirm` (a single bulk confirmation) / `ask` (explicit approval per action).
 
-- **`--yes` は明示 opt-out:** policy を**上書き**し、全安全アクションを確認なしで実行する（routine / `/loop` / `schedule` の無人実行）。gate が `ask` でも実行される。
-- **policy 不在でも壊れない（fail-safe）:** `policy-read.mjs` は fail-safe 設計で、読めない・不正な値は必ず厳しい側（`ask`）へ倒す。`policy` skill 自体が未配置で `policy-read.mjs` を import できない環境では、`health-check.mjs` は全アクションを `ask`（従来の単一確認相当・安全側）に倒す。**自律度が緩む方向には決して倒れない。**
-- **実行は直列・per-action 継続:** git 状態を変えるため並列にしない。個別アクションの失敗は継続し、結果を各行に併記する（audit trail）。
-- **既定不変:** 引数なし / `--deep` のみの経路は完全に read-only。policy が `reversible-local`=`ask` に厳格化されている場合、`--fix`（`--yes` なし）は何も自動実行しない。
+- **`--yes` is an explicit opt-out:** it **overrides** the policy and executes all safe actions without confirmation (unattended execution via routine / `/loop` / `schedule`). It executes even when the gate is `ask`.
+- **Doesn't break even without a policy present (fail-safe):** `policy-read.mjs` is fail-safe by design — unreadable or invalid values always fall to the stricter side (`ask`). In an environment where the `policy` skill itself isn't installed and `policy-read.mjs` can't be imported, `health-check.mjs` falls back to `ask` (equivalent to the old single confirmation, the safe side) for all actions. **It never falls in the direction of loosening autonomy.**
+- **Execution is sequential, continuing per action:** since it changes git state, it's not parallelized. A failure in an individual action doesn't stop the run — it continues, with the result noted on each line (audit trail).
+- **The default is unchanged:** the no-argument / `--deep`-only paths are completely read-only. If the policy has tightened `reversible-local` to `ask`, `--fix` (without `--yes`) auto-executes nothing at all.
 
-## チェック対象（16 領域）
+## Checked items (16 areas)
 
-判定ロジックの詳細はエンジン（`health-check.mjs`）にある。領域と section 順序は以下で固定:
+The details of the determination logic live in the engine (`health-check.mjs`). The areas and section order are fixed as follows:
 
-1. Interrupted git ops（MERGE/REBASE/CHERRY_PICK/BISECT） — `abort or continue`
-2. Conflict markers（`git diff --check`） — `要確認`
-3. Working tree（`git status -s`） — 情報のみ
-4. Stash（経過日数 / 元 branch 有無 / `--deep` で apply 可否） — `drop` / `要確認`
-5. Local branches（synthetic / merged PR / upstream / ahead） — `prune` / `delete` / `push` / `要確認`
-6. Remote tracking（gone ref） — `prune`
-7. Worktrees（drive orphan / locked / merged） — `prune`
-8. Submodules（`+` / `-` / `U`） — `要確認`
-9. Tags（local-only / remote-only） — `push` / `fetch`
-10. My open PRs（draft / それ以外） — `要確認` / `要対応`
+1. Interrupted git ops (MERGE/REBASE/CHERRY_PICK/BISECT) — `abort or continue`
+2. Conflict markers (`git diff --check`) — `要確認`
+3. Working tree (`git status -s`) — informational only
+4. Stash (elapsed days / whether the original branch exists / apply feasibility via `--deep`) — `drop` / `要確認`
+5. Local branches (synthetic / merged PR / upstream / ahead) — `prune` / `delete` / `push` / `要確認`
+6. Remote tracking (gone ref) — `prune`
+7. Worktrees (drive orphan / locked / merged) — `prune`
+8. Submodules (`+` / `-` / `U`) — `要確認`
+9. Tags (local-only / remote-only) — `push` / `fetch`
+10. My open PRs (draft / otherwise) — `要確認` / `要対応`
 11. Issues assigned to me — `要対応`
 12. Review requests on me — `要対応`
-13. Recent failed actions（`--deep` で same-error グルーピング） — `要確認` / `要対応`
+13. Recent failed actions (same-error grouping via `--deep`) — `要確認` / `要対応`
 14. Draft releases — `要対応`
-15. Automation PRs（bot 作者） — `要対応`
-16. Perspective MD frontmatter（review skill の観点 MD スキーマ / SSOT⇄配信先 drift） — `要確認`
+15. Automation PRs (bot author) — `要対応`
+16. Perspective MD frontmatter (the review skill's perspective MD schema / SSOT⇄distribution-target drift) — `要確認`
 
-## 明示的に除外する項目
+## Explicitly excluded items
 
-| 項目 | 除外理由 |
+| Item | Reason for exclusion |
 |---|---|
-| lockfile drift | correctness 問題。verify / CI が拾う領域。言語特化 |
-| gitignored-but-tracked file | rare すぎてノイズ源 |
-| GitHub Actions caches / artifacts | ストレージ管理の領域、leftover 状態とは別概念 |
+| lockfile drift | a correctness issue. An area caught by verify / CI. Language-specific |
+| gitignored-but-tracked file | too rare, a source of noise |
+| GitHub Actions caches / artifacts | a storage-management area, a distinct concept from leftover state |
 
-## 注意事項
+## Notes
 
-- `.env` ファイルは読み取らない。
-- 既定・`--deep` のみは read-only。実行は `--fix` の安全語彙に限る（`push` / `要確認` / `要対応` / `abort or continue` は絶対に実行しない）。
-- severity ラベル（blocker / warning / info）は付与しない。section 順序が暗黙の優先度を表す。
-- 推奨アクション語彙は固定。新規追加はエンジン + 本 SKILL.md の同時改訂で行う。
-- routine 経路（`/loop` / `schedule`）で `--fix` を使う場合は対話不能なので `--yes` を必須とする。
+- Never read `.env` files.
+- The default and `--deep`-only paths are read-only. Execution is limited to `--fix`'s safe vocabulary (`push` / `要確認` / `要対応` / `abort or continue` are never executed).
+- No severity label (blocker / warning / info) is attached. The section order represents an implicit priority.
+- The recommended-action vocabulary is fixed. Adding a new one requires revising both the engine and this SKILL.md together.
+- When using `--fix` via a routine path (`/loop` / `schedule`), interaction isn't possible, so `--yes` is required.

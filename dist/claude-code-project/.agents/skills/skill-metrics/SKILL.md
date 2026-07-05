@@ -1,63 +1,63 @@
 ---
 name: skill-metrics
-description: ローカルの observability イベントログ（~/.agents/observability/events.jsonl）を集計し、skill 別の発火件数と注目イベント（fallback / HITL 却下 / loop 上限到達 / 中断）を read-only で提示する。「skill のメトリクスを見せて」「観測結果を集計して」「どの skill がよく使われてる?」で発火。送信はしない。
+description: Aggregates the local observability event log (~/.agents/observability/events.jsonl) and presents, read-only, per-skill invocation counts and notable events (fallback / HITL rejection / loop cap reached / abort). Fires on "show me the skill metrics," "aggregate the observability results," "which skills get used the most?" Does not send anything.
 ---
 
-# skill-metrics - skill 計測の集計と提示
+# skill-metrics - Aggregation and presentation of skill measurements
 
-`skill-observability` が `~/.agents/observability/events.jsonl` に蓄積したイベントを集計し、**skill 別の発火件数 + 注目イベント**を read-only で提示する。改善ループの「集計層」。
+Aggregates the events accumulated by `skill-observability` in `~/.agents/observability/events.jsonl`, and presents, read-only, **per-skill invocation counts + notable events**. The "aggregation layer" of the improvement loop.
 
-## 原則
+## Principles
 
-- **read-only・送信なし**: イベントの読取と提示のみ。外部送信・issue 起票・ファイル編集はしない（snapshot 書き出しを除く）。反映（issue 化）は `lessons-triage` の責務。
-- **件数主義 + 小 n ガード**: 単一作者・低頻度ではデータ量が統計的有意性に届かないため、**率は分母が `min_n`（既定 5・env `SKILL_METRICS_MIN_N` で上書き）以上のときのみ提示**する。下回る場合は率を出さず件数のみ（`1/1 で中断率 100%` のミスリードを防ぐ）。
-- **fail-open**: ログが無い・読めない場合も空の rollup を返してエラーにしない。
-- **health と責務分離**: `health` は repo 状態、`skill-metrics` は skill 挙動。
+- **Read-only, no sending**: Only reads and presents events. Does not send externally, file issues, or edit files (except writing out a snapshot). Reflection (turning things into issues) is `lessons-triage`'s responsibility.
+- **Count-based reasoning + small-n guard**: Because a single author's low frequency doesn't reach statistical significance, **a rate is presented only when the denominator is at or above `min_n`** (default 5, overridable via env `SKILL_METRICS_MIN_N`). Below that, only the count is shown, not a rate (preventing the misleading impression of "1/1 = 100% abort rate").
+- **fail-open**: Returns an empty rollup without erroring, even if the log is absent or unreadable.
+- **Separation of concerns from health**: `health` covers repo state; `skill-metrics` covers skill behavior.
 
-## 入力
+## Input
 
-引数（すべて任意）:
+Arguments (all optional):
 
-- `--since=<ISO 8601>`: 指定時刻以降のイベントのみ集計
-- `--skill=<name>`: 特定 skill のみ集計
-- `--snapshot`: rollup を `~/.agents/observability/snapshots/<YYYY-Www>.json` に書き出す（トレンド比較の baseline を作る。書き出す内容は導出フィールド `trend` を除いた素の集計 = 純粋な baseline）
+- `--since=<ISO 8601>`: aggregate only events from this time onward
+- `--skill=<name>`: aggregate only a specific skill
+- `--snapshot`: writes the rollup out to `~/.agents/observability/snapshots/<YYYY-Www>.json` (creates a baseline for trend comparison; what's written is the raw aggregation with the derived `trend` field excluded = a pure baseline)
 
-## トレンド比較（前週比）
+## Trend comparison (week-over-week)
 
-エンジンは実行のたびに、`~/.agents/observability/snapshots/` にある **今週より前の最新スナップショット**（過去の `--snapshot` が書き出した前世代 baseline）を読み、現 rollup との差分を `trend` フィールドに載せる（前世代が無ければ `trend: null`）。`--snapshot` は今週分の baseline を書き出し、**次回の実行がそれを前週として比較**する。
+On each run, the engine reads the **latest snapshot from before this week** found in `~/.agents/observability/snapshots/` (a prior-generation baseline written by a past `--snapshot`), and loads the diff against the current rollup into the `trend` field (`trend: null` if there's no prior generation). `--snapshot` writes out this week's baseline, and **the next run compares against it as the prior week**.
 
-- **件数 delta は常に提示**する: skill 別 `invocations_delta`（発火数の増減）、`signals[<name>]`（摩擦シグナルの増減）。増減はプラス/マイナスで示す。
-- **率 delta は小 n ガードを継承**する: `abort_rate_delta` は**両世代とも**分母が `min_n` 以上（各 rollup の `abort_rate` が非 null）のときのみ数値を出す。片側でも n<`min_n` なら `abort_rate_delta: null` + `abort_rate_delta_suppressed: true`（率は出さず件数 delta のみ）。
-- `trend.baseline_week` / `trend.baseline_file` が比較対象のスナップショット（ISO 年週・**ファイル名のみ**・HOME 絶対パスは載せない = privacy 継承）、`trend.baseline_window` が前世代の集計 window を示す。
-- スナップショットが 1 世代しか無い・snapshots dir が無い・読めない場合は `trend: null`（fail-open、通常の rollup 提示は続行）。
+- **Count deltas are always presented**: per-skill `invocations_delta` (change in invocation count), `signals[<name>]` (change in friction signals). Increases/decreases are shown with a plus/minus sign.
+- **Rate deltas inherit the small-n guard**: `abort_rate_delta` only produces a number when **both generations'** denominators are at or above `min_n` (each rollup's `abort_rate` is non-null). If either side has n<`min_n`, it's `abort_rate_delta: null` + `abort_rate_delta_suppressed: true` (only the count delta is shown, not the rate).
+- `trend.baseline_week` / `trend.baseline_file` indicate the comparison-target snapshot (ISO year-week, **filename only** — no HOME absolute path is included, continuing the privacy stance), and `trend.baseline_window` shows the prior generation's aggregation window.
+- If there's only one generation of snapshot, the snapshots dir doesn't exist, or it can't be read, `trend: null` (fail-open; normal rollup presentation continues).
 
-## 手順
+## Steps
 
-1. **本 SKILL.md と同じディレクトリ**の `skill-metrics.mjs` を Bash で実行して JSON rollup を得る（引数はそのまま渡す）。Claude Code では `~/.claude/skills/skill-metrics/skill-metrics.mjs`（dogfood は `<repo>/.claude/skills/skill-metrics/skill-metrics.mjs`）:
+1. Run the `skill-metrics.mjs` **in the same directory as this SKILL.md** via Bash to obtain the JSON rollup (pass arguments through as-is). In Claude Code this is `~/.claude/skills/skill-metrics/skill-metrics.mjs` (dogfood: `<repo>/.claude/skills/skill-metrics/skill-metrics.mjs`):
 
    ```bash
-   node <この skill のディレクトリ>/skill-metrics.mjs [--since=...] [--skill=...] [--snapshot]
+   node <this skill's directory>/skill-metrics.mjs [--since=...] [--skill=...] [--snapshot]
    ```
 
-2. 得た JSON を人間可読に整形して提示する。最低限、以下を含める:
-   - **window**: 集計対象期間（since / until）、総イベント数、セッション数
-   - **skill 別**: 発火件数（`invocations`）と channel 内訳（`by_operation`: `invoke_agent` / `slash_command`）。outcome があれば completed / aborted / fallback の件数。中断率（`abort_rate`）は `abort_rate_suppressed: true` のとき「n<min_n のため非表示（件数のみ）」と明記する
-   - **signals**: 注目シグナルの件数（`review.deep_to_quick_fallback` / `usage_guard.fail_open` / `hitl.rejected` / `loop.hit_cap` 等）
-   - **notable**: 摩擦イベント（fallback / HITL 却下 / loop 上限 / 中断）の一覧
-   - **trend**（`trend` が非 null のとき）: 前週比（`baseline_week` と比較）の発火数増減（`invocations_delta`）と摩擦シグナル増減（`signals`）。`abort_rate_delta_suppressed: true` のときは「n<min_n のため率 delta 非表示（件数 delta のみ）」と明記する。`trend: null`（1 世代目・baseline 無し）のときは「前週スナップショットなし（次回から比較可能）」と案内する
-3. データが空（`events: 0`）の場合は「イベント未蓄積。`skill-observability` の SessionEnd hook が未配線の可能性」と案内する（hook 配線は `skill-observability` の SKILL.md「SessionEnd hook を有効化」を参照）。
+2. Format the resulting JSON into something human-readable and present it. At minimum, include:
+   - **window**: the aggregation period (since / until), total event count, session count
+   - **Per skill**: invocation count (`invocations`) and channel breakdown (`by_operation`: `invoke_agent` / `slash_command`). If outcomes exist, counts of completed / aborted / fallback. For the abort rate (`abort_rate`), when `abort_rate_suppressed: true`, note explicitly "hidden due to n<min_n (count only)"
+   - **signals**: counts of notable signals (`review.deep_to_quick_fallback` / `usage_guard.fail_open` / `hitl.rejected` / `loop.hit_cap`, etc.)
+   - **notable**: a list of friction events (fallback / HITL rejection / loop cap / abort)
+   - **trend** (when `trend` is non-null): the week-over-week (vs. `baseline_week`) invocation-count delta (`invocations_delta`) and friction-signal delta (`signals`). When `abort_rate_delta_suppressed: true`, note explicitly "rate delta hidden due to n<min_n (count delta only)." When `trend: null` (first generation, no baseline), note "no prior-week snapshot (comparison available from next time)"
+3. If the data is empty (`events: 0`), note "no events accumulated yet — the SessionEnd hook for `skill-observability` may not be wired" (for hook wiring, see `skill-observability`'s SKILL.md, "Enabling the SessionEnd hook").
 
-## 提示フォーマット例
+## Example presentation format
 
 ```text
-skill-metrics（window: 2026-06-20 〜 2026-06-29 / 142 events / 18 sessions / min_n=5）
+skill-metrics (window: 2026-06-20 to 2026-06-29 / 142 events / 18 sessions / min_n=5)
 
-skill 別発火:
-  drive    12   (invoke_agent 3, slash_command 9)   abort: n<5 のため非表示（件数のみ）
+Per-skill invocations:
+  drive    12   (invoke_agent 3, slash_command 9)   abort: hidden due to n<5 (count only)
   review    8   (slash_command 8)
   ship      6   (slash_command 6)
 
-注目シグナル:
+Notable signals:
   usage_guard.fail_open        2
   review.deep_to_quick_fallback 1
 
@@ -65,14 +65,14 @@ notable:
   [signal] review / review.deep_to_quick_fallback (2026-06-28T...)
   [signal] drive  / usage_guard.fail_open          (2026-06-27T...)
 
-トレンド（前週比 / baseline: 2026-W25）:
-  drive    発火 +4    abort 率 delta: n<5 のため非表示（件数 delta のみ）
-  review   発火 -1    abort 率 delta: -0.10
+Trend (week-over-week / baseline: 2026-W25):
+  drive    invocations +4    abort rate delta: hidden due to n<5 (count delta only)
+  review   invocations -1    abort rate delta: -0.10
   signals: usage_guard.fail_open +2 / review.deep_to_quick_fallback +1
 ```
 
-## 注意事項
+## Notes
 
-- `.env` ファイルは読み取らない。
-- イベントログにある以上の情報を推測で補わない（件数主義）。
-- 外部送信・issue 起票はしない（反映は `lessons-triage`）。
+- Does not read `.env` files.
+- Does not speculatively supplement beyond what's in the event log (count-based reasoning).
+- Does not send externally or file issues (reflection is `lessons-triage`'s responsibility).

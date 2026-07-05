@@ -135,7 +135,7 @@ test("phase-issue --draft mode is documented as stdout-only with no side effects
   );
   assert.match(
     body,
-    /外部副作用なし|gh.*呼び出さない|gh.*呼び出しもない/,
+    /no external side effects|do not call the `gh`/i,
     "--draft mode must explicitly state no gh side effects",
   );
 });
@@ -151,7 +151,7 @@ test("phase-issue canonical body marks non-interactive behavior", async () => {
   );
   assert.match(
     body,
-    /非対話/,
+    /non-interactive/i,
     "canonical SKILL.md must explicitly document its non-interactive contract",
   );
 });
@@ -171,11 +171,19 @@ test("phase-issue documents explicit out-of-scope items from Issue #62", async (
   // Issue #62 explicitly excludes drive coupling, auto-numbering, and style
   // learning. These must remain documented as out-of-scope so future edits
   // can't silently expand the contract.
-  assert.match(body, /drive\s*連携/, "out-of-scope: drive coupling must be documented");
-  assert.match(body, /自動採番/, "out-of-scope: phase number auto-numbering must be documented");
   assert.match(
     body,
-    /style\s*学習|過去\s*issue/,
+    /does not integrate with drive/i,
+    "out-of-scope: drive coupling must be documented",
+  );
+  assert.match(
+    body,
+    /auto-number/i,
+    "out-of-scope: phase number auto-numbering must be documented",
+  );
+  assert.match(
+    body,
+    /learn style from past issues/i,
     "out-of-scope: style learning must be documented",
   );
 });

@@ -77,7 +77,7 @@ test("implement canonical SKILL.md classifies actions and references the central
   // irreversible examples explicitly enumerated per the ADR.
   assert.match(
     body,
-    /migration.*データ削除.*CI・リリース設定変更|CI・リリース設定変更/s,
+    /migration.*data deletion.*CI or release config|CI or release config/s,
     "must enumerate irreversible examples (migration / data deletion / CI-release config)",
   );
 });
@@ -98,7 +98,11 @@ test("implement canonical SKILL.md removes the old always-approval prose (negati
 
 test("implement canonical SKILL.md documents policy-absence fail-safe", async () => {
   const { body } = await loadCanonical();
-  assert.match(body, /policy 不在でも壊れない/, "must document policy-absence safety");
+  assert.match(
+    body,
+    /does not break even if policy is absent/i,
+    "must document policy-absence safety",
+  );
   assert.match(body, /fail-safe/, "must reference the fail-safe design");
 });
 

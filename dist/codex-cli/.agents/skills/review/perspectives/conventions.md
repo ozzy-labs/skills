@@ -1,31 +1,31 @@
 ---
 name: conventions
 category: required
-description: Conventional Commits、lint、ファイル命名、`.yaml` 統一などのリポジトリ規約
+description: Repository conventions such as Conventional Commits, lint, file naming, and `.yaml` unification
 applies_when: ["**/*"]
 default_enabled: true
 severity_rules: { critical: "コミット / PR タイトルが Conventional Commits 違反 (commitlint で fail)、main への直接 push、--no-verify 利用", warning: "lint / formatter 違反、命名規約違反、.yaml / .yml 不整合", info: "より明示的な書き方への改善提案、命名の細かな統一" }
 exit_criteria: { drive_loop: { critical: 0, warning: 0 } }
 ---
 
-# conventions — コーディング規約
+# conventions — Coding conventions
 
-## 検査項目
+## Inspection items
 
-- **Conventional Commits**: type / scope / description の形式、`!` による破壊的変更マーキング
-- **ブランチ命名**: `<type>/<short-description>` 形式
-- **ファイル命名・配置**: 既存パターンとの整合（`SKILL.md` / `SKILL.<adapter>.md`、`perspectives/<axis>.md` など）
-- **YAML 拡張子**: `.yaml` に統一されているか（ツールが `.yml` を要求する場合のみ許容）
-- **lint / formatter**: biome / markdownlint / yamllint / shellcheck / shfmt 等の出力に違反していないか
-- **import / export 規約**: ESM / CJS の統一、明示的なファイル拡張子
-- **CLAUDE.md / AGENTS.md**: 記載されたプロジェクトルールに違反していないか
-- **言語別規約**: tools/lint-rules.md などで定義された言語固有の規約
+- **Conventional Commits**: format of type / scope / description, marking breaking changes with `!`
+- **Branch naming**: `<type>/<short-description>` format
+- **File naming / placement**: consistency with existing patterns (`SKILL.md` / `SKILL.<adapter>.md`, `perspectives/<axis>.md`, etc.)
+- **YAML extension**: whether it is unified as `.yaml` (allowed as `.yml` only when a tool requires it)
+- **lint / formatter**: whether it violates the output of biome / markdownlint / yamllint / shellcheck / shfmt, etc.
+- **import / export conventions**: ESM / CJS unification, explicit file extensions
+- **CLAUDE.md / AGENTS.md**: whether it violates the project rules documented there
+- **Per-language conventions**: language-specific conventions defined in tools/lint-rules.md, etc.
 
-## severity ガイド
+## Severity guide
 
-- **critical**: コミット / PR タイトルが Conventional Commits 違反（commitlint で fail）、`main` への直接 push、`--no-verify` 利用
-- **warning**: lint / formatter 違反、命名規約違反、`.yaml` / `.yml` 不整合
-- **info**: より明示的な書き方への改善提案、命名の細かな統一
+- **critical**: commit / PR title violates Conventional Commits (fails commitlint), direct push to `main`, use of `--no-verify`
+- **warning**: lint / formatter violations, naming convention violations, `.yaml` / `.yml` inconsistency
+- **info**: suggestions for more explicit code, minor naming unification
 
 ## skip_when
 
@@ -34,7 +34,7 @@ skip_when:
   diff_only_in: []
 ```
 
-required 観点のため常に適用する。
+Always applied because this is a `required` perspective.
 
 ## exit_criteria.drive_loop
 
@@ -45,4 +45,4 @@ exit_criteria:
     warning: 0
 ```
 
-規約違反が残っている状態で merge-ready とは判定しない。
+Do not judge as merge-ready while convention violations remain.

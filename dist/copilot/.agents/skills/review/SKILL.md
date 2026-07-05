@@ -1,74 +1,74 @@
 ---
 name: review
-description: コード変更や PR を 11 観点（perspectives）でレビューし、JSON 構造化出力 + 人間可読レポートで報告する。quick / deep モードを切替可能。PR 番号またはワーキングツリー差分を入力に取る。
+description: Reviews code changes or PRs across 11 perspectives, reporting via JSON structured output plus a human-readable report. Supports switching between quick and deep modes. Takes a PR number or working-tree diff as input.
 ---
 
-# review - 多観点コードレビュー
+# review - Multi-perspective code review
 
-差分を 11 観点（perspectives）でレビューし、Critical / Warning / Info に分類して JSON + 人間可読レポートで報告する。[ADR-0025](https://github.com/ozzy-labs/handbook/blob/main/adr/0025-skills-review-multi-perspective.md) の hybrid 方式（quick: 単一エージェント / deep: 観点並列サブエージェント）を採用する。
+Reviews the diff across 11 perspectives, classifies findings into Critical / Warning / Info, and reports them as JSON plus a human-readable report. It adopts the hybrid approach from [ADR-0025](https://github.com/ozzy-labs/handbook/blob/main/adr/0025-skills-review-multi-perspective.md) (quick: single agent / deep: parallel per-perspective subagents).
 
-決定論（観点選別・重複統合・観点間衝突の分離・グルーピング・人間可読レポート + `<!-- review-json:v1 -->` 埋め込み）は同梱の **`review.mjs` エンジン**が担う（[ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1、先行例 `health-check.mjs` / `usage-check.mjs` / `skill-metrics.mjs`）。本 SKILL.md は判断層 — **変更ファイルから観点を決め（`review.mjs select`）、各観点で findings を作り（LLM の判断）、`review.mjs render` で JSON + レポートに整形して投稿する** — に絞る。観点定義（`perspectives/<axis>.md`）と review-json Schema v1 は不変。
+The deterministic logic (perspective selection, duplicate merging, separating cross-perspective conflicts, grouping, generating the human-readable report + embedding `<!-- review-json:v1 -->`) is handled by the bundled **`review.mjs` engine** ([ADR-0028](https://github.com/ozzy-labs/handbook/blob/main/adr/0028-skills-architecture-engine-judgment-policy-catalog.md) R1, prior examples `health-check.mjs` / `usage-check.mjs` / `skill-metrics.mjs`). This SKILL.md is limited to the judgment layer — **deciding perspectives from changed files (`review.mjs select`), producing findings per perspective (LLM judgment), and formatting + posting JSON + report via `review.mjs render`**. The perspective definitions (`perspectives/<axis>.md`) and review-json Schema v1 are invariant.
 
-## 原則
+## Principles
 
-- **findings の生成のみ LLM の判断:** 「どの観点にどんな指摘があるか」はコードを読む LLM が決める。エンジンは選別（どの観点を回すか）と集約・整形（findings をどうまとめて出すか）の決定論だけを担う。
-- **内部表現は必ず JSON:** findings はすべて JSON で保持し、PR コメント・標準出力はエンジンのレンダラを通して人間可読フォーマットに変換する。
-- **severity はエンジンが上書きしない:** severity 判定は対応する `perspectives/<axis>.md` の severity ガイドに従う。観点を超えて勝手に重要度を上げ下げしない。
+- **Only finding generation is LLM judgment:** the LLM that reads the code decides "which perspective has what issue." The engine handles only the deterministic parts: selection (which perspectives to run) and aggregation/formatting (how to compile and present the findings).
+- **Internal representation is always JSON:** all findings are held as JSON; PR comments and stdout are converted to human-readable format via the engine's renderer.
+- **The engine never overrides severity:** severity determination follows the severity guide in the corresponding `perspectives/<axis>.md`. Do not arbitrarily raise or lower severity across perspectives.
 
-## 入力
+## Input
 
-- **PR 番号が指定された場合**（`#N` または数字のみ）:
-  - `gh pr diff <N>` で差分を取得、`gh pr diff <N> --name-only` で変更ファイル一覧を取得
-  - `gh pr view <N>` で PR の説明を取得
-- **引数なしの場合:**
-  - `git diff` でワーキングツリーの変更を取得（`git diff --name-only` で変更ファイル一覧）
-  - 変更がなければ `git diff main...HEAD`（変更ファイルは `git diff --name-only main...HEAD`）でブランチ差分を取得
-  - それでも変更がなければ、レビュー対象がない旨を伝えて終了する
+- **When a PR number is given** (`#N` or a bare number):
+  - Fetch the diff with `gh pr diff <N>`, and the list of changed files with `gh pr diff <N> --name-only`
+  - Fetch the PR description with `gh pr view <N>`
+- **When no arguments are given:**
+  - Fetch working-tree changes with `git diff` (list of changed files via `git diff --name-only`)
+  - If there are no changes, fetch the branch diff with `git diff main...HEAD` (changed files via `git diff --name-only main...HEAD`)
+  - If there are still no changes, report that there is nothing to review and exit
 
-## オプション
+## Options
 
-- `--axes=<axis,...>`: 適用観点を明示指定（自動選別を上書き、`default_enabled: false` 観点も明示時のみ有効化）
-- `--deep`: deep モードで実行（観点ごとにサブエージェント並列起動。Claude Code 環境のみ。他アダプタでは quick にフォールバック）
+- `--axes=<axis,...>`: Explicitly specify which perspectives to apply (overrides automatic selection; perspectives with `default_enabled: false` are only enabled when specified explicitly)
+- `--deep`: Run in deep mode (launches subagents in parallel per perspective. Claude Code environment only; other adapters fall back to quick)
 
-## 観点（11 軸）
+## Perspectives (11 axes)
 
-観点定義は `perspectives/<axis>.md` を SSOT とする。frontmatter で `category` / `applies_when` / `skip_when` / `default_enabled` / 検査項目 / severity ガイド / `exit_criteria.drive_loop` を宣言する。
+Perspective definitions use `perspectives/<axis>.md` as the SSOT. The frontmatter declares `category` / `applies_when` / `skip_when` / `default_enabled` / inspection items / severity guide / `exit_criteria.drive_loop`.
 
-| category | axis | 既定 |
+| category | axis | default |
 | --- | --- | --- |
-| required | correctness, security, conventions | 常に適用 |
-| design | architecture, compatibility, maintainability | applies_when マッチ時 |
-| quality | testing, performance, observability | applies_when マッチ時 |
-| ux | usability, documentation | applies_when マッチ時 |
+| required | correctness, security, conventions | Always applied |
+| design | architecture, compatibility, maintainability | When applies_when matches |
+| quality | testing, performance, observability | When applies_when matches |
+| ux | usability, documentation | When applies_when matches |
 
-観点選別ロジック（`category: required` は常に適用 / `default_enabled: false` は `--axes` 明示時のみ / `skip_when.diff_only_in` が最優先スキップ条件 / `applies_when` の OR マッチで適用）は `review.mjs` に実装されており、frontmatter を入力に決定論的に適用観点を返す。`skip_when` でサポートするキーは `diff_only_in` のみ（未定義キーは無視、forward-compat）。
+The perspective selection logic (`category: required` is always applied / `default_enabled: false` is applied only when specified explicitly via `--axes` / `skip_when.diff_only_in` is the highest-priority skip condition / applied on an OR match of `applies_when`) is implemented in `review.mjs`, which deterministically returns the applicable perspectives given the frontmatter as input. The only key `skip_when` supports is `diff_only_in` (undefined keys are ignored, for forward-compat).
 
-## 手順
+## Procedure
 
-### 1. 適用観点の決定
+### 1. Determine applicable perspectives
 
-変更ファイル一覧を `review.mjs select` に渡し、適用観点を決めさせる。エンジンは **本 SKILL.md と同じディレクトリ**にある（Claude Code では `~/.claude/skills/review/review.mjs`、dogfood は `<repo>/.claude/skills/review/review.mjs`）:
+Pass the list of changed files to `review.mjs select` and let it determine the applicable perspectives. The engine lives in **the same directory as this SKILL.md** (in Claude Code: `~/.claude/skills/review/review.mjs`; for dogfooding: `<repo>/.claude/skills/review/review.mjs`):
 
 ```bash
 # 変更ファイル一覧（1 行 1 パス）を stdin で渡す
 git diff --name-only | node <この skill のディレクトリ>/review.mjs select [--axes=<a,b>]
 ```
 
-エンジンは `適用観点 (n/11):` ブロックを stdout に整形出力する。**その出力をそのまま提示**する（再整形しない）。機械可読な観点リストが必要なら `--json`（`{ axesApplied, byCategory, unknownAxes, total }`）を使う。`--axes` を渡すと選別を上書きし、その観点のみ（`default_enabled: false` 含む）を適用する。
+The engine formats and prints an `適用観点 (n/11):` block to stdout. **Present that output as-is** (do not reformat it). If you need a machine-readable perspective list, use `--json` (`{ axesApplied, byCategory, unknownAxes, total }`). Passing `--axes` overrides the selection and applies only those perspectives (including ones with `default_enabled: false`).
 
-### 2. findings の生成（LLM の判断）
+### 2. Generate findings (LLM judgment)
 
-適用観点それぞれについて、該当 `perspectives/<axis>.md` の検査項目・severity ガイドに従って差分をレビューし、findings を作る。**この工程だけが LLM の判断**であり、script 化しない。
+For each applicable perspective, review the diff according to the inspection items and severity guide in the corresponding `perspectives/<axis>.md`, and produce findings. **Only this step is LLM judgment**; it is not scripted.
 
-各 finding は次の形で内部 JSON に積む: `{ axis, severity ("critical"|"warning"|"info"), file, line, issue, why, suggestion }`。原理的トレードオフ（例: security ↔ DX、observability ↔ performance）は finding にせず `conflicts` 配列（`{ axes, file, line, description }`）に積む（severity を付けず判断委ね）。
+Push each finding into the internal JSON in the following shape: `{ axis, severity ("critical"|"warning"|"info"), file, line, issue, why, suggestion }`. Fundamental trade-offs (e.g. security ↔ DX, observability ↔ performance) are not recorded as findings; push them into the `conflicts` array (`{ axes, file, line, description }`) instead (without a severity, leaving the decision to the reader).
 
-#### quick モード（デフォルト）
+#### quick mode (default)
 
-単一エージェントが適用観点を順に走査し、観点ごとに findings を内部 JSON バッファに追加する。
+A single agent scans the applicable perspectives in order, adding findings to the internal JSON buffer per perspective.
 
-#### deep モード（`--deep`）
+#### deep mode (`--deep`)
 
-観点ごとに独立した worker（並列実行単位）を起動し、各 worker が対応する `perspectives/<axis>.md` を読み込んで JSON で findings を返す。並列実行できないホストでは観点ごとに直列で独立評価しても結果は同等。worker への入力形式:
+Launch an independent worker (a unit of parallel execution) for each perspective; each worker reads the corresponding `perspectives/<axis>.md` and returns findings as JSON. On hosts that cannot run in parallel, evaluating each perspective independently in series produces an equivalent result. Input format for the worker:
 
 ```text
 axis: <axis-name>
@@ -81,22 +81,22 @@ context:
 <diff>
 ```
 
-worker は観点 MD の読み込みと JSON 出力のみで完結させる（他スキルの呼び出しはしない）。deep モードの並列起動機構はホスト依存（Claude Code: `SKILL.claude-code.md` の「deep モードでの並列起動」）。並列実行機構を持たないアダプタでは quick にフォールバックする。集約は下記のとおり **worker の return 後にエンジンで**行う（workflow 内に集約 agent を追加しない）。
+The worker should be self-contained — reading the perspective MD and producing JSON output only (it does not call other skills). The mechanism for launching deep mode in parallel is host-dependent (Claude Code: see "Parallel launch in deep mode" in `SKILL.claude-code.md`). Adapters without a parallel execution mechanism fall back to quick. As described below, aggregation happens **in the engine after the worker returns** (do not add an aggregation agent inside the workflow).
 
-### 3. 集約 + レポート出力
+### 3. Aggregation + report output
 
-生成した findings（と conflicts）を `{ mode, axes_applied, findings, conflicts }` の JSON にまとめ、`review.mjs render` に渡す。エンジンが重複統合（同一 `file:line:issue` を 1 件に統合し `axes_merged` を併記）・summary 計算（by_axis / total）・観点→severity→ファイルのグルーピング・人間可読レポート生成・`<!-- review-json:v1 -->` 埋め込みを行う:
+Assemble the generated findings (and conflicts) into JSON of the shape `{ mode, axes_applied, findings, conflicts }`, and pass it to `review.mjs render`. The engine performs duplicate merging (merging identical `file:line:issue` entries into one and noting `axes_merged`), summary calculation (by_axis / total), grouping by perspective → severity → file, human-readable report generation, and embedding `<!-- review-json:v1 -->`:
 
 ```bash
 # findings JSON を stdin で渡す（--input=<file> でも可）
 printf '%s' "$FINDINGS_JSON" | node <この skill のディレクトリ>/review.mjs render
 ```
 
-エンジンの stdout（人間可読レポート + 末尾の JSON 埋め込み）を**そのまま**提示・投稿する。PR レビューの場合、`gh pr comment <N> --body "<レポート>"` で PR にコメントする。`--json` で埋め込み対象の Schema v1 JSON のみを取り出せる。
+Present and post the engine's stdout (the human-readable report plus the trailing JSON embed) **as-is**. For a PR review, comment on the PR with `gh pr comment <N> --body "<report>"`. Use `--json` to extract only the embedded Schema v1 JSON.
 
-## review-json Schema v1（契約・不変）
+## review-json Schema v1 (contract, invariant)
 
-エンジンが埋め込む JSON は次の形（[ADR-0025](https://github.com/ozzy-labs/handbook/blob/main/adr/0025-skills-review-multi-perspective.md) Schema v1、drive がこれを再読して観点別 `exit_criteria.drive_loop` を判定する）:
+The JSON the engine embeds has the following shape ([ADR-0025](https://github.com/ozzy-labs/handbook/blob/main/adr/0025-skills-review-multi-perspective.md) Schema v1; drive re-reads this to evaluate the per-perspective `exit_criteria.drive_loop`):
 
 ```json
 {
@@ -125,26 +125,26 @@ printf '%s' "$FINDINGS_JSON" | node <この skill のディレクトリ>/review.
 }
 ```
 
-`axes_merged` と `conflicts` は任意フィールド（重複統合・観点間衝突がある場合のみエンジンが付与）。
+`axes_merged` and `conflicts` are optional fields (the engine adds them only when there is duplicate merging or a cross-perspective conflict).
 
 ### Version migration policy
 
-- `version` は単調増加の整数（文字列）。本 ADR で `"1"` を確立する
-- reader 側（drive など）は `version` が現状コードの上限と一致する場合のみ機械判定を行う
-- 未対応 version は `unknown_review_version` として fail-soft 終了し、JSON を無視して人間可読部分のみ扱う
-- 互換破壊変更は `version` を bump し、reader は最低 N-1 まで読める実装を維持する。**Schema v1 を変更する場合はエンジン（`review.mjs`）・本 SKILL.md・drive の再読ロジックを同時に改訂する**
+- `version` is a monotonically increasing integer (as a string). This ADR establishes `"1"`
+- The reader side (e.g. drive) performs machine judgment only when `version` matches the current code's supported upper bound
+- An unsupported version fails soft as `unknown_review_version`, ignoring the JSON and handling only the human-readable part
+- Breaking changes bump `version`, and readers keep an implementation that can read at least down to N-1. **When changing Schema v1, revise the engine (`review.mjs`), this SKILL.md, and drive's re-read logic together**
 
-## 過去 PR コメントとの互換（resume）
+## Compatibility with past PR comments (resume)
 
-drive が過去に投稿したコメントには JSON 埋込みがない場合がある。reader は次のように扱う:
+Comments drive posted in the past may not have a JSON embed. The reader handles these as follows:
 
-- `<!-- review-json:v1 ... -->` を含むコメント → JSON を解析して機械判定
-- JSON 不在のコメント → **legacy comment** として扱い、新規 review pass の trigger として無視する（過去コメントは消さない）
-- `<!-- review-json:v<unknown> ... -->` → `unknown_review_version` として無視（fail-soft）
+- A comment containing `<!-- review-json:v1 ... -->` → parse the JSON and do machine judgment
+- A comment with no JSON → treated as a **legacy comment** and ignored as a trigger for a new review pass (past comments are not deleted)
+- `<!-- review-json:v<unknown> ... -->` → ignored as `unknown_review_version` (fail-soft)
 
-## 注意事項
+## Notes
 
-- `Critical` を 1 件でも報告する場合は明確な悪影響（バグ・脆弱性等）の根拠を示す
-- 観点の severity 判定は対応する `perspectives/<axis>.md` の severity ガイドに従う。観点を超えて勝手に重要度を上げ下げしない
-- deep モードは観点数 × 並列度ぶんのトークンを消費する。drive のオーケストレーションモードでは強制的に quick にフォールバック（コスト管理）
-- `Info` は提案のみ。drive の review loop では `Info` を修正対象としない
+- When reporting even a single `Critical`, show clear grounds for adverse impact (a bug, vulnerability, etc.)
+- Severity determination for a perspective follows the severity guide in the corresponding `perspectives/<axis>.md`. Do not arbitrarily raise or lower severity across perspectives
+- deep mode consumes tokens proportional to (number of perspectives × parallelism). In drive's orchestration mode, it forcibly falls back to quick (cost management)
+- `Info` is suggestion-only. drive's review loop does not treat `Info` as something to fix

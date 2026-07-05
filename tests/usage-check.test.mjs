@@ -1070,12 +1070,12 @@ test("built claude-code usage-guard SKILL.md is user-invocable + has standalone-
   assert.doesNotMatch(fm[1], /^adapters:/m, "build-control `adapters` must be stripped");
   assert.match(fm[1], /argument-hint:/, "frontmatter must declare argument-hint");
   // standalone form section
-  assert.match(built, /単体形態/, "body must document the standalone /usage-guard form");
+  assert.match(built, /standalone form/, "body must document the standalone /usage-guard form");
   assert.match(built, /\/usage-guard/, "body must reference the /usage-guard invocation");
   // self-contained (M1): must NOT thin-wrap the .agents/ canonical
   assert.doesNotMatch(
     built,
-    /`\.agents\/skills\/usage-guard\/SKILL\.md` を Read/,
+    /Read `\.agents\/skills\/usage-guard\/SKILL\.md`/,
     "usage-guard must be self-contained, not a thin wrapper over .agents/ canonical",
   );
 });

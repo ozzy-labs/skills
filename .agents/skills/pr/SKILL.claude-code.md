@@ -5,11 +5,11 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 
 # pr
 
-`.agents/skills/pr/SKILL.md` を Read し、ワークフロー手順に従う。
+Read `.agents/skills/pr/SKILL.md` and follow its workflow steps.
 
-## Claude Code 固有の追加事項
+## Claude Code-specific additions
 
-完了報告の直後に AskUserQuestion を呼び出す（`answers` パラメータは設定しない）:
+Immediately after the completion report, call AskUserQuestion (do not set the `answers` parameter):
 
-- **「PR をレビューする」** → `.claude/skills/review/SKILL.md` を Read し、その手順に従う
-- **「PR をマージする」** → `gh pr merge --squash --delete-branch` でマージを実行し、結果を報告する
+- **「PR をレビューする」** → Read `.claude/skills/review/SKILL.md` and follow its steps
+- **「PR をマージする」** → run `gh pr merge --squash --delete-branch` to perform the merge and report the result

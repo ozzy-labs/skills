@@ -1,45 +1,45 @@
 ---
 name: pr
-description: コミット済みの変更をリモートにプッシュし、PR を作成・更新する。
+description: Pushes committed changes to the remote and creates or updates a PR.
 ---
 
-# pr - プッシュ＆PR 作成
+# pr - Push & PR creation
 
-コミット済みの変更をリモートにプッシュし、PR を作成・更新する。
+Pushes committed changes to the remote and creates or updates a PR.
 
-## 前提条件
+## Prerequisites
 
-- main ブランチからの直接 push は行わない
-- 未コミットの変更がある場合は先にコミットする
-- プッシュ対象のコミットがない場合は終了する
+- Do not push directly to the main branch
+- If there are uncommitted changes, commit them first
+- If there are no commits to push, stop
 
-## 手順
+## Steps
 
-### 1. 状態確認
+### 1. Check state
 
-- `git branch --show-current` で現在のブランチを確認
-- `git status` で未コミットの変更を確認
-- `git log --oneline origin/<branch>..HEAD 2>/dev/null || git log --oneline -5` で未プッシュのコミットを確認
+- Check the current branch with `git branch --show-current`
+- Check uncommitted changes with `git status`
+- Check unpushed commits with `git log --oneline origin/<branch>..HEAD 2>/dev/null || git log --oneline -5`
 
-### 2. プッシュ＆PR 作成
+### 2. Push & create PR
 
-1. `git push -u origin <branch>` でリモートにプッシュする
-2. PR の作成:
-   - `gh pr view` で既存 PR を確認する
-   - **既存 PR がない場合:** `gh pr create --title "<タイトル>" --body "<本文>"` で PR を作成する。タイトルは直近のコミットメッセージの 1 行目を使用する
-   - **既存 PR がある場合:** プッシュのみ（PR は自動更新される）
+1. Push to the remote with `git push -u origin <branch>`
+2. Create the PR:
+   - Check for an existing PR with `gh pr view`
+   - **If no existing PR:** create the PR with `gh pr create --title "<title>" --body "<body>"`. Use the first line of the most recent commit message as the title
+   - **If an existing PR exists:** just push (the PR updates automatically)
 
-PR の本文フォーマット:
+PR body format:
 
 ```markdown
 ## Summary
 
-- <変更内容の箇条書き>
+- <bulleted list of changes>
 
-Closes #N <!-- Issue 起点の場合のみ -->
+Closes #N <!-- only when originating from an Issue -->
 ```
 
-### 3. 完了報告
+### 3. Completion report
 
 ```text
 完了:
