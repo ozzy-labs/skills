@@ -289,8 +289,8 @@ Runs after Final-4's merge. The per-status cleanup policy (`merged` is deleted /
 
 If interrupted at any phase, confirm the next action with AskUserQuestion:
 
-- **"Fix the error and resume"** → resume from the interrupted phase
-- **"Abort"** → end
+- **「エラーを修正して再開する」** → resume from the interrupted phase
+- **「中断する」** → end
 
 In orchestration mode, if only some tasks fail, after outputting the Phase Final report, confirm the resume targets with AskUserQuestion.
 
@@ -300,8 +300,8 @@ In orchestration mode, if only some tasks fail, after outputting the Phase Final
 
 1. **When `--merge` is specified:** run the merge following the Phase 4 procedure, report the result, and end
 2. **When `--merge` is not specified:** call AskUserQuestion (don't set the `answers` parameter)
-   - **"Merge the PR"** → run the merge with `POLICY_GUARD_PROCEED=merge gh pr merge --squash --delete-branch` and report the result (since AskUserQuestion's explicit approval satisfies the `ask` gate, `POLICY_GUARD_PROCEED=merge` is prefixed so it passes through the PreToolUse `policy-hook.mjs`; see the canonical's "Merge and the autonomy policy")
-   - **"Make additional changes"** → end
+   - **「PR をマージする」** → run the merge with `POLICY_GUARD_PROCEED=merge gh pr merge --squash --delete-branch` and report the result (since AskUserQuestion's explicit approval satisfies the `ask` gate, `POLICY_GUARD_PROCEED=merge` is prefixed so it passes through the PreToolUse `policy-hook.mjs`; see the canonical's "Merge and the autonomy policy")
+   - **「追加の変更を行う」** → end
 
 #### Orchestration mode
 
@@ -309,5 +309,5 @@ Phase Final runs Final-1 (consistency) → Final-2 (audit) → Final-3 (reconcil
 
 1. **When `--merge` is specified:** the parent merges in dependency order in Phase Final-4, followed by Final-5 cleanup (cleaning up merged workers) → outputting the Final-6 aggregate report, and ending
 2. **When `--merge` is not specified:** after completing through Final-3, call AskUserQuestion (don't set the `answers` parameter)
-   - **"Merge all PRs in bulk"** → run Phase Final-4's dependency-order merge, followed by Final-5 cleanup → output the Final-6 report
-   - **"Handle individually"** → output the Final-6 report and end. `merge-ready` worktrees remain left in place. The user cleans them up after merging, either via `/health` area #7 or manually
+   - **「全 PR を一括マージする」** → run Phase Final-4's dependency-order merge, followed by Final-5 cleanup → output the Final-6 report
+   - **「個別に対応する」** → output the Final-6 report and end. `merge-ready` worktrees remain left in place. The user cleans them up after merging, either via `/health` area #7 or manually

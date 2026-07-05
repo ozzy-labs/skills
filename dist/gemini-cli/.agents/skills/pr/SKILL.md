@@ -42,7 +42,7 @@ Closes #N <!-- only when originating from an Issue -->
 ### 3. Completion report
 
 ```text
-Done:
-  Branch: <branch-name>
+完了:
+  ブランチ: <branch-name>
   PR: <PR URL>
 ```

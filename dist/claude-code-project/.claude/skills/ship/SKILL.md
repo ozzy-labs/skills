@@ -16,5 +16,5 @@ Read `.agents/skills/ship/SKILL.md` and follow the workflow steps.
 
 Immediately after the completion report, call AskUserQuestion (do not set the `answers` parameter):
 
-- **"Review the PR"** → Read `.claude/skills/review/SKILL.md` and follow its steps
-- **"Merge the PR"** → run the merge with `gh pr merge --squash --delete-branch` and report the result
+- **「PR をレビューする」** → Read `.claude/skills/review/SKILL.md` and follow its steps
+- **「PR をマージする」** → run the merge with `gh pr merge --squash --delete-branch` and report the result
