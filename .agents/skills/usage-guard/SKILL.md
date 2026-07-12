@@ -63,6 +63,7 @@ The **canonical decision path** for `usage-check.mjs` is the OAuth usage-rate en
   "resets_at": null,
   "resume_buffer_seconds": 300,
   "suspected_reflection_lag": false,
+  "resume_plan": null,
   "source": "endpoint"
 }
 ```
@@ -72,7 +73,25 @@ The **canonical decision path** for `usage-check.mjs` is the OAuth usage-rate en
 - `resets_at`: the `resets_at` of that latest over-threshold window (**left unchanged at the window boundary** — neither the buffer nor the lag degradation is applied). `null` when `ok`. The expected resume time = `resets_at + resume_buffer_seconds`, kept distinct
 - `resume_buffer_seconds`: the post-reset buffer seconds folded into `wait_seconds` (default 300; 0 restores prior behavior)
 - `suspected_reflection_lag`: `true` if reflection lag is suspected (over-threshold right at the boundary). When `true`, `wait_seconds` becomes the short recheck interval, and this result is **not written to cache** (so the next check can fetch the real endpoint value immediately). Always `false` when `ok`. Set on both the endpoint and jsonl paths
+- `resume_plan` (`#212`): the **deterministic resume plan** the caller should execute, or `null` when `ok`. `{ trigger, wait_seconds, fire_at }` — see "Resume plan" below. This moves the "choosing a resume trigger" decision from prose into the engine
 - `source`: `endpoint` / `jsonl` / `cache` / `fail-open`
+
+### Resume plan (deterministic trigger, `#212`)
+
+The purpose of usage-guard is to avoid "stopped → reset arrives → still stopped". The *stop* half is deterministic (the hook denies); the **resume half used to be prose** the model had to interpret. `usage-check.mjs` now emits a `resume_plan` so the caller **executes a plan** instead:
+
+```json
+"resume_plan": { "trigger": "cron-oneshot", "wait_seconds": 12900, "fire_at": "2026-07-13T02:15:00.000Z" }
+```
+
+- `trigger` selection is deterministic (see [ADR-0002](../../../docs/adr/0002-usage-guard-resume-arming.md)):
+  - `suspected_reflection_lag` → **`short-recheck`** (re-check at the short interval; never pin a long trigger on a boundary afterimage)
+  - `context: "durable"` → **`cron-routine`** (a cloud Routine that survives a 100% hard-interrupt — `#213`)
+  - `context: "orchestration"`, or `wait_seconds > 3600` (the ScheduleWakeup per-call cap) → **`cron-oneshot`** (durable one-shot)
+  - otherwise → **`schedule-wakeup`** (in-session heartbeat)
+- `fire_at` = the planned resume wall-clock (`now + wait_seconds`, i.e. `resets_at + buffer` for a genuine overage).
+- `context` is set via CLI `--context orchestration|durable` or env `USAGE_GUARD_RESUME_CONTEXT`; default (unset) derives purely from `wait_seconds`.
+- **Mapping to host tools**: `short-recheck` / `schedule-wakeup` → `ScheduleWakeup(min(wait_seconds, 3600))`; `cron-oneshot` → a durable `CronCreate` (`recurring:false`) at `fire_at`; `cron-routine` → a cloud Routine at `fire_at` (`#213`). The engine cannot call these host tools itself (`.mjs` limitation) — it emits the plan; the caller executes it.
 
 ### Behavior: resume buffer
 
@@ -154,6 +173,35 @@ There are 2 mechanisms for resuming after a wait (heartbeat / waking). Use which
 
 - **ScheduleWakeup**: suited to an in-session heartbeat. Since one call is capped at 3600s, a long wait becomes multi-stage. When `wait_seconds > 3600`, repeat `min(wait_seconds, 3600)`.
 - **CronCreate one-shot**: fires once by wall clock and is restart-resilient. Robust for `>3600s` and non-/loop cases (Agent tool orchestration, etc.). Set the firing time to `resets_at + resume_buffer_seconds` (the resume time derived from `wait_seconds`). A one-shot (`recurring: false`) **auto-deletes after firing**. In practice, when running a ~72-minute wait via Agent tool orchestration, CronCreate one-shot proved more robust than a multi-stage ScheduleWakeup.
+
+## Pending-resume marker + SessionStart detection (`#212`)
+
+The engine emits a `resume_plan`, but it cannot *call* the host scheduling tool, so it cannot **guarantee** the arm. A marker + a SessionStart check is the code-side net that **detects a missed resume** (the exact "stuck after reset" failure) instead of leaving it silent.
+
+- **When a caller pauses**, it writes the marker via `resume-marker.mjs` — `writeResumeMarker({ continuation, fire_at, trigger })` → `~/.claude/usage-guard/resume-pending.json` (atomic temp→rename). `continuation` is the idempotent command to re-run (e.g. `/drive #212-213 --merge`); `fire_at` is `resume_plan.fire_at`.
+- **On a successful resume**, the caller clears it: `clearResumeMarker()`.
+- **SessionStart hook `resume-check.mjs`** reads the marker at session start and surfaces:
+  - **OVERDUE** — `fire_at` has already passed but the marker was never cleared → "a paused resume is OVERDUE — re-run `<continuation>`". This is the failure usage-guard exists to prevent, now made visible.
+  - **pending** — paused, `fire_at` not yet reached (informational).
+  - read-only, fail-open (never blocks a session start).
+
+### Wiring the SessionStart hook (optional, recommended)
+
+Add one SessionStart entry to `~/.claude/settings.local.json` (absolute path; same M3 caveat as the PreToolUse hook):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node /home/<you>/.claude/skills/usage-guard/resume-check.mjs" }
+        ]
+      }
+    ]
+  }
+}
+```
 
 ## Usage form 1: engine form (the caller Reads it)
 

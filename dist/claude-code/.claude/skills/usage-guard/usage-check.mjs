@@ -222,6 +222,92 @@ export function resolveLagRecheck(env = process.env) {
   return n;
 }
 
+// A single ScheduleWakeup call is capped at 3600s by the harness; a longer wait
+// must use a durable one-shot (CronCreate) instead (#212).
+const SCHEDULE_WAKEUP_CAP_S = 3600;
+
+/**
+ * Resolve the resume-context hint (env override → null).
+ *
+ * `USAGE_GUARD_RESUME_CONTEXT` selects a durability preference for the resume
+ * plan (#212/#213): `orchestration` (prefer a durable one-shot) or `durable`
+ * (prefer a cloud Routine that survives a hard-interrupt). Anything else → null
+ * (derive purely from wait_seconds).
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {"orchestration"|"durable"|null}
+ */
+export function resolveResumeContext(env = process.env) {
+  const raw = env?.USAGE_GUARD_RESUME_CONTEXT;
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  return v === "orchestration" || v === "durable" ? v : null;
+}
+
+/**
+ * Build the deterministic resume plan (#212) from an evaluated result.
+ *
+ * Moves SKILL.md's "choosing a resume trigger" table into code so the caller
+ * executes a plan instead of interpreting prose. Returns null when `ok`
+ * (nothing to resume).
+ *
+ * Trigger selection (deterministic):
+ *   - `suspected_reflection_lag` → `short-recheck` (re-check at the short
+ *     interval; never pin a long trigger on a boundary afterimage).
+ *   - `context: "durable"` → `cron-routine` (a cloud Routine that survives a
+ *     100% hard-interrupt — #213).
+ *   - `context: "orchestration"`, or `wait_seconds` beyond the ScheduleWakeup
+ *     cap (3600s) → `cron-oneshot` (durable, restart-resilient).
+ *   - otherwise → `schedule-wakeup` (in-session heartbeat).
+ *
+ * `fire_at` is the planned resume wall-clock = `now + wait_seconds` (which
+ * already folds `resets_at + resume_buffer` for a genuine overage, or the short
+ * recheck interval for a suspected lag).
+ *
+ * @param {{ ok: boolean, wait_seconds: number, suspected_reflection_lag: boolean }} result
+ * @param {object} [opts]
+ * @param {"orchestration"|"durable"|null} [opts.context]
+ * @param {() => number} [opts.now]
+ * @param {number} [opts.scheduleWakeupCapS]
+ * @returns {{ trigger: string, wait_seconds: number, fire_at: string }|null}
+ */
+export function buildResumePlan(
+  result,
+  { context = null, now = Date.now, scheduleWakeupCapS = SCHEDULE_WAKEUP_CAP_S } = {},
+) {
+  if (!result || result.ok !== false) return null;
+  const waitS = Math.max(0, Math.ceil(Number(result.wait_seconds) || 0));
+  const fireAt = new Date(now() + waitS * 1000).toISOString();
+  let trigger;
+  if (result.suspected_reflection_lag === true) trigger = "short-recheck";
+  else if (context === "durable") trigger = "cron-routine";
+  else if (context === "orchestration") trigger = "cron-oneshot";
+  else if (waitS > scheduleWakeupCapS) trigger = "cron-oneshot";
+  else trigger = "schedule-wakeup";
+  return { trigger, wait_seconds: waitS, fire_at: fireAt };
+}
+
+/**
+ * Parse `--context <v>` (or `--context=<v>`) from CLI argv. Returns the
+ * normalized context (`orchestration`/`durable`) or `undefined` when the flag
+ * is absent/invalid so getUsage falls back to the env default (#212).
+ *
+ * @param {string[]} argv
+ * @returns {"orchestration"|"durable"|undefined}
+ */
+export function parseContextArg(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    let raw;
+    if (a === "--context") raw = argv[i + 1];
+    else if (a.startsWith("--context=")) raw = a.slice("--context=".length);
+    else continue;
+    const v = String(raw).trim().toLowerCase();
+    return v === "orchestration" || v === "durable" ? v : undefined;
+  }
+  return undefined;
+}
+
 /**
  * Read + parse the OAuth access token, honoring `expiresAt`.
  *
@@ -338,6 +424,7 @@ export function evaluate(
     resumeBuffer = DEFAULT_RESUME_BUFFER_SECONDS,
     lagEpsilon = DEFAULT_LAG_EPSILON_SECONDS,
     lagRecheck = DEFAULT_LAG_RECHECK_SECONDS,
+    context = null,
     now = Date.now,
   } = {},
 ) {
@@ -382,7 +469,7 @@ export function evaluate(
       waitSeconds = Math.max(0, Math.ceil((latestMs - nowMs) / 1000)) + Math.max(0, resumeBuffer);
     }
   }
-  return {
+  const base = {
     five_hour: windows.five_hour,
     seven_day: windows.seven_day,
     ok,
@@ -391,6 +478,9 @@ export function evaluate(
     resume_buffer_seconds: Math.max(0, resumeBuffer),
     suspected_reflection_lag: suspectedReflectionLag,
   };
+  // Deterministic resume plan (#212): moves SKILL.md's "choosing a resume
+  // trigger" table into code so the caller executes a plan, not prose.
+  return { ...base, resume_plan: buildResumePlan(base, { context, now }) };
 }
 
 /**
@@ -610,6 +700,10 @@ export async function getUsage({
   // over the env default so a wave checkpoint can request a per-dispatch reserve
   // without exporting an env var. `undefined` → fall back to env.
   headroom,
+  // Resume context (#212): an explicit value (e.g. the CLI `--context`) tunes
+  // the emitted resume_plan's trigger ("orchestration"/"durable"); `undefined`
+  // → fall back to the env default.
+  context,
   warn = (msg) => process.stderr.write(`${msg}\n`),
 } = {}) {
   const threshold = resolveThreshold(env);
@@ -617,6 +711,7 @@ export async function getUsage({
   const lagEpsilon = resolveLagEpsilon(env);
   const lagRecheck = resolveLagRecheck(env);
   const dispatchHeadroom = headroom === undefined ? resolveDispatchHeadroom(env) : headroom;
+  const resumeContext = context === undefined ? resolveResumeContext(env) : context;
 
   // Headroom + shared cache (#141 follow-up): the cache at CACHE_PATH is shared
   // with the #123 PreToolUse hook and every headroom-0 caller, and it stores a
@@ -646,6 +741,7 @@ export async function getUsage({
     resumeBuffer,
     lagEpsilon,
     lagRecheck,
+    context: resumeContext,
     now,
   };
 
@@ -690,6 +786,7 @@ export async function getUsage({
         resets_at: null,
         resume_buffer_seconds: resumeBuffer,
         suspected_reflection_lag: false,
+        resume_plan: null,
         source: "fail-open",
       };
     }
@@ -727,7 +824,10 @@ async function main() {
   // `--headroom <pct>` (CLI) wins over USAGE_GUARD_DISPATCH_HEADROOM (env); when
   // the flag is absent getUsage resolves the env default (#141).
   const headroom = parseHeadroomArg(process.argv.slice(2));
-  const result = await getUsage({ headroom });
+  // `--context orchestration|durable` (CLI) tunes the resume_plan trigger and
+  // wins over USAGE_GUARD_RESUME_CONTEXT (env); absent → getUsage resolves env.
+  const context = parseContextArg(process.argv.slice(2));
+  const result = await getUsage({ headroom, context });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
@@ -744,6 +844,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         resets_at: null,
         resume_buffer_seconds: resolveResumeBuffer(),
         suspected_reflection_lag: false,
+        resume_plan: null,
         source: "fail-open",
       })}\n`,
     );
