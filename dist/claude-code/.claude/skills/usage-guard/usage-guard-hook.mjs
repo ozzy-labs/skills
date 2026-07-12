@@ -34,7 +34,7 @@
 // `{ allow, reason }` with no I/O, so tests can feed usage without real files.
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DISABLE_PATH,
@@ -43,6 +43,10 @@ import {
   readCache,
   resolveThreshold,
 } from "./usage-check.mjs";
+
+// Monotonic sequence for unique temp filenames in atomic (write-temp → rename)
+// state persistence (#211).
+let __hookStateSeq = 0;
 
 // PreToolUse "deny" is signaled to the harness with exit code 2 (stderr/JSON is
 // surfaced to the model); 0 = allow. Keep these named for clarity.
@@ -275,16 +279,47 @@ export function resolveSpikeDelta(env = process.env) {
 }
 
 /**
+ * Derive the per-origin hook-state path (#211).
+ *
+ * The debounce/spike counter used to live in ONE shared file (HOOK_STATE_PATH)
+ * that every PreToolUse hook process read-modify-wrote. Under Workflow fan-out
+ * (up to 16 concurrent subagents, each firing the hook before every tool call)
+ * that shared read-modify-write races and loses updates — biasing toward ALLOW,
+ * i.e. an overshoot in exactly the high-concurrency case the ceiling most needs
+ * to hold. Concurrent hook invocations always come from DIFFERENT origins (each
+ * subagent, or the main session); a single origin runs its tool calls
+ * sequentially. Partitioning the state file by origin removes the cross-process
+ * sharing entirely — each origin owns a file no other process touches — so the
+ * lost-update race cannot occur by construction (no locking, no per-call latency
+ * added). The main session (no `agent_id`) keeps the original HOOK_STATE_PATH
+ * for backward compatibility.
+ *
+ * @param {string|null|undefined} agentId the payload's `agent_id` (null = main)
+ * @returns {string}
+ */
+export function hookStatePathFor(agentId) {
+  if (!agentId || typeof agentId !== "string") return HOOK_STATE_PATH;
+  // Sanitize to a safe filename fragment (agent ids are opaque strings).
+  const safe = agentId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+  if (!safe) return HOOK_STATE_PATH;
+  return join(HOOK_STATE_PATH, "..", `hook-state.${safe}.json`);
+}
+
+/**
  * Read the cross-call hook state (debounce counter + last good reading).
  * Tolerates a missing / malformed file → `{}` (so the first run starts clean).
+ * The path is derived per-origin from `agentId` (#211) unless `statePath` is
+ * given explicitly (tests / callers that own the path).
  * @param {object} [deps]
  * @param {typeof readFile} [deps.readFileImpl]
- * @param {string} [deps.statePath]
+ * @param {string} [deps.statePath] explicit path override (wins over agentId)
+ * @param {string|null} [deps.agentId] origin for per-origin path derivation
  * @returns {Promise<object>}
  */
-export async function readHookState({ readFileImpl = readFile, statePath = HOOK_STATE_PATH } = {}) {
+export async function readHookState({ readFileImpl = readFile, statePath, agentId } = {}) {
+  const path = statePath ?? hookStatePathFor(agentId);
   try {
-    const parsed = JSON.parse(await readFileImpl(statePath, "utf8"));
+    const parsed = JSON.parse(await readFileImpl(path, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -294,19 +329,29 @@ export async function readHookState({ readFileImpl = readFile, statePath = HOOK_
 /**
  * Persist the cross-call hook state (best-effort; failures are swallowed so the
  * hook never hard-stops on a state write error).
+ *
+ * Atomic write (#211): temp → rename so a concurrent reader never observes a
+ * torn file. The per-origin partitioning (see `hookStatePathFor`) already
+ * prevents cross-process lost-update; the atomic rename additionally guards a
+ * same-origin crash mid-write from leaving a corrupt state file.
  * @param {object} state
  * @param {object} [deps]
  * @param {typeof writeFile} [deps.writeFileImpl]
  * @param {typeof mkdir} [deps.mkdirImpl]
- * @param {string} [deps.statePath]
+ * @param {(from: string, to: string) => Promise<void>} [deps.renameImpl]
+ * @param {string} [deps.statePath] explicit path override (wins over agentId)
+ * @param {string|null} [deps.agentId] origin for per-origin path derivation
  */
 export async function writeHookState(
   state,
-  { writeFileImpl = writeFile, mkdirImpl = mkdir, statePath = HOOK_STATE_PATH } = {},
+  { writeFileImpl = writeFile, mkdirImpl = mkdir, renameImpl = rename, statePath, agentId } = {},
 ) {
+  const path = statePath ?? hookStatePathFor(agentId);
   try {
-    await mkdirImpl(join(statePath, ".."), { recursive: true });
-    await writeFileImpl(statePath, JSON.stringify(state));
+    await mkdirImpl(join(path, ".."), { recursive: true });
+    const tmpPath = `${path}.tmp.${process.pid}.${__hookStateSeq++}`;
+    await writeFileImpl(tmpPath, JSON.stringify(state));
+    await renameImpl(tmpPath, path);
   } catch {
     // best-effort state; ignore.
   }
@@ -431,8 +476,10 @@ export async function run({
   readStdinImpl = () => readStdin(),
   resolveUsageImpl = () => resolveUsage(),
   killSwitchImpl = () => existsSync(DISABLE_PATH),
-  readStateImpl = () => readHookState(),
-  writeStateImpl = (s) => writeHookState(s),
+  // Per-origin state (#211): the default impls derive the state path from the
+  // call's origin (agent_id) so concurrent subagents never share one file.
+  readStateImpl = (agentId) => readHookState({ agentId }),
+  writeStateImpl = (s, agentId) => writeHookState(s, { agentId }),
   env = process.env,
   now = Date.now,
   warn = (msg) => process.stderr.write(`${msg}\n`),
@@ -477,7 +524,7 @@ export async function run({
     warn(degradedSourceWarning(source, origin));
   }
 
-  const prevState = await readStateImpl();
+  const prevState = await readStateImpl(agentId);
   const { allow, reason, degraded, nextState } = evaluateHookDecision(usage, prevState, {
     threshold,
     debounceCount,
@@ -486,7 +533,7 @@ export async function run({
     now,
   });
   // Persist the debounce/spike state for the next tool call (best-effort).
-  await writeStateImpl(nextState);
+  await writeStateImpl(nextState, agentId);
 
   // Surface why an over-threshold reading was ALLOWed (lag/spike/debounce) so a
   // soft-allow never looks like the guard simply being off.

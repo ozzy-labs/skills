@@ -56,16 +56,24 @@ async function seedCache(result) {
 }
 
 /**
- * Seed `<tmpHome>/.claude/usage-guard/hook-state.json` (#139 (b) debounce).
- * Defaults the consecutive-over counter to debounceCount-1 = 1 so that the next
- * over-threshold spawn denies immediately — the deny-contract cases below
- * assert the SUSTAINED-overage behaviour, not the first lone reading.
+ * Seed the debounce state file (#139 (b)). Defaults the consecutive-over counter
+ * to debounceCount-1 = 1 so the next over-threshold spawn denies immediately —
+ * the deny-contract cases assert the SUSTAINED-overage behaviour, not the first
+ * lone reading.
+ *
+ * Per-origin (#211): the hook now derives its state path from the payload's
+ * `agent_id` (main session → `hook-state.json`; a subagent → the per-origin
+ * `hook-state.<id>.json`). Pass `agentId` to seed the file the hook will
+ * actually read for that origin (matching `hookStatePathFor`'s sanitization).
  * @param {object} state
+ * @param {string|null} [agentId]
  */
-async function seedHookState(state = { consecutive_over: 1 }) {
+async function seedHookState(state = { consecutive_over: 1 }, agentId = null) {
   const dir = join(tmpHome, ".claude", "usage-guard");
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "hook-state.json"), JSON.stringify(state));
+  const safe = agentId ? agentId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) : null;
+  const file = safe ? `hook-state.${safe}.json` : "hook-state.json";
+  await writeFile(join(dir, file), JSON.stringify(state));
 }
 
 /** Create the kill-switch file so the hook is an instant no-op (#139 (a)). */
@@ -150,7 +158,7 @@ test("hook: over-threshold seeded cache → exit 2 with 'Usage Limit reached' + 
 // ── Case 2: hook + subagent agent_id over-threshold → deny tagged subagent ───
 test("hook: over-threshold + agent_id payload → exit 2 tagged 'subagent abc123'", async () => {
   await seedCache(overResult());
-  await seedHookState();
+  await seedHookState({ consecutive_over: 1 }, "abc123"); // seed THIS origin's file (#211 per-origin)
   const { code, stderr } = await spawnScript(HOOK, { stdin: '{"agent_id":"abc123"}' });
   assert.equal(code, 2, "over threshold → DENY (exit 2)");
   assert.match(stderr, /Usage Limit reached/);

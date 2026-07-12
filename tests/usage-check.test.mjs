@@ -1093,3 +1093,53 @@ test("usage-guard ships its usage-check.mjs extra file in the claude-code payloa
     "extra file must not contain a rewritten .claude/skills/ self-path literal",
   );
 });
+
+// --- (#211) atomic cache write: temp → rename --------------------------------
+
+test("(#211) writeCache writes to a temp sibling then renames onto cachePath", async () => {
+  const writes = [];
+  const renames = [];
+  await writeCache(
+    { ok: true },
+    {
+      writeFileImpl: async (p) => writes.push(p),
+      mkdirImpl: async () => {},
+      renameImpl: async (from, to) => renames.push([from, to]),
+      cachePath: "/fake/cache.json",
+      now,
+    },
+  );
+  assert.equal(writes.length, 1);
+  assert.notEqual(writes[0], "/fake/cache.json", "payload is NOT written directly to cachePath");
+  assert.match(writes[0], /^\/fake\/cache\.json\.tmp\./, "written to a temp sibling of cachePath");
+  assert.equal(renames.length, 1);
+  assert.deepEqual(renames[0], [writes[0], "/fake/cache.json"], "temp is renamed onto cachePath");
+});
+
+test("(#211) concurrent real-fs writeCache never yields a torn/unparseable cache", async () => {
+  const { mkdtemp, readFile: rf, rm, readdir } = await import("node:fs/promises");
+  const { writeFile: wf, mkdir: mk, rename: rn } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const tmp = await mkdtemp(join(tmpdir(), "ug-atomic-"));
+  const cachePath = join(tmp, "cache.json");
+  try {
+    // 40 concurrent writers with distinct payloads. A non-atomic direct write
+    // could let a reader observe a half-written file; temp+rename guarantees
+    // every observable state is a COMPLETE record.
+    await Promise.all(
+      Array.from({ length: 40 }, (_v, i) =>
+        writeCache(
+          { ok: i % 2 === 0, seq: i },
+          { writeFileImpl: wf, mkdirImpl: mk, renameImpl: rn, cachePath, now: () => FIXED_NOW + i },
+        ),
+      ),
+    );
+    const onDisk = JSON.parse(await rf(cachePath, "utf8")); // must parse (not torn)
+    assert.equal(typeof onDisk.cached_at, "number");
+    assert.equal(typeof onDisk.result.seq, "number", "a complete record survived");
+    const leftovers = (await readdir(tmp)).filter((f) => f.includes(".tmp."));
+    assert.equal(leftovers.length, 0, "temp files are renamed away, none left behind");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
