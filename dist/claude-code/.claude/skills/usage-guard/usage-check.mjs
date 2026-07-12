@@ -288,6 +288,29 @@ export function buildResumePlan(
 }
 
 /**
+ * Fire-before-reset guard for the durable (`cron-routine`) path (#213).
+ *
+ * A cloud Routine armed to fire AT OR BEFORE the window reset would be rejected
+ * with a `session_rate_limited_error` (the budget has not recovered yet). This
+ * returns `true` only when the plan's `fire_at` is strictly AFTER `resets_at`,
+ * i.e. it lands in the fresh window. A caller pre-arming a durable Routine
+ * should assert this before creating it; on `false` it must delay to
+ * `resets_at + resume_buffer` (the default buffer already guarantees this — the
+ * guard exists to catch a `resume_buffer=0` misconfiguration or a clock skew).
+ *
+ * @param {{ fire_at?: string }|null|undefined} plan
+ * @param {string|null|undefined} resetsAt
+ * @returns {boolean}
+ */
+export function firesAfterReset(plan, resetsAt) {
+  if (!plan || typeof plan.fire_at !== "string") return false;
+  const fireMs = Date.parse(plan.fire_at);
+  const resetMs = typeof resetsAt === "string" ? Date.parse(resetsAt) : NaN;
+  if (!Number.isFinite(fireMs) || !Number.isFinite(resetMs)) return false;
+  return fireMs > resetMs;
+}
+
+/**
  * Parse `--context <v>` (or `--context=<v>`) from CLI argv. Returns the
  * normalized context (`orchestration`/`durable`) or `undefined` when the flag
  * is absent/invalid so getUsage falls back to the env default (#212).

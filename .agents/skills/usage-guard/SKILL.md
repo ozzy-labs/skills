@@ -93,6 +93,15 @@ The purpose of usage-guard is to avoid "stopped → reset arrives → still stop
 - `context` is set via CLI `--context orchestration|durable` or env `USAGE_GUARD_RESUME_CONTEXT`; default (unset) derives purely from `wait_seconds`.
 - **Mapping to host tools**: `short-recheck` / `schedule-wakeup` → `ScheduleWakeup(min(wait_seconds, 3600))`; `cron-oneshot` → a durable `CronCreate` (`recurring:false`) at `fire_at`; `cron-routine` → a cloud Routine at `fire_at` (`#213`). The engine cannot call these host tools itself (`.mjs` limitation) — it emits the plan; the caller executes it.
 
+### Durable resume that survives a hard-interrupt (`cron-routine`, `#213`)
+
+`ScheduleWakeup` and a session-scoped `CronCreate` are **in-session** primitives: a genuine 100% **hard-interrupt** freezes the session and neither auto-fires across it. The only trigger that survives is a **cloud Routine** (scheduled deployment), which runs on session-independent infrastructure. Select it with `context: "durable"` (`--context durable` / `USAGE_GUARD_RESUME_CONTEXT=durable`), which emits `trigger: "cron-routine"`.
+
+- **Pre-arm, don't react**: because a hard-interrupt kills the session *before* a reactive pause can arm anything, a durable resume must be armed **before** the risky run (at job start), scheduled to fire at `fire_at`. drive orchestration / long jobs are the intended callers (`--context orchestration` gates dispatch; `durable` additionally pre-arms a Routine).
+- **Fire-after-reset guard**: a Routine firing at or before the reset is rejected (`session_rate_limited_error`). `fire_at = resets_at + resume_buffer` already lands in the fresh window; callers can assert this with `firesAfterReset(plan, resets_at)` before creating the Routine (it catches a `resume_buffer=0` misconfig / clock skew — delay to `resets_at + buffer` on `false`).
+- **Idempotent continuation required**: the continuation must detect partial progress and be safe to re-run (drive already is — it detects an existing PR/branch). A spurious fire (limit never hit) is then a harmless no-op re-run.
+- **Fallback**: where the host `/schedule` (Routines) is unavailable (e.g. a headless/cron run), fall back to the in-session plan (`cron-oneshot`) and emit a degradation warning — a durable path that cannot be armed must not silently drop the resume.
+
 ### Behavior: resume buffer
 
 When an over-threshold state is detected, `resume_buffer_seconds` (default 300 seconds) is added to `wait_seconds`. This extends the wait from `resets_at` (the window boundary) to `resets_at + buffer`, avoiding the server-side reflection delay right after a reset and allowing a clean, single re-entry into the new window (in practice, "reset + a few minutes" achieves a clean resume).
@@ -247,7 +256,10 @@ The continuation command is treated as **idempotent by assumption**. It is the u
 /usage-guard ""                 # status check only
 USAGE_GUARD_THRESHOLD=80 /usage-guard "<continuation command>"   # temporarily set the threshold to 80%
 USAGE_GUARD_RESUME_BUFFER_SECONDS=600 /usage-guard "<continuation command>"   # set the resume buffer to 10 minutes
+USAGE_GUARD_RESUME_CONTEXT=durable /usage-guard "/drive #123"   # arm a durable cloud Routine (survives a hard-interrupt, #213)
 ```
+
+> **`--durable` / `context: durable` (`#213`)**: selects the `cron-routine` trigger so the resume survives a 100% hard-interrupt (a cloud Routine, not an in-session wakeup). Since a hard-interrupt kills the session before a reactive pause can arm anything, prefer arming the durable Routine **at the start** of a long/interruptible run, and ensure the continuation is idempotent (drive is). Falls back to `cron-oneshot` + a warning where `/schedule` is unavailable.
 
 ## Enabling the PreToolUse hook (recommended in combination)
 

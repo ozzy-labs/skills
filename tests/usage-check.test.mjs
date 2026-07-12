@@ -20,6 +20,7 @@ import {
   aggregateJsonlUsage,
   buildResumePlan,
   evaluate,
+  firesAfterReset,
   getUsage,
   normalizeWindows,
   parseContextArg,
@@ -1261,4 +1262,71 @@ test("(#212) getUsage endpoint result carries a resume_plan (over → cron-onesh
   assert.equal(result.ok, false);
   assert.ok(result.resume_plan, "over-threshold endpoint result carries a resume_plan");
   assert.equal(result.resume_plan.trigger, "cron-oneshot");
+});
+
+// --- (#213) durable resume: cron-routine + fire-after-reset guard ------------
+
+test("(#213) getUsage --context durable → resume_plan.trigger cron-routine", async () => {
+  const result = await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: {
+        utilization: 99,
+        resets_at: new Date(FIXED_NOW + 2 * 3600 * 1000).toISOString(),
+      },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    readFileImpl: credsReader(),
+    now,
+    context: "durable",
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(
+    result.resume_plan.trigger,
+    "cron-routine",
+    "durable → a cloud Routine (survives hard-interrupt)",
+  );
+});
+
+test("(#213) firesAfterReset: fire_at after / equal / before resets_at", () => {
+  const resetsAt = "2026-06-15T02:00:00.000Z";
+  assert.equal(
+    firesAfterReset({ fire_at: "2026-06-15T02:05:00.000Z" }, resetsAt),
+    true,
+    "fire_at strictly after reset → safe to arm",
+  );
+  assert.equal(
+    firesAfterReset({ fire_at: resetsAt }, resetsAt),
+    false,
+    "fire_at == reset → NOT safe (would session_rate_limited_error)",
+  );
+  assert.equal(
+    firesAfterReset({ fire_at: "2026-06-15T01:59:00.000Z" }, resetsAt),
+    false,
+    "fire_at before reset → NOT safe",
+  );
+});
+
+test("(#213) firesAfterReset: missing/invalid inputs → false (fail-safe)", () => {
+  assert.equal(firesAfterReset(null, "2026-06-15T02:00:00.000Z"), false);
+  assert.equal(firesAfterReset({ fire_at: "nope" }, "2026-06-15T02:00:00.000Z"), false);
+  assert.equal(firesAfterReset({ fire_at: "2026-06-15T02:05:00.000Z" }, null), false);
+});
+
+test("(#213) a durable plan built from a genuine overage passes the fire-after-reset guard", () => {
+  // resets in 2h; default buffer 300s → fire_at = resets_at + 300s > resets_at.
+  const resetsAt = new Date(FIXED_NOW + 2 * 3600 * 1000).toISOString();
+  const over = evaluate(
+    {
+      five_hour: { utilization: 99, resets_at: resetsAt },
+      seven_day: { utilization: 10, resets_at: null },
+    },
+    { context: "durable", now },
+  );
+  assert.equal(over.resume_plan.trigger, "cron-routine");
+  assert.equal(
+    firesAfterReset(over.resume_plan, over.resets_at),
+    true,
+    "resets_at + buffer lands in the fresh window",
+  );
 });
