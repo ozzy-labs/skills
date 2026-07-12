@@ -21,9 +21,12 @@ import {
   degradedSourceWarning,
   evaluateHookDecision,
   formatResetTime,
+  hookStatePathFor,
   parsePayload,
+  readHookState,
   resolveUsage,
   run,
+  writeHookState,
 } from "../.agents/skills/usage-guard/usage-guard-hook.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -639,4 +642,79 @@ test("usage-guard-hook.mjs is ABSENT from non-claude adapter payloads (gating)",
     true,
     "usage-guard SSOT lives under .agents/skills/ (gating is enforced at dist, not the SSOT)",
   );
+});
+
+// --- (#211) per-origin hook-state path + atomic write ------------------------
+
+test("(#211) hookStatePathFor: main (no agentId) vs per-origin file", () => {
+  const main = hookStatePathFor(null);
+  const worker = hookStatePathFor("worker-7");
+  assert.match(main, /hook-state\.json$/, "main session → default hook-state.json");
+  assert.match(worker, /hook-state\.worker-7\.json$/, "subagent → per-origin file");
+  assert.notEqual(main, worker, "distinct origins get distinct files (no shared RMW)");
+});
+
+test("(#211) hookStatePathFor sanitizes unsafe id chars (no path traversal)", () => {
+  const p = hookStatePathFor("../../etc/pwn id");
+  assert.doesNotMatch(p, /\.\.\//, "path-traversal separators are stripped");
+  assert.match(p, /hook-state\._+etc_pwn_id\.json$/);
+});
+
+test("(#211) hookStatePathFor: empty/blank id falls back to the default path", () => {
+  assert.equal(hookStatePathFor(""), hookStatePathFor(null));
+});
+
+test("(#211) writeHookState writes a temp then renames onto the per-origin path", async () => {
+  const writes = [];
+  const renames = [];
+  await writeHookState(
+    { consecutive_over: 2 },
+    {
+      writeFileImpl: async (p) => writes.push(p),
+      mkdirImpl: async () => {},
+      renameImpl: async (from, to) => renames.push([from, to]),
+      agentId: "worker-9",
+    },
+  );
+  assert.equal(writes.length, 1);
+  assert.match(
+    writes[0],
+    /hook-state\.worker-9\.json\.tmp\./,
+    "temp sibling of the per-origin path",
+  );
+  assert.equal(renames.length, 1);
+  assert.match(renames[0][1], /hook-state\.worker-9\.json$/, "renamed onto the per-origin path");
+});
+
+test("(#211) concurrent DIFFERENT origins keep independent counters (real fs, no clobber)", async () => {
+  const {
+    mkdtemp,
+    readFile: rf,
+    rm,
+    writeFile: wf,
+    mkdir: mk,
+    rename: rn,
+  } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const tmp = await mkdtemp(join(tmpdir(), "ug-origin-"));
+  try {
+    // Each origin runs an independent read→increment→write against its OWN path.
+    // Under the old single-shared-file design these concurrent RMWs lost updates;
+    // per-origin paths make every write land in a file no other origin touches.
+    const origins = Array.from({ length: 12 }, (_v, i) => `w${i}`);
+    await Promise.all(
+      origins.map(async (o) => {
+        const statePath = join(tmp, `hook-state.${o}.json`);
+        const prev = await readHookState({ readFileImpl: rf, statePath });
+        const next = { consecutive_over: (Number(prev.consecutive_over) || 0) + 1 };
+        await writeHookState(next, { writeFileImpl: wf, mkdirImpl: mk, renameImpl: rn, statePath });
+      }),
+    );
+    for (const o of origins) {
+      const st = JSON.parse(await rf(join(tmp, `hook-state.${o}.json`), "utf8"));
+      assert.equal(st.consecutive_over, 1, `origin ${o} kept its own counter (no cross-clobber)`);
+    }
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
 });

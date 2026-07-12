@@ -57,9 +57,14 @@
 // This is a plain .mjs (NOT a Workflow script): Date.now() / real fetch / real
 // fs are fine. Pure/injectable functions are exported for tests.
 
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+// Monotonic sequence for unique temp filenames in atomic (write-temp → rename)
+// persistence (#211). Combined with process.pid it disambiguates concurrent
+// writers across processes (the PreToolUse hook fleet) and within a process.
+let __atomicWriteSeq = 0;
 
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -547,12 +552,21 @@ export async function readCache({
 
 /**
  * Persist a result to the cache (best-effort; failures are swallowed).
+ *
+ * Atomic write (#211): the record is written to a unique temp sibling and then
+ * `rename`d onto `cachePath`. `rename` is atomic on a POSIX filesystem, so a
+ * concurrent reader (or another writer in the PreToolUse hook fleet) never
+ * observes a half-written/torn JSON — it sees either the old file or the new one
+ * in full. A crash mid-write leaves only an orphan temp file, never a corrupt
+ * cache. Last-writer-wins across concurrent writers is fine here (any recent
+ * reading is acceptable); only torn reads had to be eliminated.
  * @param {object} result
  * @param {object} deps
+ * @param {(from: string, to: string) => Promise<void>} [deps.renameImpl]
  */
 export async function writeCache(
   result,
-  { writeFileImpl, mkdirImpl, cachePath = CACHE_PATH, now = Date.now, ttlMs } = {},
+  { writeFileImpl, mkdirImpl, renameImpl = rename, cachePath = CACHE_PATH, now = Date.now, ttlMs } = {},
 ) {
   if (!writeFileImpl) return;
   try {
@@ -561,7 +575,10 @@ export async function writeCache(
     // (#139 (e)); records without `ttl_ms` use readCache's caller-supplied TTL.
     const record = { cached_at: now(), result };
     if (typeof ttlMs === "number") record.ttl_ms = ttlMs;
-    await writeFileImpl(cachePath, JSON.stringify(record));
+    // Write-temp → rename so a reader never sees a partial write (#211).
+    const tmpPath = `${cachePath}.tmp.${process.pid}.${__atomicWriteSeq++}`;
+    await writeFileImpl(tmpPath, JSON.stringify(record));
+    await renameImpl(tmpPath, cachePath);
   } catch {
     // best-effort cache; ignore.
   }
@@ -582,6 +599,7 @@ export async function getUsage({
   readdirImpl = readdir,
   writeFileImpl = writeFile,
   mkdirImpl = mkdir,
+  renameImpl = rename,
   env = process.env,
   now = Date.now,
   credentialsPath = CREDENTIALS_PATH,
@@ -644,7 +662,7 @@ export async function getUsage({
     // re-hits the endpoint) rather than pinned for the full TTL. Sub-threshold
     // reads cache normally.
     const ttlMs = result.ok === false ? DEFAULT_OVER_THRESHOLD_CACHE_TTL_MS : undefined;
-    await writeCache(result, { writeFileImpl, mkdirImpl, cachePath, now, ttlMs });
+    await writeCache(result, { writeFileImpl, mkdirImpl, renameImpl, cachePath, now, ttlMs });
     return result;
   };
 
