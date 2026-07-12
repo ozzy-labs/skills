@@ -20,6 +20,7 @@ Numbering is **independent** between the two tiers — this project starts at `0
 | # | Title | Status | Date |
 | --- | --- | --- | --- |
 | [0001](./0001-observability-measurement-design.md) | Observability measurement design | Accepted | 2026-07-03 |
+| [0002](./0002-usage-guard-resume-arming.md) | usage-guard resume arming | Accepted | 2026-07-13 |
 
 ## How to add a new ADR
 

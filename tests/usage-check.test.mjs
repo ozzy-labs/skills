@@ -18,9 +18,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   aggregateJsonlUsage,
+  buildResumePlan,
   evaluate,
   getUsage,
   normalizeWindows,
+  parseContextArg,
   parseHeadroomArg,
   readAccessToken,
   readCache,
@@ -28,6 +30,7 @@ import {
   resolveLagEpsilon,
   resolveLagRecheck,
   resolveResumeBuffer,
+  resolveResumeContext,
   resolveThreshold,
   writeCache,
 } from "../.agents/skills/usage-guard/usage-check.mjs";
@@ -1142,4 +1145,120 @@ test("(#211) concurrent real-fs writeCache never yields a torn/unparseable cache
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+});
+
+// --- (#212) deterministic resume_plan ----------------------------------------
+
+test("(#212) buildResumePlan: ok → null (nothing to resume)", () => {
+  assert.equal(buildResumePlan({ ok: true, wait_seconds: 0 }, { now }), null);
+});
+
+test("(#212) buildResumePlan: over + short wait → schedule-wakeup with fire_at = now+wait", () => {
+  const p = buildResumePlan(
+    { ok: false, wait_seconds: 1200, suspected_reflection_lag: false },
+    { now },
+  );
+  assert.equal(p.trigger, "schedule-wakeup");
+  assert.equal(p.wait_seconds, 1200);
+  assert.equal(p.fire_at, new Date(FIXED_NOW + 1200 * 1000).toISOString());
+});
+
+test("(#212) buildResumePlan: wait beyond the 3600s ScheduleWakeup cap → cron-oneshot", () => {
+  const p = buildResumePlan(
+    { ok: false, wait_seconds: 12_900, suspected_reflection_lag: false },
+    { now },
+  );
+  assert.equal(p.trigger, "cron-oneshot");
+});
+
+test("(#212) buildResumePlan: context=orchestration forces cron-oneshot even for a short wait", () => {
+  const p = buildResumePlan(
+    { ok: false, wait_seconds: 900, suspected_reflection_lag: false },
+    { context: "orchestration", now },
+  );
+  assert.equal(p.trigger, "cron-oneshot");
+});
+
+test("(#212) buildResumePlan: context=durable → cron-routine (survives a hard-interrupt, #213)", () => {
+  const p = buildResumePlan(
+    { ok: false, wait_seconds: 12_900, suspected_reflection_lag: false },
+    { context: "durable", now },
+  );
+  assert.equal(p.trigger, "cron-routine");
+});
+
+test("(#212) buildResumePlan: suspected lag → short-recheck (wins over context)", () => {
+  const p = buildResumePlan(
+    { ok: false, wait_seconds: 180, suspected_reflection_lag: true },
+    { context: "durable", now },
+  );
+  assert.equal(p.trigger, "short-recheck", "a boundary afterimage never pins a long trigger");
+  assert.equal(p.wait_seconds, 180);
+});
+
+test("(#212) evaluate() attaches resume_plan (null when ok, plan when over)", () => {
+  const okRes = evaluate(
+    {
+      five_hour: { utilization: 10, resets_at: null },
+      seven_day: { utilization: 10, resets_at: null },
+    },
+    { now },
+  );
+  assert.equal(okRes.resume_plan, null, "ok → no plan");
+  const overRes = evaluate(
+    {
+      five_hour: {
+        utilization: 99,
+        resets_at: new Date(FIXED_NOW + 2 * 3600 * 1000).toISOString(),
+      },
+      seven_day: { utilization: 10, resets_at: null },
+    },
+    { now },
+  );
+  assert.ok(overRes.resume_plan, "over → a plan is emitted");
+  assert.equal(
+    overRes.resume_plan.trigger,
+    "cron-oneshot",
+    "2h+buffer wait > 3600 → durable one-shot",
+  );
+});
+
+test("(#212) resolveResumeContext: env orchestration/durable/other/unset", () => {
+  assert.equal(
+    resolveResumeContext({ USAGE_GUARD_RESUME_CONTEXT: "orchestration" }),
+    "orchestration",
+  );
+  assert.equal(resolveResumeContext({ USAGE_GUARD_RESUME_CONTEXT: "DURABLE" }), "durable");
+  assert.equal(resolveResumeContext({ USAGE_GUARD_RESUME_CONTEXT: "nonsense" }), null);
+  assert.equal(resolveResumeContext({}), null);
+});
+
+test("(#212) parseContextArg: --context value / =value / absent / invalid", () => {
+  assert.equal(parseContextArg(["--context", "orchestration"]), "orchestration");
+  assert.equal(parseContextArg(["--context=durable"]), "durable");
+  assert.equal(
+    parseContextArg(["--headroom", "12"]),
+    undefined,
+    "absent → undefined (fall back to env)",
+  );
+  assert.equal(parseContextArg(["--context", "bogus"]), undefined, "invalid → undefined");
+});
+
+test("(#212) getUsage endpoint result carries a resume_plan (over → cron-oneshot)", async () => {
+  const result = await getUsage({
+    fetchImpl: fetchOk({
+      five_hour: {
+        utilization: 99,
+        resets_at: new Date(FIXED_NOW + 2 * 3600 * 1000).toISOString(),
+      },
+      seven_day: { utilization: 10, resets_at: null },
+    }),
+    readFileImpl: credsReader(),
+    now,
+    cachePath: "/nonexistent/cache.json",
+    credentialsPath: "/fake/.credentials.json",
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.resume_plan, "over-threshold endpoint result carries a resume_plan");
+  assert.equal(result.resume_plan.trigger, "cron-oneshot");
 });
